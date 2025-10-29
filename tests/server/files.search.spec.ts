@@ -1,12 +1,13 @@
-import { join } from "node:path";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { afterEach, describe, expect, it } from "vitest";
 
 import { runIndexer } from "../../src/indexer/cli";
-import { DuckDBClient } from "../../src/shared/duckdb";
-import { filesSearch, resolveRepoId } from "../../src/server/handlers";
 import { ServerContext } from "../../src/server/context";
+import { filesSearch, resolveRepoId } from "../../src/server/handlers";
+import { DuckDBClient } from "../../src/shared/duckdb";
 import { createTempRepo } from "../helpers/test-repo";
 
 interface CleanupTarget {

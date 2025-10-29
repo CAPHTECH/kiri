@@ -8,7 +8,7 @@ export function collectDiagnostics(): Record<string, string> {
   return {
     node: run("node --version"),
     pnpm: run("pnpm --version"),
-    gitStatus: run("git status -sb")
+    gitStatus: run("git status -sb"),
   };
 }
 

@@ -1,6 +1,7 @@
 # 取り込みパイプライン（Indexer）
 
 ## ステップ概要
+
 1. **ワークツリー列挙**: `git ls-files` を用いつつ ignore を尊重し、サブモジュールは別リポジトリとして扱う。
 2. **メタデータ推定**: 拡張子から言語判定し、サイズ・mtime・バイナリ判定（ヌルバイト/閾値）を取得する。
 3. **blob/tree 生成**: blob をハッシュで重複排除し、HEAD 時点の path→blob 対応を保持する。
@@ -12,10 +13,12 @@
 9. **ステージング投入**: 小刻み書き込みを避け、ステージング→バッチマージでトランザクションをまとめる。
 
 ## 実行モード
+
 - CLI: `kiri index --repo /path/to/repo --db /path/to/index.duckdb [--full | --since <commit>]`
 - トリガ: pre-commit / post-merge hook / ファイル監視からの自動起動
 
 ## 疑似コード（TypeScript）
+
 ```ts
 import { connect } from "duckdb";
 
@@ -29,22 +32,8 @@ export async function indexRepo(repoRoot: string, dbPath: string) {
     if (meta.isBinary) continue;
     const content = await readText(filePath);
     const hash = hashContent(content);
-    stage.push([
-      "blob",
-      hash,
-      content.length,
-      content.split(/\r?\n/).length,
-      content,
-    ]);
-    stage.push([
-      "file",
-      filePath,
-      hash,
-      meta.ext,
-      meta.lang,
-      false,
-      meta.mtime,
-    ]);
+    stage.push(["blob", hash, content.length, content.split(/\r?\n/).length, content]);
+    stage.push(["file", filePath, hash, meta.ext, meta.lang, false, meta.mtime]);
   }
 
   await db.transaction(async (trx) => {

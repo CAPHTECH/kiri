@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 
 export function updateDependencies(extraArgs: string[] = []): number {
   const result = spawnSync("pnpm", ["up", "--latest", ...extraArgs], {
-    stdio: "inherit"
+    stdio: "inherit",
   });
   return result.status ?? 1;
 }

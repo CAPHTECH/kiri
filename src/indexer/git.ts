@@ -26,7 +26,7 @@ export async function getDefaultBranch(repoRoot: string): Promise<string | null>
       return null;
     }
     return branch;
-  } catch (error) {
+  } catch {
     return null;
   }
 }

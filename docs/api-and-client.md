@@ -1,6 +1,7 @@
 # MCP API とクライアント設定
 
 ## 提供ツール一覧
+
 - `files.search(query, lang?, ext?, path_prefix?, limit=50)`
 - `symbols.find(name, kind?, path_hint?, limit=50)`
 - `deps.closure(paths[], direction="out"|"in", depth=2)`
@@ -14,6 +15,7 @@
   - 出力: 断片リスト（path, [start,end], why[], score, preview）と `tokens_estimate`
 
 ## `context.bundle` リクエスト/レスポンス例
+
 ```json
 // request
 {
@@ -50,6 +52,7 @@
 ```
 
 ## Codex CLI 設定例
+
 ```json
 {
   "mcpServers": {
