@@ -1,4 +1,4 @@
-import { DuckDBClient } from "../shared/duckdb";
+import { DuckDBClient } from "../shared/duckdb.js";
 
 export interface ServerContext {
   db: DuckDBClient;

@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { startServer } from "../../src/server/main";
+import { startServer } from "../../src/server/main.js";
 
 describe("startServer", () => {
   it("fails fast when repository index is missing", async () => {

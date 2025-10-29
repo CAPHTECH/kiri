@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { runIndexer } from "../../src/indexer/cli.js";
 import { ServerContext } from "../../src/server/context.js";
-import { filesSearch, resolveRepoId } from "../../src/server/handlers.js";
+import { depsClosure, resolveRepoId } from "../../src/server/handlers.js";
 import { DuckDBClient } from "../../src/shared/duckdb.js";
 import { createTempRepo } from "../helpers/test-repo.js";
 
@@ -14,7 +14,7 @@ interface CleanupTarget {
   dispose: () => Promise<void>;
 }
 
-describe("files.search", () => {
+describe("deps.closure", () => {
   const cleanupTargets: CleanupTarget[] = [];
 
   afterEach(async () => {
@@ -23,10 +23,23 @@ describe("files.search", () => {
     }
   });
 
-  it("returns matches filtered by substring", async () => {
+  it("returns outbound dependency closure", async () => {
     const repo = await createTempRepo({
-      "src/main.ts": "export function meaning() {\n  return 42;\n}\n",
-      "docs/readme.md": "The meaning of life is context.\n",
+      "src/a.ts": [
+        "import { b } from './b.js';",
+        "",
+        "export function a() {",
+        "  return b();",
+        "}",
+      ].join("\n"),
+      "src/b.ts": [
+        "import { c } from './c.js';",
+        "",
+        "export function b() {",
+        "  return c();",
+        "}",
+      ].join("\n"),
+      "src/c.ts": ["export function c() {", "  return 'c';", "}"].join("\n"),
     });
     cleanupTargets.push({ dispose: repo.cleanup });
 
@@ -42,11 +55,12 @@ describe("files.search", () => {
     const repoId = await resolveRepoId(db, repo.path);
     const context: ServerContext = { db, repoId };
 
-    const results = await filesSearch(context, { query: "meaning" });
-    expect(results.length).toBeGreaterThan(0);
-    const paths = results.map((item) => item.path);
-    expect(paths).toContain("src/main.ts");
-    expect(paths).toContain("docs/readme.md");
-    expect(results.every((item) => item.preview.toLowerCase().includes("meaning"))).toBe(true);
+    const closure = await depsClosure(context, { path: "src/a.ts", max_depth: 5 });
+    expect(closure.root).toBe("src/a.ts");
+    expect(closure.direction).toBe("outbound");
+    const nodes = closure.nodes.map((node) => `${node.kind}:${node.target}`);
+    expect(nodes).toEqual(["path:src/a.ts", "path:src/b.ts", "path:src/c.ts"]);
+    const edges = closure.edges.map((edge) => `${edge.from}->${edge.to}:${edge.kind}`);
+    expect(edges).toEqual(["src/a.ts->src/b.ts:path", "src/b.ts->src/c.ts:path"]);
   });
 });

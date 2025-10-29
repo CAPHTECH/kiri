@@ -1,6 +1,6 @@
-import { DuckDBClient } from "../shared/duckdb";
+import { DuckDBClient } from "../shared/duckdb.js";
 
-import { ServerContext } from "./context";
+import { ServerContext } from "./context.js";
 
 export interface FilesSearchParams {
   query: string;
@@ -31,10 +31,40 @@ export interface SnippetResult {
   endLine: number;
   content: string;
   totalLines: number;
+  symbolName: string | null;
+  symbolKind: string | null;
 }
 
 const DEFAULT_SEARCH_LIMIT = 50;
 const DEFAULT_SNIPPET_WINDOW = 150;
+
+export interface DepsClosureParams {
+  path: string;
+  max_depth?: number;
+  direction?: "outbound" | "inbound";
+  include_packages?: boolean;
+}
+
+export interface DepsClosureNode {
+  kind: "path" | "package";
+  target: string;
+  depth: number;
+}
+
+export interface DepsClosureEdge {
+  from: string;
+  to: string;
+  kind: "path" | "package";
+  rel: string;
+  depth: number;
+}
+
+export interface DepsClosureResult {
+  root: string;
+  direction: "outbound";
+  nodes: DepsClosureNode[];
+  edges: DepsClosureEdge[];
+}
 
 interface FileRow {
   path: string;
@@ -45,6 +75,22 @@ interface FileRow {
 
 interface FileWithBinaryRow extends FileRow {
   is_binary: boolean;
+}
+
+interface SnippetRow {
+  snippet_id: number;
+  start_line: number;
+  end_line: number;
+  symbol_id: number | null;
+  symbol_name: string | null;
+  symbol_kind: string | null;
+}
+
+interface DependencyRow {
+  src_path: string;
+  dst_kind: string;
+  dst: string;
+  rel: string;
 }
 
 function normalizeLimit(limit?: number): number {
@@ -159,6 +205,12 @@ export async function snippetsGet(
   }
 
   const row = rows[0];
+  if (!row) {
+    throw new Error(
+      "Requested snippet file was not indexed. Re-run the indexer or choose another path."
+    );
+  }
+
   if (row.is_binary) {
     throw new Error(
       "Binary snippets are not supported. Choose a text file to preview its content."
@@ -171,12 +223,56 @@ export async function snippetsGet(
 
   const lines = row.content.split(/\r?\n/);
   const totalLines = lines.length;
+  const snippetRows = await db.all<SnippetRow>(
+    `
+      SELECT s.snippet_id, s.start_line, s.end_line, s.symbol_id, sym.name AS symbol_name, sym.kind AS symbol_kind
+      FROM snippet s
+      LEFT JOIN symbol sym
+        ON sym.repo_id = s.repo_id
+       AND sym.path = s.path
+       AND sym.symbol_id = s.symbol_id
+      WHERE s.repo_id = ? AND s.path = ?
+      ORDER BY s.start_line
+    `,
+    [repoId, params.path]
+  );
+
   const requestedStart = params.start_line ?? 1;
   const requestedEnd =
     params.end_line ?? Math.min(totalLines, requestedStart + DEFAULT_SNIPPET_WINDOW - 1);
 
-  const startLine = Math.max(1, Math.min(totalLines, requestedStart));
-  const endLine = Math.max(startLine, Math.min(totalLines, requestedEnd));
+  const useSymbolSnippets = snippetRows.length > 0 && params.end_line === undefined;
+
+  let snippetSelection: SnippetRow | null = null;
+  if (useSymbolSnippets) {
+    snippetSelection =
+      snippetRows.find(
+        (snippet) => requestedStart >= snippet.start_line && requestedStart <= snippet.end_line
+      ) ?? null;
+    if (!snippetSelection) {
+      const firstSnippet = snippetRows[0];
+      if (firstSnippet && requestedStart < firstSnippet.start_line) {
+        snippetSelection = firstSnippet;
+      } else {
+        snippetSelection = snippetRows[snippetRows.length - 1] ?? null;
+      }
+    }
+  }
+
+  let startLine: number;
+  let endLine: number;
+  let symbolName: string | null = null;
+  let symbolKind: string | null = null;
+
+  if (snippetSelection) {
+    startLine = snippetSelection.start_line;
+    endLine = snippetSelection.end_line;
+    symbolName = snippetSelection.symbol_name;
+    symbolKind = snippetSelection.symbol_kind;
+  } else {
+    startLine = Math.max(1, Math.min(totalLines, requestedStart));
+    endLine = Math.max(startLine, Math.min(totalLines, requestedEnd));
+  }
 
   const snippetContent = lines.slice(startLine - 1, endLine).join("\n");
 
@@ -186,6 +282,132 @@ export async function snippetsGet(
     endLine,
     content: snippetContent,
     totalLines,
+    symbolName,
+    symbolKind,
+  };
+}
+
+export async function depsClosure(
+  context: ServerContext,
+  params: DepsClosureParams
+): Promise<DepsClosureResult> {
+  const { db, repoId } = context;
+  if (!params.path) {
+    throw new Error(
+      "deps.closure requires a file path. Provide a tracked source file path to continue."
+    );
+  }
+
+  if (params.direction && params.direction !== "outbound") {
+    throw new Error("deps.closure currently supports only outbound direction. Use outbound.");
+  }
+
+  const maxDepth = params.max_depth ?? 3;
+  const includePackages = params.include_packages ?? true;
+
+  const dependencyRows = await db.all<DependencyRow>(
+    `
+      SELECT src_path, dst_kind, dst, rel
+      FROM dependency
+      WHERE repo_id = ?
+    `,
+    [repoId]
+  );
+
+  const outbound = new Map<string, DependencyRow[]>();
+  for (const row of dependencyRows) {
+    if (!outbound.has(row.src_path)) {
+      outbound.set(row.src_path, []);
+    }
+    outbound.get(row.src_path)?.push(row);
+  }
+
+  interface Pending {
+    path: string;
+    depth: number;
+  }
+
+  const queue: Pending[] = [{ path: params.path, depth: 0 }];
+  const visitedPaths = new Set<string>([params.path]);
+
+  const nodeDepth = new Map<string, DepsClosureNode>();
+  const edgeSet = new Map<string, DepsClosureEdge>();
+
+  const recordNode = (node: DepsClosureNode) => {
+    const key = `${node.kind}:${node.target}`;
+    const existing = nodeDepth.get(key);
+    if (!existing || node.depth < existing.depth) {
+      nodeDepth.set(key, { ...node });
+    }
+  };
+
+  const recordEdge = (edge: DepsClosureEdge) => {
+    const key = `${edge.from}->${edge.to}:${edge.kind}:${edge.rel}`;
+    const existing = edgeSet.get(key);
+    if (!existing || edge.depth < existing.depth) {
+      edgeSet.set(key, { ...edge });
+    }
+  };
+
+  recordNode({ kind: "path", target: params.path, depth: 0 });
+
+  while (queue.length > 0) {
+    const current = queue.shift() as Pending;
+    if (current.depth >= maxDepth) {
+      continue;
+    }
+    const edges = outbound.get(current.path) ?? [];
+    for (const edge of edges) {
+      const nextDepth = current.depth + 1;
+      if (edge.dst_kind === "path") {
+        recordEdge({
+          from: current.path,
+          to: edge.dst,
+          kind: "path",
+          rel: edge.rel,
+          depth: nextDepth,
+        });
+        recordNode({ kind: "path", target: edge.dst, depth: nextDepth });
+        if (!visitedPaths.has(edge.dst)) {
+          visitedPaths.add(edge.dst);
+          queue.push({ path: edge.dst, depth: nextDepth });
+        }
+      } else if (edge.dst_kind === "package" && includePackages) {
+        recordEdge({
+          from: current.path,
+          to: edge.dst,
+          kind: "package",
+          rel: edge.rel,
+          depth: nextDepth,
+        });
+        recordNode({ kind: "package", target: edge.dst, depth: nextDepth });
+      }
+    }
+  }
+
+  const nodes = Array.from(nodeDepth.values()).sort((a, b) => {
+    if (a.depth === b.depth) {
+      return a.target.localeCompare(b.target);
+    }
+    return a.depth - b.depth;
+  });
+
+  const edges = Array.from(edgeSet.values()).sort((a, b) => {
+    if (a.depth === b.depth) {
+      const fromCmp = a.from.localeCompare(b.from);
+      if (fromCmp !== 0) {
+        return fromCmp;
+      }
+      return a.to.localeCompare(b.to);
+    }
+    return a.depth - b.depth;
+  });
+
+  return {
+    root: params.path,
+    direction: "outbound",
+    nodes,
+    edges,
   };
 }
 
@@ -197,7 +419,11 @@ export async function resolveRepoId(db: DuckDBClient, repoRoot: string): Promise
         "Target repository is missing from DuckDB. Run the indexer before starting the server."
       );
     }
-    return rows[0].id;
+    const row = rows[0];
+    if (!row) {
+      throw new Error("Failed to retrieve repository record. Database returned empty result.");
+    }
+    return row.id;
   } catch (error) {
     if (error instanceof Error && error.message.includes("Table with name repo")) {
       throw new Error(

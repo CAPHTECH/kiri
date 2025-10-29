@@ -4,11 +4,11 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { runIndexer } from "../../src/indexer/cli";
-import { ServerContext } from "../../src/server/context";
-import { resolveRepoId, snippetsGet } from "../../src/server/handlers";
-import { DuckDBClient } from "../../src/shared/duckdb";
-import { createTempRepo } from "../helpers/test-repo";
+import { runIndexer } from "../../src/indexer/cli.js";
+import { ServerContext } from "../../src/server/context.js";
+import { resolveRepoId, snippetsGet } from "../../src/server/handlers.js";
+import { DuckDBClient } from "../../src/shared/duckdb.js";
+import { createTempRepo } from "../helpers/test-repo.js";
 
 interface CleanupTarget {
   dispose: () => Promise<void>;
@@ -64,9 +64,10 @@ describe("snippets.get", () => {
     const snippet = await snippetsGet(context, { path: "src/main.ts", start_line: 5 });
     expect(snippet.path).toBe("src/main.ts");
     expect(snippet.startLine).toBe(5);
-    expect(snippet.endLine).toBeGreaterThanOrEqual(5);
-    expect(snippet.endLine).toBeLessThanOrEqual(snippet.totalLines);
-    expect(snippet.content.split("\n")[0]).toContain("beta");
+    expect(snippet.endLine).toBe(7);
+    expect(snippet.content.split("\n").length).toBe(3);
+    expect(snippet.symbolName).toBe("beta");
+    expect(snippet.symbolKind).toBe("function");
   });
 
   it("respects explicit start and end lines", async () => {
@@ -96,5 +97,7 @@ describe("snippets.get", () => {
     expect(snippet.endLine).toBe(3);
     expect(snippet.content).toContain("second");
     expect(snippet.content).toContain("third");
+    expect(snippet.symbolName).toBeNull();
+    expect(snippet.symbolKind).toBeNull();
   });
 });

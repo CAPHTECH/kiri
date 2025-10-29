@@ -30,7 +30,7 @@ function assertNoUndefined(sql: string, params: QueryParams): void {
 }
 
 export class DuckDBClient {
-  private readonly database: duckdb.Database;
+  private readonly database: import("duckdb").Database;
 
   constructor(path: string) {
     this.database = new duckdb.Database(path);
@@ -55,12 +55,14 @@ export class DuckDBClient {
       };
       if (Array.isArray(params)) {
         if (params.length > 0) {
+          // @ts-expect-error - duckdb.run expects rest parameters which cannot be strongly typed with unknown[]
           this.database.run(sql, ...params, callback);
         } else {
           this.database.run(sql, callback);
         }
       } else if (hasDefinedParams(params)) {
-        this.database.run(sql, params, callback);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        this.database.run(sql, params as any, callback);
       } else {
         this.database.run(sql, callback);
       }
@@ -82,12 +84,14 @@ export class DuckDBClient {
       };
       if (Array.isArray(params)) {
         if (params.length > 0) {
+          // @ts-expect-error - duckdb.all expects rest parameters which cannot be strongly typed with unknown[]
           this.database.all<T>(sql, ...params, callback);
         } else {
           this.database.all<T>(sql, callback);
         }
       } else if (hasDefinedParams(params)) {
-        this.database.all<T>(sql, params, callback);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        this.database.all<T>(sql, params as any, callback);
       } else {
         this.database.all<T>(sql, callback);
       }
@@ -113,7 +117,7 @@ export class DuckDBClient {
 
   async close(): Promise<void> {
     await new Promise<void>((resolve, reject) => {
-      this.database.close((err) => {
+      this.database.close((err: Error | null) => {
         if (err) {
           reject(err);
           return;
