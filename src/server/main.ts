@@ -7,11 +7,13 @@ import { DuckDBClient } from "../shared/duckdb.js";
 
 import { ServerContext } from "./context.js";
 import {
+  ContextBundleParams,
   DepsClosureParams,
   FilesSearchParams,
   SnippetsGetParams,
   depsClosure,
   filesSearch,
+  contextBundle,
   resolveRepoId,
   snippetsGet,
 } from "./handlers.js";
@@ -125,6 +127,50 @@ function parseDepsClosureParams(input: unknown): DepsClosureParams {
   return params;
 }
 
+function parseContextBundleParams(input: unknown): ContextBundleParams {
+  if (!input || typeof input !== "object") {
+    return { goal: "" };
+  }
+  const record = input as Record<string, unknown>;
+  const params: ContextBundleParams = {
+    goal: typeof record.goal === "string" ? record.goal : "",
+  };
+  const limitValue = record.limit;
+  if (typeof limitValue === "number") {
+    params.limit = limitValue;
+  } else if (typeof limitValue === "string") {
+    const parsed = Number(limitValue);
+    if (!Number.isNaN(parsed)) {
+      params.limit = parsed;
+    }
+  }
+
+  const artifactsValue = record.artifacts;
+  if (artifactsValue && typeof artifactsValue === "object") {
+    const artifactsRecord = artifactsValue as Record<string, unknown>;
+    const artifacts: ContextBundleParams["artifacts"] = {};
+    if (typeof artifactsRecord.editing_path === "string") {
+      artifacts.editing_path = artifactsRecord.editing_path;
+    }
+    if (Array.isArray(artifactsRecord.failing_tests)) {
+      const failingTests = artifactsRecord.failing_tests.filter(
+        (value): value is string => typeof value === "string"
+      );
+      if (failingTests.length > 0) {
+        artifacts.failing_tests = failingTests;
+      }
+    }
+    if (typeof artifactsRecord.last_diff === "string") {
+      artifacts.last_diff = artifactsRecord.last_diff;
+    }
+    if (artifacts.editing_path || artifacts.failing_tests || artifacts.last_diff) {
+      params.artifacts = artifacts;
+    }
+  }
+
+  return params;
+}
+
 async function readBody(request: IncomingMessage): Promise<string> {
   return await new Promise<string>((resolveBody, rejectBody) => {
     const chunks: Array<string> = [];
@@ -220,6 +266,11 @@ export async function startServer(options: ServerOptions): Promise<Server> {
       try {
         let result: unknown;
         switch (payload.method) {
+          case "context.bundle": {
+            const params = parseContextBundleParams(payload.params);
+            result = await contextBundle(context, params);
+            break;
+          }
           case "files.search": {
             const params = parseFilesSearchParams(payload.params);
             result = await filesSearch(context, params);
@@ -240,7 +291,7 @@ export async function startServer(options: ServerOptions): Promise<Server> {
             res.end(
               errorResponse(
                 payload.id ?? null,
-                "Requested method is not available. Use files.search, snippets.get, or deps.closure."
+                "Requested method is not available. Use context.bundle, files.search, snippets.get, or deps.closure."
               )
             );
             return;
