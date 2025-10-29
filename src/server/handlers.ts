@@ -239,9 +239,10 @@ export async function snippetsGet(
 
   let snippetSelection: SnippetRow | null = null;
   if (useSymbolSnippets) {
-    snippetSelection = snippetRows.find(
-      (snippet) => requestedStart >= snippet.start_line && requestedStart <= snippet.end_line
-    ) ?? null;
+    snippetSelection =
+      snippetRows.find(
+        (snippet) => requestedStart >= snippet.start_line && requestedStart <= snippet.end_line
+      ) ?? null;
     if (!snippetSelection) {
       if (requestedStart < snippetRows[0]?.start_line) {
         snippetSelection = snippetRows[0] ?? null;
@@ -352,7 +353,13 @@ export async function depsClosure(
     for (const edge of edges) {
       const nextDepth = current.depth + 1;
       if (edge.dst_kind === "path") {
-        recordEdge({ from: current.path, to: edge.dst, kind: "path", rel: edge.rel, depth: nextDepth });
+        recordEdge({
+          from: current.path,
+          to: edge.dst,
+          kind: "path",
+          rel: edge.rel,
+          depth: nextDepth,
+        });
         recordNode({ kind: "path", target: edge.dst, depth: nextDepth });
         if (!visitedPaths.has(edge.dst)) {
           visitedPaths.add(edge.dst);

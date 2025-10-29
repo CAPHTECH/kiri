@@ -105,9 +105,10 @@ function parseDepsClosureParams(input: unknown): DepsClosureParams {
     }
     return undefined;
   };
-  const direction = record.direction === "inbound" || record.direction === "outbound"
-    ? (record.direction as "inbound" | "outbound")
-    : undefined;
+  const direction =
+    record.direction === "inbound" || record.direction === "outbound"
+      ? (record.direction as "inbound" | "outbound")
+      : undefined;
   const includePackages =
     typeof record.include_packages === "boolean" ? record.include_packages : undefined;
   return {

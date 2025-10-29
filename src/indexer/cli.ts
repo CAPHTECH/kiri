@@ -5,10 +5,10 @@ import { pathToFileURL } from "node:url";
 
 import { DuckDBClient } from "../shared/duckdb";
 
+import { analyzeSource, buildFallbackSnippet } from "./codeintel";
 import { getDefaultBranch, getHeadCommit, gitLsFiles } from "./git";
 import { detectLanguage } from "./language";
 import { ensureBaseSchema } from "./schema";
-import { analyzeSource, buildFallbackSnippet } from "./codeintel";
 
 interface IndexerOptions {
   repoRoot: string;
@@ -211,7 +211,7 @@ async function persistSymbols(
       record.rangeStartLine,
       record.rangeEndLine,
       record.signature,
-      record.doc,
+      record.doc
     );
   }
 
@@ -240,7 +240,7 @@ async function persistSnippets(
       record.snippetId,
       record.startLine,
       record.endLine,
-      record.symbolId,
+      record.symbolId
     );
   }
 

@@ -53,7 +53,9 @@ function getDocComment(node: ts.Node): string | null {
       if (typeof tag.comment === "string") {
         parts.push(tag.comment);
       } else if (Array.isArray(tag.comment)) {
-        parts.push(tag.comment.map((part) => (typeof part === "string" ? part : part.text)).join(""));
+        parts.push(
+          tag.comment.map((part) => (typeof part === "string" ? part : part.text)).join("")
+        );
       }
     }
   }
@@ -172,12 +174,20 @@ function collectDependencies(
   };
 
   const visit = (node: ts.Node): void => {
-    if (ts.isImportDeclaration(node) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) {
+    if (
+      ts.isImportDeclaration(node) &&
+      node.moduleSpecifier &&
+      ts.isStringLiteral(node.moduleSpecifier)
+    ) {
       const target = normalizePathSpecifier(sourcePath, node.moduleSpecifier.text, fileSet);
       if (target) {
         record(target.kind, target.target);
       }
-    } else if (ts.isExportDeclaration(node) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) {
+    } else if (
+      ts.isExportDeclaration(node) &&
+      node.moduleSpecifier &&
+      ts.isStringLiteral(node.moduleSpecifier)
+    ) {
       const target = normalizePathSpecifier(sourcePath, node.moduleSpecifier.text, fileSet);
       if (target) {
         record(target.kind, target.target);

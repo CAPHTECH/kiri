@@ -1,12 +1,13 @@
-import { join } from "node:path";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { afterEach, describe, expect, it } from "vitest";
 
 import { runIndexer } from "../../src/indexer/cli";
-import { DuckDBClient } from "../../src/shared/duckdb";
-import { depsClosure, resolveRepoId } from "../../src/server/handlers";
 import { ServerContext } from "../../src/server/context";
+import { depsClosure, resolveRepoId } from "../../src/server/handlers";
+import { DuckDBClient } from "../../src/shared/duckdb";
 import { createTempRepo } from "../helpers/test-repo";
 
 interface CleanupTarget {
@@ -38,11 +39,7 @@ describe("deps.closure", () => {
         "  return c();",
         "}",
       ].join("\n"),
-      "src/c.ts": [
-        "export function c() {",
-        "  return 'c';",
-        "}",
-      ].join("\n"),
+      "src/c.ts": ["export function c() {", "  return 'c';", "}"].join("\n"),
     });
     cleanupTargets.push({ dispose: repo.cleanup });
 
@@ -62,15 +59,8 @@ describe("deps.closure", () => {
     expect(closure.root).toBe("src/a.ts");
     expect(closure.direction).toBe("outbound");
     const nodes = closure.nodes.map((node) => `${node.kind}:${node.target}`);
-    expect(nodes).toEqual([
-      "path:src/a.ts",
-      "path:src/b.ts",
-      "path:src/c.ts",
-    ]);
+    expect(nodes).toEqual(["path:src/a.ts", "path:src/b.ts", "path:src/c.ts"]);
     const edges = closure.edges.map((edge) => `${edge.from}->${edge.to}:${edge.kind}`);
-    expect(edges).toEqual([
-      "src/a.ts->src/b.ts:path",
-      "src/b.ts->src/c.ts:path",
-    ]);
+    expect(edges).toEqual(["src/a.ts->src/b.ts:path", "src/b.ts->src/c.ts:path"]);
   });
 });

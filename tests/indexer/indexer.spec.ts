@@ -30,11 +30,7 @@ describe("runIndexer", () => {
         "  return helper();",
         "}",
       ].join("\n"),
-      "src/util.ts": [
-        "export function helper() {",
-        "  return 'util';",
-        "}",
-      ].join("\n"),
+      "src/util.ts": ["export function helper() {", "  return 'util';", "}"].join("\n"),
       "README.md": "# Sample\n\nThis is a repo.\n",
     });
     cleanupTargets.push({ dispose: repo.cleanup });
