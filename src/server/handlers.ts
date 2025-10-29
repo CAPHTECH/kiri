@@ -72,11 +72,16 @@ function buildPreview(content: string, query: string): { preview: string; line: 
   return { preview, line: matchLine };
 }
 
-export async function filesSearch(context: ServerContext, params: FilesSearchParams): Promise<FilesSearchResult[]> {
+export async function filesSearch(
+  context: ServerContext,
+  params: FilesSearchParams
+): Promise<FilesSearchResult[]> {
   const { db, repoId } = context;
   const { query } = params;
   if (!query || query.trim().length === 0) {
-    throw new Error("files.search requires a non-empty query. Provide a search keyword to continue.");
+    throw new Error(
+      "files.search requires a non-empty query. Provide a search keyword to continue."
+    );
   }
 
   const limit = normalizeLimit(params.limit);
@@ -124,10 +129,15 @@ export async function filesSearch(context: ServerContext, params: FilesSearchPar
   });
 }
 
-export async function snippetsGet(context: ServerContext, params: SnippetsGetParams): Promise<SnippetResult> {
+export async function snippetsGet(
+  context: ServerContext,
+  params: SnippetsGetParams
+): Promise<SnippetResult> {
   const { db, repoId } = context;
   if (!params.path) {
-    throw new Error("snippets.get requires a file path. Specify a tracked text file path to continue.");
+    throw new Error(
+      "snippets.get requires a file path. Specify a tracked text file path to continue."
+    );
   }
 
   const rows = await db.all<FileWithBinaryRow>(
@@ -142,12 +152,16 @@ export async function snippetsGet(context: ServerContext, params: SnippetsGetPar
   );
 
   if (rows.length === 0) {
-    throw new Error("Requested snippet file was not indexed. Re-run the indexer or choose another path.");
+    throw new Error(
+      "Requested snippet file was not indexed. Re-run the indexer or choose another path."
+    );
   }
 
   const row = rows[0];
   if (row.is_binary) {
-    throw new Error("Binary snippets are not supported. Choose a text file to preview its content.");
+    throw new Error(
+      "Binary snippets are not supported. Choose a text file to preview its content."
+    );
   }
 
   if (row.content === null) {
@@ -157,7 +171,8 @@ export async function snippetsGet(context: ServerContext, params: SnippetsGetPar
   const lines = row.content.split(/\r?\n/);
   const totalLines = lines.length;
   const requestedStart = params.start_line ?? 1;
-  const requestedEnd = params.end_line ?? Math.min(totalLines, requestedStart + DEFAULT_SNIPPET_WINDOW - 1);
+  const requestedEnd =
+    params.end_line ?? Math.min(totalLines, requestedStart + DEFAULT_SNIPPET_WINDOW - 1);
 
   const startLine = Math.max(1, Math.min(totalLines, requestedStart));
   const endLine = Math.max(startLine, Math.min(totalLines, requestedEnd));
@@ -177,12 +192,16 @@ export async function resolveRepoId(db: DuckDBClient, repoRoot: string): Promise
   try {
     const rows = await db.all<{ id: number }>("SELECT id FROM repo WHERE root = ?", [repoRoot]);
     if (rows.length === 0) {
-      throw new Error("Target repository is missing from DuckDB. Run the indexer before starting the server.");
+      throw new Error(
+        "Target repository is missing from DuckDB. Run the indexer before starting the server."
+      );
     }
     return rows[0].id;
   } catch (error) {
     if (error instanceof Error && error.message.includes("Table with name repo")) {
-      throw new Error("Target repository is missing from DuckDB. Run the indexer before starting the server.");
+      throw new Error(
+        "Target repository is missing from DuckDB. Run the indexer before starting the server."
+      );
     }
     throw error;
   }

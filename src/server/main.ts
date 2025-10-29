@@ -124,7 +124,11 @@ export async function startServer(options: ServerOptions): Promise<Server> {
       if (req.method !== "POST") {
         res.statusCode = 405;
         res.setHeader("Content-Type", "application/json");
-        res.end(JSON.stringify(errorResponse(null, "Only POST is supported. Send a JSON-RPC request via POST.")));
+        res.end(
+          JSON.stringify(
+            errorResponse(null, "Only POST is supported. Send a JSON-RPC request via POST.")
+          )
+        );
         return;
       }
 
@@ -135,7 +139,12 @@ export async function startServer(options: ServerOptions): Promise<Server> {
         res.statusCode = 500;
         res.setHeader("Content-Type", "application/json");
         res.end(
-          JSON.stringify(errorResponse(null, "Failed to read request body. Retry the call with a smaller payload."))
+          JSON.stringify(
+            errorResponse(
+              null,
+              "Failed to read request body. Retry the call with a smaller payload."
+            )
+          )
         );
         return;
       }
@@ -146,14 +155,25 @@ export async function startServer(options: ServerOptions): Promise<Server> {
       } catch (error) {
         res.statusCode = 400;
         res.setHeader("Content-Type", "application/json");
-        res.end(JSON.stringify(errorResponse(null, "Invalid JSON payload. Submit a JSON-RPC 2.0 compliant request.")));
+        res.end(
+          JSON.stringify(
+            errorResponse(null, "Invalid JSON payload. Submit a JSON-RPC 2.0 compliant request.")
+          )
+        );
         return;
       }
 
       if (payload.jsonrpc !== "2.0" || typeof payload.method !== "string") {
         res.statusCode = 400;
         res.setHeader("Content-Type", "application/json");
-        res.end(JSON.stringify(errorResponse(payload.id ?? null, "Malformed JSON-RPC request. Provide method and jsonrpc=2.0.")));
+        res.end(
+          JSON.stringify(
+            errorResponse(
+              payload.id ?? null,
+              "Malformed JSON-RPC request. Provide method and jsonrpc=2.0."
+            )
+          )
+        );
         return;
       }
 
@@ -174,7 +194,12 @@ export async function startServer(options: ServerOptions): Promise<Server> {
           }
           default: {
             res.statusCode = 404;
-            res.end(errorResponse(payload.id ?? null, "Requested method is not available. Use files.search or snippets.get."));
+            res.end(
+              errorResponse(
+                payload.id ?? null,
+                "Requested method is not available. Use files.search or snippets.get."
+              )
+            );
             return;
           }
         }

@@ -18,7 +18,9 @@ export async function getHeadCommit(repoRoot: string): Promise<string> {
 
 export async function getDefaultBranch(repoRoot: string): Promise<string | null> {
   try {
-    const { stdout } = await execFileAsync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: repoRoot });
+    const { stdout } = await execFileAsync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+      cwd: repoRoot,
+    });
     const branch = stdout.trim();
     if (branch === "HEAD" || branch.length === 0) {
       return null;

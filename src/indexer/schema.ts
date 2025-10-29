@@ -4,7 +4,7 @@ export async function ensureBaseSchema(db: DuckDBClient): Promise<void> {
   await db.run(`
     CREATE TABLE IF NOT EXISTS repo (
       id INTEGER PRIMARY KEY,
-      root TEXT NOT NULL,
+      root TEXT NOT NULL UNIQUE,
       default_branch TEXT,
       indexed_at TIMESTAMP
     )
