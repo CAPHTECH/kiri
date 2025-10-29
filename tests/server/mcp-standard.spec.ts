@@ -88,4 +88,128 @@ describe("MCP標準エンドポイント", () => {
     expect(toolNames).toContain("context.bundle");
     expect(toolNames).toContain("files.search");
   });
+
+  it("tools/call が files.search を実行して MCP 標準形式で結果を返す", async () => {
+    const repo = await createTempRepo({
+      "src/main.ts": "export function meaning() {\n  return 42;\n}\n",
+      "docs/readme.md": "The meaning of life is context.\n",
+    });
+    cleanupTargets.push({ dispose: repo.cleanup });
+
+    const dbDir = await mkdtemp(join(tmpdir(), "kiri-mcp-call-"));
+    cleanupTargets.push({ dispose: async () => await rm(dbDir, { recursive: true, force: true }) });
+
+    const dbPath = join(dbDir, "index.duckdb");
+    await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+    const runtime = await createServerRuntime({ repoRoot: repo.path, databasePath: dbPath });
+    cleanupTargets.push({ dispose: async () => await runtime.close() });
+
+    const handler = createRpcHandler(runtime);
+    const request: JsonRpcRequest = {
+      jsonrpc: "2.0",
+      id: 3,
+      method: "tools/call",
+      params: {
+        name: "files.search",
+        arguments: {
+          query: "meaning",
+        },
+      },
+    };
+    const response = await handler(request);
+
+    expect(response.statusCode).toBe(200);
+    const payload = response.response as JsonRpcSuccess;
+    const result = payload.result as Record<string, unknown>;
+
+    // MCP standard format validation
+    expect(result).toHaveProperty("content");
+    expect(result).toHaveProperty("isError");
+    expect(result.isError).toBe(false);
+
+    const content = result.content as Array<{ type: string; text: string }>;
+    expect(Array.isArray(content)).toBe(true);
+    expect(content.length).toBeGreaterThan(0);
+    expect(content[0]).toHaveProperty("type", "text");
+    expect(content[0]).toHaveProperty("text");
+
+    // Parse the JSON result and verify it contains search results
+    const searchResults = JSON.parse(content[0].text);
+    expect(Array.isArray(searchResults)).toBe(true);
+    expect(searchResults.length).toBeGreaterThan(0);
+  });
+
+  it("tools/call が不明なツール名でエラーを返す", async () => {
+    const repo = await createTempRepo({
+      "src/app.ts": "export const app = () => 1;\n",
+    });
+    cleanupTargets.push({ dispose: repo.cleanup });
+
+    const dbDir = await mkdtemp(join(tmpdir(), "kiri-mcp-error-"));
+    cleanupTargets.push({ dispose: async () => await rm(dbDir, { recursive: true, force: true }) });
+
+    const dbPath = join(dbDir, "index.duckdb");
+    await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+    const runtime = await createServerRuntime({ repoRoot: repo.path, databasePath: dbPath });
+    cleanupTargets.push({ dispose: async () => await runtime.close() });
+
+    const handler = createRpcHandler(runtime);
+    const request: JsonRpcRequest = {
+      jsonrpc: "2.0",
+      id: 4,
+      method: "tools/call",
+      params: {
+        name: "unknown.tool",
+        arguments: {},
+      },
+    };
+    const response = await handler(request);
+
+    expect(response.statusCode).toBe(200);
+    const payload = response.response as JsonRpcSuccess;
+    const result = payload.result as Record<string, unknown>;
+
+    // Should return MCP error format (not JSON-RPC error)
+    expect(result).toHaveProperty("content");
+    expect(result).toHaveProperty("isError");
+    expect(result.isError).toBe(true);
+
+    const content = result.content as Array<{ type: string; text: string }>;
+    expect(Array.isArray(content)).toBe(true);
+    expect(content[0].text).toContain("Unknown tool");
+  });
+
+  it("tools/call が無効なパラメータで JSON-RPC エラーを返す", async () => {
+    const repo = await createTempRepo({
+      "src/app.ts": "export const app = () => 1;\n",
+    });
+    cleanupTargets.push({ dispose: repo.cleanup });
+
+    const dbDir = await mkdtemp(join(tmpdir(), "kiri-mcp-invalid-"));
+    cleanupTargets.push({ dispose: async () => await rm(dbDir, { recursive: true, force: true }) });
+
+    const dbPath = join(dbDir, "index.duckdb");
+    await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+    const runtime = await createServerRuntime({ repoRoot: repo.path, databasePath: dbPath });
+    cleanupTargets.push({ dispose: async () => await runtime.close() });
+
+    const handler = createRpcHandler(runtime);
+    const request: JsonRpcRequest = {
+      jsonrpc: "2.0",
+      id: 5,
+      method: "tools/call",
+      params: {
+        // Missing "name" field
+        arguments: {},
+      },
+    };
+    const response = await handler(request);
+
+    expect(response.statusCode).toBe(400);
+    const payload = response.response;
+    expect(payload).toHaveProperty("error");
+  });
 });

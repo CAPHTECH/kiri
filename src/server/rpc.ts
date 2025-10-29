@@ -380,6 +380,73 @@ export function validateJsonRpcRequest(payload: JsonRpcRequest): string | null {
   return null;
 }
 
+// MCP standard tool result format
+interface McpToolResult {
+  content: Array<{
+    type: "text";
+    text: string;
+  }>;
+  isError?: boolean;
+}
+
+// Helper function to execute a tool by name
+async function executeToolByName(
+  toolName: string,
+  toolParams: unknown,
+  context: ServerContext,
+  degrade: DegradeController,
+  allowDegrade: boolean
+): Promise<unknown> {
+  switch (toolName) {
+    case "context.bundle": {
+      const params = parseContextBundleParams(toolParams);
+      const handler = async () =>
+        await withSpan("context.bundle", async () => await contextBundle(context, params));
+      return await degrade.withResource(handler, "duckdb:context.bundle");
+    }
+    case "semantic.rerank": {
+      const params = parseSemanticRerankParams(toolParams);
+      const handler = async () =>
+        await withSpan("semantic.rerank", async () => await semanticRerank(context, params));
+      return await degrade.withResource(handler, "duckdb:semantic.rerank");
+    }
+    case "files.search": {
+      const params = parseFilesSearchParams(toolParams);
+      if (degrade.current.active && allowDegrade) {
+        return {
+          hits: degrade.search(params.query, params.limit ?? 20).map((hit) => ({
+            path: hit.path,
+            preview: hit.preview,
+            matchLine: hit.matchLine,
+            lang: null,
+            ext: null,
+            score: 0,
+          })),
+          degrade: true,
+        };
+      } else {
+        const handler = async () =>
+          await withSpan("files.search", async () => await filesSearch(context, params));
+        return await degrade.withResource(handler, "duckdb:files.search");
+      }
+    }
+    case "snippets.get": {
+      const params = parseSnippetsGetParams(toolParams);
+      const handler = async () =>
+        await withSpan("snippets.get", async () => await snippetsGet(context, params));
+      return await degrade.withResource(handler, "duckdb:snippets.get");
+    }
+    case "deps.closure": {
+      const params = parseDepsClosureParams(toolParams);
+      const handler = async () =>
+        await withSpan("deps.closure", async () => await depsClosure(context, params));
+      return await degrade.withResource(handler, "duckdb:deps.closure");
+    }
+    default:
+      throw new Error(`Unknown tool: ${toolName}`);
+  }
+}
+
 export function createRpcHandler(
   dependencies: RpcHandlerDependencies
 ): (payload: JsonRpcRequest) => Promise<RpcHandleResult> {
@@ -387,62 +454,106 @@ export function createRpcHandler(
   return async (payload: JsonRpcRequest): Promise<RpcHandleResult> => {
     try {
       let result: unknown;
+      let isMcpToolCall = false;
+
       switch (payload.method) {
         case "initialize": {
           result = INITIALIZE_PAYLOAD;
           break;
         }
         case "tools/list": {
+          // MCP standard format: tools array without nextCursor (no pagination)
           result = { tools: TOOL_DESCRIPTORS };
           break;
         }
-        case "context.bundle": {
-          const params = parseContextBundleParams(payload.params);
-          const handler = async () =>
-            await withSpan("context.bundle", async () => await contextBundle(context, params));
-          result = await degrade.withResource(handler, "duckdb:context.bundle");
-          break;
-        }
-        case "semantic.rerank": {
-          const params = parseSemanticRerankParams(payload.params);
-          const handler = async () =>
-            await withSpan("semantic.rerank", async () => await semanticRerank(context, params));
-          result = await degrade.withResource(handler, "duckdb:semantic.rerank");
-          break;
-        }
-        case "files.search": {
-          const params = parseFilesSearchParams(payload.params);
-          if (degrade.current.active && allowDegrade) {
-            result = {
-              hits: degrade.search(params.query, params.limit ?? 20).map((hit) => ({
-                path: hit.path,
-                preview: hit.preview,
-                matchLine: hit.matchLine,
-                lang: null,
-                ext: null,
-                score: 0,
-              })),
-              degrade: true,
+        case "tools/call": {
+          // MCP standard tool invocation
+          isMcpToolCall = true;
+          const paramsRecord = payload.params as Record<string, unknown> | null | undefined;
+          if (!paramsRecord || typeof paramsRecord !== "object") {
+            return {
+              statusCode: 400,
+              response: errorResponse(
+                payload.id ?? null,
+                "Invalid params for tools/call. Provide name and arguments.",
+                -32602
+              ),
             };
-          } else {
-            const handler = async () =>
-              await withSpan("files.search", async () => await filesSearch(context, params));
-            result = await degrade.withResource(handler, "duckdb:files.search");
+          }
+
+          const toolName = paramsRecord.name;
+          if (typeof toolName !== "string") {
+            return {
+              statusCode: 400,
+              response: errorResponse(
+                payload.id ?? null,
+                "Invalid params for tools/call. Tool name must be a string.",
+                -32602
+              ),
+            };
+          }
+
+          const toolArguments = paramsRecord.arguments ?? {};
+
+          try {
+            const toolResult = await executeToolByName(
+              toolName,
+              toolArguments,
+              context,
+              degrade,
+              allowDegrade
+            );
+
+            // Convert to MCP standard format
+            const mcpResult: McpToolResult = {
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify(toolResult, null, 2),
+                },
+              ],
+              isError: false,
+            };
+            result = mcpResult;
+          } catch (error) {
+            // Tool execution error - return as MCP error result
+            const errorMessage =
+              error instanceof Error
+                ? error.message
+                : "Tool execution failed. Inspect server logs and retry.";
+
+            const mcpErrorResult: McpToolResult = {
+              content: [
+                {
+                  type: "text",
+                  text: errorMessage,
+                },
+              ],
+              isError: true,
+            };
+            result = mcpErrorResult;
           }
           break;
         }
+        // Legacy direct method invocation (backward compatibility)
+        case "context.bundle": {
+          result = await executeToolByName("context.bundle", payload.params, context, degrade, allowDegrade);
+          break;
+        }
+        case "semantic.rerank": {
+          result = await executeToolByName("semantic.rerank", payload.params, context, degrade, allowDegrade);
+          break;
+        }
+        case "files.search": {
+          result = await executeToolByName("files.search", payload.params, context, degrade, allowDegrade);
+          break;
+        }
         case "snippets.get": {
-          const params = parseSnippetsGetParams(payload.params);
-          const handler = async () =>
-            await withSpan("snippets.get", async () => await snippetsGet(context, params));
-          result = await degrade.withResource(handler, "duckdb:snippets.get");
+          result = await executeToolByName("snippets.get", payload.params, context, degrade, allowDegrade);
           break;
         }
         case "deps.closure": {
-          const params = parseDepsClosureParams(payload.params);
-          const handler = async () =>
-            await withSpan("deps.closure", async () => await depsClosure(context, params));
-          result = await degrade.withResource(handler, "duckdb:deps.closure");
+          result = await executeToolByName("deps.closure", payload.params, context, degrade, allowDegrade);
           break;
         }
         default: {
@@ -450,7 +561,8 @@ export function createRpcHandler(
             statusCode: 404,
             response: errorResponse(
               payload.id ?? null,
-              "Requested method is not available. Use context.bundle, semantic.rerank, files.search, snippets.get, or deps.closure."
+              "Requested method is not available. Use tools/call, or legacy methods: context.bundle, semantic.rerank, files.search, snippets.get, or deps.closure.",
+              -32601
             ),
           };
         }
