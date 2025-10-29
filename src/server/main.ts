@@ -5,6 +5,7 @@ import { performance } from "node:perf_hooks";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
 
+import { IndexWatcher } from "../indexer/watch.js";
 import { ensureDatabaseIndexed } from "./indexBootstrap.js";
 import { writeMetricsResponse } from "./observability/metrics.js";
 import { JsonRpcRequest, createRpcHandler, errorResponse, validateJsonRpcRequest } from "./rpc.js";
@@ -13,6 +14,7 @@ import { startStdioServer, type StdioServerOptions } from "./stdio.js";
 
 export interface ServerOptions extends CommonServerOptions {
   port: number;
+  watcher?: IndexWatcher | null;
 }
 
 async function readBody(request: IncomingMessage): Promise<string> {
@@ -34,6 +36,19 @@ async function readBody(request: IncomingMessage): Promise<string> {
 export async function startServer(options: ServerOptions): Promise<Server> {
   const runtime = await createServerRuntime(options);
   const handleRpc = createRpcHandler(runtime);
+
+  // Set up watcher metrics collection if watcher is provided
+  let metricsInterval: NodeJS.Timeout | undefined;
+  if (options.watcher) {
+    const watcher = options.watcher;
+    metricsInterval = setInterval(() => {
+      const stats = watcher.getStatistics();
+      runtime.metrics.updateWatcherMetrics({
+        ...stats,
+        isRunning: watcher.isRunning(),
+      });
+    }, 5000); // Update every 5 seconds
+  }
 
   try {
     const server = createServer(async (req, res) => {
@@ -111,11 +126,17 @@ export async function startServer(options: ServerOptions): Promise<Server> {
     });
 
     server.on("close", () => {
+      if (metricsInterval) {
+        clearInterval(metricsInterval);
+      }
       void runtime.close();
     });
 
     return server;
   } catch (error) {
+    if (metricsInterval) {
+      clearInterval(metricsInterval);
+    }
     await runtime.close();
     throw error;
   }
@@ -151,9 +172,34 @@ async function startHttpOrStdio(): Promise<void> {
   const securityLockPath = parseArg("--security-lock");
   const allowDegrade = hasFlag("--allow-degrade");
   const forceReindex = hasFlag("--reindex");
+  const watch = hasFlag("--watch");
+  const debounceMs = parseInt(parseArg("--debounce") ?? "500", 10);
 
   // Ensure database is indexed before starting server
   await ensureDatabaseIndexed(repoRoot, databasePath, allowDegrade, forceReindex);
+
+  // Start watch mode in parallel with server if requested
+  let watcher: IndexWatcher | null = null;
+
+  if (watch) {
+    const abortController = new AbortController();
+    watcher = new IndexWatcher({
+      repoRoot,
+      databasePath,
+      debounceMs,
+      signal: abortController.signal,
+    });
+
+    // Handle graceful shutdown
+    const shutdownHandler = () => {
+      process.stderr.write("\n🛑 Received shutdown signal. Stopping watch mode...\n");
+      abortController.abort();
+    };
+    process.on("SIGINT", shutdownHandler);
+    process.on("SIGTERM", shutdownHandler);
+
+    await watcher.start();
+  }
 
   if (hasFlag("--port")) {
     const port = parsePort(process.argv);
@@ -162,6 +208,7 @@ async function startHttpOrStdio(): Promise<void> {
       repoRoot,
       databasePath,
       allowDegrade,
+      watcher: watcher,
     };
     if (securityConfigPath) {
       options.securityConfigPath = securityConfigPath;
@@ -169,6 +216,7 @@ async function startHttpOrStdio(): Promise<void> {
     if (securityLockPath) {
       options.securityLockPath = securityLockPath;
     }
+
     await startServer(options);
     return;
   }
@@ -184,6 +232,9 @@ async function startHttpOrStdio(): Promise<void> {
   if (securityLockPath) {
     stdioOptions.securityLockPath = securityLockPath;
   }
+
+  // For stdio mode, we'll update watcher metrics via a simpler mechanism
+  // since there's no /metrics endpoint
   await startStdioServer(stdioOptions);
 }
 

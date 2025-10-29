@@ -1,8 +1,9 @@
 import { access, constants } from "node:fs/promises";
-import { existsSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, unlinkSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
 import { runIndexer } from "../indexer/cli.js";
+import { acquireLock, releaseLock, getLockOwner, LockfileError } from "../shared/utils/lockfile.js";
 
 /**
  * Ensures the database is indexed before server startup.
@@ -33,13 +34,18 @@ export async function ensureDatabaseIndexed(
 
   // Acquire lock to prevent concurrent indexing
   try {
-    writeFileSync(lockfilePath, String(process.pid), { flag: "wx" });
+    acquireLock(lockfilePath);
   } catch (error) {
-    process.stderr.write(
-      `⚠️  Another indexing process is already running (lock file exists).\n`
-    );
-    process.stderr.write(`   Please wait for it to complete and try again.\n`);
-    process.exit(1);
+    if (error instanceof LockfileError) {
+      const ownerPid = error.ownerPid ?? getLockOwner(lockfilePath);
+      const ownerInfo = ownerPid ? ` (PID: ${ownerPid})` : "";
+      process.stderr.write(
+        `⚠️  Another indexing process${ownerInfo} is already running.\n`
+      );
+      process.stderr.write(`   Please wait for it to complete and try again.\n`);
+      process.exit(1);
+    }
+    throw error;
   }
 
   try {
@@ -101,11 +107,6 @@ export async function ensureDatabaseIndexed(
     throw error;
   } finally {
     // Always release the lock
-    try {
-      unlinkSync(lockfilePath);
-    } catch (error) {
-      // Ignore errors during lock cleanup
-      // This can happen if the process is killed before lock is created
-    }
+    releaseLock(lockfilePath);
   }
 }

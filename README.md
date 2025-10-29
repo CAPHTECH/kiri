@@ -16,6 +16,7 @@
 - **⚡ Fast Response**: Time to first useful result ≤ 1.0s
 - **🛡️ Degrade-First Architecture**: Works without VSS/FTS extensions via fallback
 - **🔌 MCP Integration**: JSON-RPC 2.0 over stdio/HTTP
+- **👁️ Watch Mode**: Automatic re-indexing on file changes with debouncing
 
 ## 🚀 Quick Start
 
@@ -41,6 +42,12 @@ node dist/src/server/main.js --repo . --db var/index.duckdb
 
 # Force re-indexing
 node dist/src/server/main.js --repo . --db var/index.duckdb --reindex
+
+# Start with watch mode (auto-reindex on file changes)
+node dist/src/server/main.js --repo . --db var/index.duckdb --watch
+
+# Customize debounce timing (default: 500ms)
+node dist/src/server/main.js --repo . --db var/index.duckdb --watch --debounce 1000
 ```
 
 #### Manual Indexing (Optional)
@@ -60,6 +67,9 @@ pnpm run dev
 
 # Or specify custom port
 node dist/src/server/main.js --repo . --db var/index.duckdb --port 8765
+
+# With watch mode enabled
+node dist/src/server/main.js --repo . --db var/index.duckdb --port 8765 --watch
 ```
 
 ## 📋 MCP Tools
@@ -76,6 +86,29 @@ KIRI provides 5 MCP tools for code exploration:
 
 ## 🔧 Configuration
 
+### Watch Mode
+
+Watch mode monitors your repository for file changes and automatically re-indexes when changes are detected:
+
+- **Debouncing**: Aggregates rapid consecutive changes to minimize reindex operations (default: 500ms)
+- **Denylist Integration**: Respects both `denylist.yml` and `.gitignore` patterns
+- **Lock Management**: Prevents concurrent indexing using lock files
+- **Graceful Shutdown**: Supports `SIGINT`/`SIGTERM` for clean termination
+- **Statistics**: Tracks reindex count, duration, and queue depth
+
+```bash
+# Enable watch mode with default debounce (500ms)
+node dist/src/server/main.js --repo . --db var/index.duckdb --watch
+
+# Customize debounce timing for slower hardware or network filesystems
+node dist/src/server/main.js --repo . --db var/index.duckdb --watch --debounce 1000
+
+# Watch mode works with both stdio and HTTP modes
+node dist/src/server/main.js --repo . --db var/index.duckdb --port 8765 --watch
+```
+
+**Note**: Watch mode runs in parallel with the MCP server. File changes trigger reindexing in the background without interrupting ongoing queries.
+
 ### Codex Integration
 
 Create `~/.config/codex/mcp.json`:
@@ -87,7 +120,8 @@ Create `~/.config/codex/mcp.json`:
       "command": "kiri",
       "args": [
         "--repo", "/path/to/your/project",
-        "--db", "/path/to/your/project/.kiri/index.duckdb"
+        "--db", "/path/to/your/project/.kiri/index.duckdb",
+        "--watch"
       ]
     }
   }
@@ -214,9 +248,11 @@ pnpm run check                # Lint + test
 tsx src/indexer/cli.ts --repo <path> --db <db-path> --full
 
 # Server modes
-node dist/src/server/main.js --repo <path> --db <db-path>              # stdio mode (auto-indexes if needed)
-node dist/src/server/main.js --repo <path> --db <db-path> --port 8765 # HTTP mode (auto-indexes if needed)
-node dist/src/server/main.js --repo <path> --db <db-path> --reindex   # Force re-indexing
+node dist/src/server/main.js --repo <path> --db <db-path>                     # stdio mode (auto-indexes if needed)
+node dist/src/server/main.js --repo <path> --db <db-path> --port 8765        # HTTP mode (auto-indexes if needed)
+node dist/src/server/main.js --repo <path> --db <db-path> --reindex          # Force re-indexing
+node dist/src/server/main.js --repo <path> --db <db-path> --watch            # Enable watch mode
+node dist/src/server/main.js --repo <path> --db <db-path> --watch --debounce 1000  # Custom debounce timing
 ```
 
 ## 🤝 Contributing
