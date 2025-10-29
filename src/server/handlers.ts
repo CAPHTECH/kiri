@@ -540,7 +540,7 @@ export async function contextBundle(
 
   if (keywords.length === 0 && artifacts.editing_path) {
     const pathSegments = artifacts.editing_path
-      .split(/[\/_.-]/)
+      .split(/[/_.-]/)
       .map((segment) => segment.toLowerCase())
       .filter((segment) => segment.length >= 3 && !STOP_WORDS.has(segment));
     keywords = pathSegments.slice(0, MAX_KEYWORDS);

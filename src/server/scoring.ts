@@ -31,10 +31,11 @@ export const DEFAULT_WEIGHTS: ScoringWeights = {
  * スコアリングプロファイルをロード
  * 将来的にはYAML設定や環境変数からロード可能にする予定
  *
- * @param profileName - プロファイル名（現在未使用、将来の拡張用）
+ * @param _profileName - プロファイル名（現在未使用、将来の拡張用）
  * @returns スコアリング重み設定
  */
-export function loadScoringProfile(profileName?: string): ScoringWeights {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export function loadScoringProfile(_profileName?: string): ScoringWeights {
   // TODO: 将来的にはconfig/scoring.yamlから読み込み
   // TODO: 評価メトリクス（P@k, TTFU）を使った自動チューニング
   return DEFAULT_WEIGHTS;

@@ -42,7 +42,7 @@ export function timeToFirstUseful(
   const baseline =
     typeof options.startTimestampMs === "number"
       ? options.startTimestampMs
-      : sorted[0]?.timestampMs ?? 0;
+      : (sorted[0]?.timestampMs ?? 0);
   for (const event of sorted) {
     if (event.relevant) {
       const deltaMs = event.timestampMs - baseline;
