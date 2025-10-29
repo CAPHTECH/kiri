@@ -18,7 +18,11 @@ function tokenize(text: string): string[] {
 function hashToken(token: string): number {
   const digest = createHash("sha256").update(token).digest();
   // Use the first four bytes to build a deterministic integer hash
-  return ((digest[0] << 24) | (digest[1] << 16) | (digest[2] << 8) | digest[3]) >>> 0;
+  const byte0 = digest[0] ?? 0;
+  const byte1 = digest[1] ?? 0;
+  const byte2 = digest[2] ?? 0;
+  const byte3 = digest[3] ?? 0;
+  return ((byte0 << 24) | (byte1 << 16) | (byte2 << 8) | byte3) >>> 0;
 }
 
 function applyToken(vector: number[], token: string): void {
@@ -26,7 +30,10 @@ function applyToken(vector: number[], token: string): void {
   const index = hash % vector.length;
   const sign = (hash & 1) === 0 ? 1 : -1;
   const weight = Math.log(1 + token.length);
-  vector[index] += sign * weight;
+  const current = vector[index];
+  if (current !== undefined) {
+    vector[index] = current + sign * weight;
+  }
 }
 
 function normalize(values: number[]): number[] {
@@ -72,6 +79,9 @@ export function structuralSimilarity(a: number[], b: number[]): number {
   for (let i = 0; i < length; i += 1) {
     const valueA = a[i];
     const valueB = b[i];
+    if (valueA === undefined || valueB === undefined) {
+      continue;
+    }
     dot += valueA * valueB;
     normA += valueA * valueA;
     normB += valueB * valueB;
