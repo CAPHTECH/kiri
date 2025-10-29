@@ -138,7 +138,9 @@ function normalizePathSpecifier(
 ): { kind: "path" | "package"; target: string } | null {
   if (specifier.startsWith(".") || specifier.startsWith("/")) {
     const baseDir = path.posix.dirname(sourcePath);
-    const joined = path.posix.normalize(path.posix.join(baseDir, specifier));
+    // Strip .js extension if present (ESM imports use .js but source files are .ts)
+    const pathWithoutJs = specifier.endsWith(".js") ? specifier.slice(0, -3) : specifier;
+    const joined = path.posix.normalize(path.posix.join(baseDir, pathWithoutJs));
     const candidates = [
       joined,
       `${joined}.ts`,
@@ -193,12 +195,14 @@ function collectDependencies(
         record(target.kind, target.target);
       }
     } else if (ts.isCallExpression(node)) {
+      const firstArg = node.arguments[0];
       if (
         node.expression.getText(source) === "require" &&
         node.arguments.length === 1 &&
-        ts.isStringLiteral(node.arguments[0])
+        firstArg &&
+        ts.isStringLiteral(firstArg)
       ) {
-        const target = normalizePathSpecifier(sourcePath, node.arguments[0].text, fileSet);
+        const target = normalizePathSpecifier(sourcePath, firstArg.text, fileSet);
         if (target) {
           record(target.kind, target.target);
         }

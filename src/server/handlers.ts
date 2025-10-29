@@ -1,6 +1,6 @@
-import { DuckDBClient } from "../shared/duckdb";
+import { DuckDBClient } from "../shared/duckdb.js";
 
-import { ServerContext } from "./context";
+import { ServerContext } from "./context.js";
 
 export interface FilesSearchParams {
   query: string;
@@ -205,6 +205,12 @@ export async function snippetsGet(
   }
 
   const row = rows[0];
+  if (!row) {
+    throw new Error(
+      "Requested snippet file was not indexed. Re-run the indexer or choose another path."
+    );
+  }
+
   if (row.is_binary) {
     throw new Error(
       "Binary snippets are not supported. Choose a text file to preview its content."
@@ -244,8 +250,9 @@ export async function snippetsGet(
         (snippet) => requestedStart >= snippet.start_line && requestedStart <= snippet.end_line
       ) ?? null;
     if (!snippetSelection) {
-      if (requestedStart < snippetRows[0]?.start_line) {
-        snippetSelection = snippetRows[0] ?? null;
+      const firstSnippet = snippetRows[0];
+      if (firstSnippet && requestedStart < firstSnippet.start_line) {
+        snippetSelection = firstSnippet;
       } else {
         snippetSelection = snippetRows[snippetRows.length - 1] ?? null;
       }
@@ -412,7 +419,13 @@ export async function resolveRepoId(db: DuckDBClient, repoRoot: string): Promise
         "Target repository is missing from DuckDB. Run the indexer before starting the server."
       );
     }
-    return rows[0].id;
+    const row = rows[0];
+    if (!row) {
+      throw new Error(
+        "Failed to retrieve repository record. Database returned empty result."
+      );
+    }
+    return row.id;
   } catch (error) {
     if (error instanceof Error && error.message.includes("Table with name repo")) {
       throw new Error(

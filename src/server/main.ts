@@ -3,9 +3,9 @@ import { resolve } from "node:path";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
 
-import { DuckDBClient } from "../shared/duckdb";
+import { DuckDBClient } from "../shared/duckdb.js";
 
-import { ServerContext } from "./context";
+import { ServerContext } from "./context.js";
 import {
   DepsClosureParams,
   FilesSearchParams,
@@ -14,7 +14,7 @@ import {
   filesSearch,
   resolveRepoId,
   snippetsGet,
-} from "./handlers";
+} from "./handlers.js";
 
 export interface ServerOptions {
   port: number;
@@ -59,13 +59,14 @@ function parseFilesSearchParams(input: unknown): FilesSearchParams {
       limit = parsed;
     }
   }
-  return {
+  const params: FilesSearchParams = {
     query: typeof record.query === "string" ? record.query : "",
-    lang: typeof record.lang === "string" ? record.lang : undefined,
-    ext: typeof record.ext === "string" ? record.ext : undefined,
-    path_prefix: typeof record.path_prefix === "string" ? record.path_prefix : undefined,
-    limit,
   };
+  if (typeof record.lang === "string") params.lang = record.lang;
+  if (typeof record.ext === "string") params.ext = record.ext;
+  if (typeof record.path_prefix === "string") params.path_prefix = record.path_prefix;
+  if (limit !== undefined) params.limit = limit;
+  return params;
 }
 
 function parseSnippetsGetParams(input: unknown): SnippetsGetParams {
@@ -83,11 +84,14 @@ function parseSnippetsGetParams(input: unknown): SnippetsGetParams {
     }
     return undefined;
   };
-  return {
+  const startLine = toNumber(record.start_line);
+  const endLine = toNumber(record.end_line);
+  const params: SnippetsGetParams = {
     path: typeof record.path === "string" ? record.path : "",
-    start_line: toNumber(record.start_line),
-    end_line: toNumber(record.end_line),
   };
+  if (startLine !== undefined) params.start_line = startLine;
+  if (endLine !== undefined) params.end_line = endLine;
+  return params;
 }
 
 function parseDepsClosureParams(input: unknown): DepsClosureParams {
@@ -111,12 +115,14 @@ function parseDepsClosureParams(input: unknown): DepsClosureParams {
       : undefined;
   const includePackages =
     typeof record.include_packages === "boolean" ? record.include_packages : undefined;
-  return {
+  const maxDepth = toNumber(record.max_depth);
+  const params: DepsClosureParams = {
     path: typeof record.path === "string" ? record.path : "",
-    max_depth: toNumber(record.max_depth),
-    direction,
-    include_packages: includePackages,
   };
+  if (maxDepth !== undefined) params.max_depth = maxDepth;
+  if (direction !== undefined) params.direction = direction;
+  if (includePackages !== undefined) params.include_packages = includePackages;
+  return params;
 }
 
 async function readBody(request: IncomingMessage): Promise<string> {

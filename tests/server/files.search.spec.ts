@@ -4,11 +4,11 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { runIndexer } from "../../src/indexer/cli";
-import { ServerContext } from "../../src/server/context";
-import { filesSearch, resolveRepoId } from "../../src/server/handlers";
-import { DuckDBClient } from "../../src/shared/duckdb";
-import { createTempRepo } from "../helpers/test-repo";
+import { runIndexer } from "../../src/indexer/cli.js";
+import { ServerContext } from "../../src/server/context.js";
+import { filesSearch, resolveRepoId } from "../../src/server/handlers.js";
+import { DuckDBClient } from "../../src/shared/duckdb.js";
+import { createTempRepo } from "../helpers/test-repo.js";
 
 interface CleanupTarget {
   dispose: () => Promise<void>;

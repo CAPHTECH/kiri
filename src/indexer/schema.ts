@@ -1,4 +1,4 @@
-import { DuckDBClient } from "../shared/duckdb";
+import { DuckDBClient } from "../shared/duckdb.js";
 
 export async function ensureBaseSchema(db: DuckDBClient): Promise<void> {
   await db.run(`

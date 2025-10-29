@@ -4,11 +4,11 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { runIndexer } from "../../src/indexer/cli";
-import { ServerContext } from "../../src/server/context";
-import { depsClosure, resolveRepoId } from "../../src/server/handlers";
-import { DuckDBClient } from "../../src/shared/duckdb";
-import { createTempRepo } from "../helpers/test-repo";
+import { runIndexer } from "../../src/indexer/cli.js";
+import { ServerContext } from "../../src/server/context.js";
+import { depsClosure, resolveRepoId } from "../../src/server/handlers.js";
+import { DuckDBClient } from "../../src/shared/duckdb.js";
+import { createTempRepo } from "../helpers/test-repo.js";
 
 interface CleanupTarget {
   dispose: () => Promise<void>;
@@ -26,14 +26,14 @@ describe("deps.closure", () => {
   it("returns outbound dependency closure", async () => {
     const repo = await createTempRepo({
       "src/a.ts": [
-        "import { b } from './b';",
+        "import { b } from './b.js';",
         "",
         "export function a() {",
         "  return b();",
         "}",
       ].join("\n"),
       "src/b.ts": [
-        "import { c } from './c';",
+        "import { c } from './c.js';",
         "",
         "export function b() {",
         "  return c();",

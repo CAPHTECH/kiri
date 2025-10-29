@@ -3,12 +3,12 @@ import { readFile, stat } from "node:fs/promises";
 import { join, resolve, extname } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { DuckDBClient } from "../shared/duckdb";
+import { DuckDBClient } from "../shared/duckdb.js";
 
-import { analyzeSource, buildFallbackSnippet } from "./codeintel";
-import { getDefaultBranch, getHeadCommit, gitLsFiles } from "./git";
-import { detectLanguage } from "./language";
-import { ensureBaseSchema } from "./schema";
+import { analyzeSource, buildFallbackSnippet } from "./codeintel.js";
+import { getDefaultBranch, getHeadCommit, gitLsFiles } from "./git.js";
+import { detectLanguage } from "./language.js";
+import { ensureBaseSchema } from "./schema.js";
 
 interface IndexerOptions {
   repoRoot: string;
@@ -110,7 +110,13 @@ async function ensureRepo(
       "Failed to create or find repository record. Check database constraints and schema."
     );
   }
-  return rows[0].id;
+  const row = rows[0];
+  if (!row) {
+    throw new Error(
+      "Failed to retrieve repository record. Database returned empty result."
+    );
+  }
+  return row.id;
 }
 
 async function persistBlobs(db: DuckDBClient, blobs: Map<string, BlobRecord>): Promise<void> {
@@ -471,7 +477,12 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
   const full = process.argv.includes("--full");
   const since = parseArg("--since");
 
-  runIndexer({ repoRoot, databasePath, full: full || !since, since }).catch((error) => {
+  const options: IndexerOptions = { repoRoot, databasePath, full: full || !since };
+  if (since) {
+    options.since = since;
+  }
+
+  runIndexer(options).catch((error) => {
     console.error("Failed to index repository. Retry after resolving the logged error.");
     console.error(error);
     process.exitCode = 1;
