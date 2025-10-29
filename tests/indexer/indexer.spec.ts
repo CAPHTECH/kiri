@@ -1,6 +1,7 @@
-import { join } from "node:path";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { afterEach, describe, expect, it } from "vitest";
 
 import { runIndexer } from "../../src/indexer/cli";
@@ -29,7 +30,9 @@ describe("runIndexer", () => {
 
     const dbDir = await mkdtemp(join(tmpdir(), "kiri-db-"));
     const dbPath = join(dbDir, "index.duckdb");
-    cleanupTargets.push({ dispose: async () => await rm(dbDir, { recursive: true, force: true }) });
+    cleanupTargets.push({
+      dispose: async () => await rm(dbDir, { recursive: true, force: true }),
+    });
 
     await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
 

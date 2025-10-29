@@ -1,9 +1,10 @@
 import { createServer, IncomingMessage, Server } from "node:http";
 import { resolve } from "node:path";
-import { pathToFileURL } from "node:url";
 import process from "node:process";
+import { pathToFileURL } from "node:url";
 
 import { DuckDBClient } from "../shared/duckdb";
+
 import { ServerContext } from "./context";
 import {
   FilesSearchParams,
@@ -135,7 +136,7 @@ export async function startServer(options: ServerOptions): Promise<Server> {
       let body: string;
       try {
         body = await readBody(req);
-      } catch (error) {
+      } catch {
         res.statusCode = 500;
         res.setHeader("Content-Type", "application/json");
         res.end(
@@ -152,7 +153,7 @@ export async function startServer(options: ServerOptions): Promise<Server> {
       let payload: JsonRpcRequest;
       try {
         payload = JSON.parse(body) as JsonRpcRequest;
-      } catch (error) {
+      } catch {
         res.statusCode = 400;
         res.setHeader("Content-Type", "application/json");
         res.end(

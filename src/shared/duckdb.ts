@@ -1,5 +1,6 @@
-import { dirname } from "node:path";
 import { mkdir } from "node:fs/promises";
+import { dirname } from "node:path";
+
 import duckdb from "duckdb";
 
 export interface DuckDBClientOptions {

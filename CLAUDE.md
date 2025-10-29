@@ -46,6 +46,7 @@ pnpm run check
 ## DuckDB Schema Design
 
 The schema uses **blob/tree separation**:
+
 - `blob` table: Stores unique file content by hash (deduplicates renamed/copied files)
 - `tree` table: Maps repo_id + commit_hash + path → blob_hash
 - `file` table: Convenience view of HEAD state for fast queries
@@ -59,16 +60,18 @@ See `docs/data-model.md` for full schema and `sql/schema.sql` for baseline DDL.
 ### Database Client Usage
 
 Always use the `DuckDBClient` wrapper, which provides:
+
 - Automatic directory creation via `ensureDirectory` option
 - Transaction support with `db.transaction(async () => {...})`
 - Async query methods: `db.all()`, `db.run()`
 - Resource cleanup with `db.close()`
 
 Example:
+
 ```typescript
 const db = await DuckDBClient.connect({
   databasePath: "var/index.duckdb",
-  ensureDirectory: true
+  ensureDirectory: true,
 });
 try {
   await db.transaction(async () => {
@@ -82,6 +85,7 @@ try {
 ### Testing with DuckDB
 
 Tests using DuckDB should:
+
 - Create temporary databases in `tmp/` directory
 - Use `afterEach` to clean up: `await db.close()` and delete temp files
 - Run evaluation tests with `vitest --runInBand` to avoid race conditions
@@ -93,6 +97,7 @@ See `tests/server/handlers.spec.ts` and `tests/indexer/cli.spec.ts` for patterns
 All error messages follow the pattern: **"Problem description. Resolution action."**
 
 Examples:
+
 - `"Target repository is missing from DuckDB. Run the indexer before starting the server."`
 - `"Requested snippet file was not indexed. Re-run the indexer or choose another path."`
 

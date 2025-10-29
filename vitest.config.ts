@@ -7,7 +7,7 @@ export default defineConfig({
       provider: "v8",
       reporter: ["text", "lcov"],
       lines: 0.8,
-      statements: 0.8
-    }
-  }
+      statements: 0.8,
+    },
+  },
 });

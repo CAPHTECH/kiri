@@ -1,6 +1,6 @@
 import { mkdtemp, rm } from "node:fs/promises";
-import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -11,9 +11,9 @@ describe("startServer", () => {
     const tempDir = await mkdtemp(join(tmpdir(), "kiri-server-"));
     const dbPath = join(tempDir, "index.duckdb");
 
-    await expect(
-      startServer({ port: 0, repoRoot: tempDir, databasePath: dbPath })
-    ).rejects.toThrow(/Target repository is missing/);
+    await expect(startServer({ port: 0, repoRoot: tempDir, databasePath: dbPath })).rejects.toThrow(
+      /Target repository is missing/
+    );
 
     await rm(tempDir, { recursive: true, force: true });
   });

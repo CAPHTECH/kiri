@@ -3,10 +3,11 @@ import { readFile, stat } from "node:fs/promises";
 import { join, resolve, extname } from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { DuckDBClient } from "../shared/duckdb";
+
+import { getDefaultBranch, getHeadCommit, gitLsFiles } from "./git";
 import { detectLanguage } from "./language";
 import { ensureBaseSchema } from "./schema";
-import { getDefaultBranch, getHeadCommit, gitLsFiles } from "./git";
-import { DuckDBClient } from "../shared/duckdb";
 
 interface IndexerOptions {
   repoRoot: string;

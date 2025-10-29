@@ -15,7 +15,11 @@ declare module "duckdb" {
     run(sql: string, callback: RunCallback): void;
     run(sql: string, params: unknown[], callback: RunCallback): void;
     all<T = Record<string, unknown>>(sql: string, callback: AllCallback<T>): void;
-    all<T = Record<string, unknown>>(sql: string, params: unknown[], callback: AllCallback<T>): void;
+    all<T = Record<string, unknown>>(
+      sql: string,
+      params: unknown[],
+      callback: AllCallback<T>
+    ): void;
     exec(sql: string, callback: RunCallback): void;
     prepare(sql: string, callback: (err: Error | null, statement: Statement) => void): void;
     close(callback: RunCallback): void;
