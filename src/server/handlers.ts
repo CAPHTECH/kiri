@@ -3,6 +3,7 @@ import path from "node:path";
 import { DuckDBClient } from "../shared/duckdb.js";
 
 import { ServerContext } from "./context.js";
+import { loadScoringProfile } from "./scoring.js";
 
 export interface FilesSearchParams {
   query: string;
@@ -69,6 +70,7 @@ const MAX_BUNDLE_LIMIT = 20;
 const MAX_KEYWORDS = 12;
 const MAX_MATCHES_PER_KEYWORD = 40;
 const MAX_DEPENDENCY_SEEDS = 8;
+const MAX_DEPENDENCY_SEEDS_QUERY_LIMIT = 100; // SQL injection防御用の上限
 const NEARBY_LIMIT = 6;
 const FALLBACK_SNIPPET_WINDOW = 120;
 
@@ -308,9 +310,36 @@ function buildSnippetPreview(content: string, startLine: number, endLine: number
   return `${snippet.slice(0, 479)}…`;
 }
 
+/**
+ * トークン数を推定（行ベース）
+ * 後方互換性のため、コンテンツなしでも動作する
+ *
+ * @param startLine - 開始行
+ * @param endLine - 終了行
+ * @returns 推定トークン数
+ */
 function estimateTokens(startLine: number, endLine: number): number {
   const lineCount = Math.max(1, endLine - startLine + 1);
   return lineCount * 4;
+}
+
+/**
+ * トークン数を推定（コンテンツベース）
+ * GPT-style: ~4 chars per token for code
+ *
+ * @param content - ファイル全体のコンテンツ
+ * @param startLine - 開始行（1-indexed）
+ * @param endLine - 終了行（1-indexed）
+ * @returns 推定トークン数
+ */
+function estimateTokensFromContent(content: string, startLine: number, endLine: number): number {
+  const lines = content.split(/\r?\n/);
+  const startIndex = Math.max(0, startLine - 1);
+  const endIndex = Math.min(endLine, lines.length);
+  const selectedLines = lines.slice(startIndex, endIndex);
+  const charCount = selectedLines.reduce((sum, line) => sum + line.length, 0);
+  // GPT-style: 約4文字で1トークン
+  return Math.max(1, Math.ceil(charCount / 4));
 }
 
 export async function filesSearch(
@@ -496,6 +525,9 @@ export async function contextBundle(
   const limit = normalizeBundleLimit(params.limit);
   const artifacts = params.artifacts ?? {};
 
+  // スコアリング重みをロード（将来的には設定ファイルや引数から）
+  const weights = loadScoringProfile();
+
   const keywordSources: string[] = [goal];
   if (artifacts.failing_tests && artifacts.failing_tests.length > 0) {
     keywordSources.push(artifacts.failing_tests.join(" "));
@@ -538,10 +570,11 @@ export async function contextBundle(
         continue;
       }
       const candidate = ensureCandidate(candidates, row.path);
-      candidate.score += 1;
+      candidate.score += weights.textMatch;
       candidate.reasons.add(`text:${keyword}`);
       const { line } = buildPreview(row.content, keyword);
-      candidate.matchLine = candidate.matchLine === null ? line : Math.min(candidate.matchLine, line);
+      candidate.matchLine =
+        candidate.matchLine === null ? line : Math.min(candidate.matchLine, line);
       candidate.content ??= row.content;
       candidate.lang ??= row.lang;
       candidate.ext ??= row.ext;
@@ -560,7 +593,7 @@ export async function contextBundle(
 
   if (artifacts.editing_path) {
     const editingCandidate = ensureCandidate(candidates, artifacts.editing_path);
-    editingCandidate.score += 2;
+    editingCandidate.score += weights.editingPath;
     editingCandidate.reasons.add("artifact:editing_path");
     editingCandidate.matchLine ??= 1;
   }
@@ -577,7 +610,21 @@ export async function contextBundle(
   }
 
   if (dependencySeeds.size > 0) {
+    // SQL injection防御: プレースホルダー生成前にサイズを検証
+    if (dependencySeeds.size > MAX_DEPENDENCY_SEEDS_QUERY_LIMIT) {
+      throw new Error(
+        `Too many dependency seeds: ${dependencySeeds.size} (max ${MAX_DEPENDENCY_SEEDS_QUERY_LIMIT}). Narrow your search criteria.`
+      );
+    }
+
     const placeholders = Array.from(dependencySeeds, () => "?").join(", ");
+
+    // 防御的チェック: プレースホルダーが正しい形式であることを確認
+    // 期待される形式: "?, ?, ..." (クエスチョンマーク、カンマ、スペースのみ)
+    if (!/^(\?)(,\s*\?)*$/.test(placeholders)) {
+      throw new Error("Invalid placeholder generation detected. Operation aborted for safety.");
+    }
+
     const depRows = await db.all<DependencyRow>(
       `
         SELECT src_path, dst_kind, dst, rel
@@ -592,7 +639,7 @@ export async function contextBundle(
         continue;
       }
       const candidate = ensureCandidate(candidates, dep.dst);
-      candidate.score += 0.5;
+      candidate.score += weights.dependency;
       candidate.reasons.add(`dep:${dep.src_path}`);
     }
   }
@@ -617,7 +664,7 @@ export async function contextBundle(
           continue;
         }
         const candidate = ensureCandidate(candidates, near.path);
-        candidate.score += 0.25;
+        candidate.score += weights.proximity;
         candidate.reasons.add(`near:${directory}`);
       }
     }
@@ -719,7 +766,15 @@ export async function contextBundle(
     });
   }
 
-  const tokensEstimate = results.reduce((acc, item) => acc + estimateTokens(item.range[0], item.range[1]), 0);
+  // コンテンツベースのトークン推定を使用（より正確）
+  const tokensEstimate = results.reduce((acc, item) => {
+    const candidate = sortedCandidates.find((c) => c.path === item.path);
+    if (candidate && candidate.content) {
+      return acc + estimateTokensFromContent(candidate.content, item.range[0], item.range[1]);
+    }
+    // フォールバック: 行ベース推定
+    return acc + estimateTokens(item.range[0], item.range[1]);
+  }, 0);
 
   return { context: results, tokens_estimate: tokensEstimate };
 }

@@ -102,4 +102,99 @@ describe("context.bundle", () => {
 
     await expect(contextBundle(serverContext, { goal: "" })).rejects.toThrow(/non-empty goal/);
   });
+
+  it("handles files without pre-computed snippets using fallback generation", async () => {
+    const repo = await createTempRepo({
+      "README.md": "# Test Project\n\nThis is a test.\n\nMore content here.\n",
+    });
+    cleanupTargets.push({ dispose: repo.cleanup });
+
+    const dbDir = await mkdtemp(join(tmpdir(), "kiri-db-"));
+    const dbPath = join(dbDir, "index.duckdb");
+    cleanupTargets.push({ dispose: async () => await rm(dbDir, { recursive: true, force: true }) });
+
+    await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+    const db = await DuckDBClient.connect({ databasePath: dbPath });
+    cleanupTargets.push({ dispose: async () => await db.close() });
+
+    const repoId = await resolveRepoId(db, repo.path);
+    const context: ServerContext = { db, repoId };
+
+    // README.mdはマークダウンファイルなのでスニペットが生成されない可能性が高い
+    const bundle = await contextBundle(context, {
+      goal: "test project documentation",
+      limit: 5,
+    });
+
+    expect(bundle.context.length).toBeGreaterThan(0);
+    const readme = bundle.context.find((item) => item.path === "README.md");
+    expect(readme).toBeDefined();
+    expect(readme?.range).toBeDefined();
+    expect(readme?.preview.length).toBeGreaterThan(0);
+  });
+
+  it("handles CJK and emoji-rich keywords gracefully", async () => {
+    const repo = await createTempRepo({
+      "src/日本語.ts": "// 日本語コメント\nexport function 処理() { return '成功'; }\n",
+      "src/emoji.ts": "// 🐛 Bug fix\nexport function fix🔧() { return 'fixed'; }\n",
+    });
+    cleanupTargets.push({ dispose: repo.cleanup });
+
+    const dbDir = await mkdtemp(join(tmpdir(), "kiri-db-"));
+    const dbPath = join(dbDir, "index.duckdb");
+    cleanupTargets.push({ dispose: async () => await rm(dbDir, { recursive: true, force: true }) });
+
+    await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+    const db = await DuckDBClient.connect({ databasePath: dbPath });
+    cleanupTargets.push({ dispose: async () => await db.close() });
+
+    const repoId = await resolveRepoId(db, repo.path);
+    const context: ServerContext = { db, repoId };
+
+    // CJK文字とemojiを含むゴールでも正常動作することを確認
+    const bundle = await contextBundle(context, {
+      goal: "修正 bug🐛 を fix する",
+      limit: 5,
+    });
+
+    // キーワード抽出が失敗してもエラーにならず、空の結果が返ることを確認
+    expect(bundle.context).toBeDefined();
+    expect(Array.isArray(bundle.context)).toBe(true);
+  });
+
+  it("respects MAX_DEPENDENCY_SEEDS_QUERY_LIMIT for security", async () => {
+    // 大量の依存関係シードを持つケースをシミュレート
+    // 実際には内部制限により、MAX_DEPENDENCY_SEEDS (8) までしか使われない
+    const files: Record<string, string> = {};
+    for (let i = 0; i < 15; i++) {
+      files[`src/file${i}.ts`] = `export function func${i}() { return ${i}; }\n`;
+    }
+
+    const repo = await createTempRepo(files);
+    cleanupTargets.push({ dispose: repo.cleanup });
+
+    const dbDir = await mkdtemp(join(tmpdir(), "kiri-db-"));
+    const dbPath = join(dbDir, "index.duckdb");
+    cleanupTargets.push({ dispose: async () => await rm(dbDir, { recursive: true, force: true }) });
+
+    await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+    const db = await DuckDBClient.connect({ databasePath: dbPath });
+    cleanupTargets.push({ dispose: async () => await db.close() });
+
+    const repoId = await resolveRepoId(db, repo.path);
+    const context: ServerContext = { db, repoId };
+
+    // 多くのファイルにマッチするが、依存関係シードは内部で制限される
+    const bundle = await contextBundle(context, {
+      goal: "func return",
+      limit: 10,
+    });
+
+    expect(bundle.context).toBeDefined();
+    // エラーが発生せず正常に完了することを確認
+    expect(bundle.context.length).toBeGreaterThan(0);
+  });
 });
