@@ -6,32 +6,32 @@ default:
   editingPath: 2.0 # Currently editing file weight
   dependency: 0.5 # Dependency relationship weight
   proximity: 0.25 # Same directory weight
-  semantic: 0.75 # Semantic similarity weight
+  structural: 0.75 # Structural similarity weight (LSH-based, not semantic embeddings)
 
 bugfix:
   textMatch: 1.0
   editingPath: 1.8
   dependency: 0.7 # Higher: bugs often in dependencies
   proximity: 0.35
-  semantic: 0.9 # Higher: semantic understanding helps
+  structural: 0.9 # Higher: structural understanding helps
 
 testfail:
   textMatch: 1.0
   editingPath: 1.6
   dependency: 0.85 # Very high: failed tests reveal dependencies
   proximity: 0.3
-  semantic: 0.8
+  structural: 0.8
 
 typeerror:
   textMatch: 1.0
   editingPath: 1.4
   dependency: 0.6
   proximity: 0.4 # Higher: type errors cluster in modules
-  semantic: 0.6 # Lower: type errors are structural
+  structural: 0.6 # Lower: type errors are structural
 
 feature:
   textMatch: 1.0
   editingPath: 1.5
   dependency: 0.45 # Lower: new features less dependent
   proximity: 0.5 # Higher: features cluster spatially
-  semantic: 0.7
+  structural: 0.7

@@ -52,7 +52,16 @@ export function generateEmbedding(text: string, dims = DEFAULT_DIMS): EmbeddingV
   return { dims, values: normalize(vector) };
 }
 
-export function cosineSimilarity(a: number[], b: number[]): number {
+/**
+ * Calculate structural similarity between two embedding vectors using cosine similarity.
+ * Note: This measures syntactic/structural similarity based on LSH (Locality-Sensitive Hashing),
+ * not semantic similarity from language models like BERT or GPT embeddings.
+ *
+ * @param a - First embedding vector
+ * @param b - Second embedding vector
+ * @returns Similarity score between 0 and 1
+ */
+export function structuralSimilarity(a: number[], b: number[]): number {
   const length = Math.min(a.length, b.length);
   if (length === 0) {
     return 0;
@@ -72,5 +81,8 @@ export function cosineSimilarity(a: number[], b: number[]): number {
   }
   return dot / Math.sqrt(normA * normB);
 }
+
+/** @deprecated Use structuralSimilarity() instead. Kept for backward compatibility. */
+export const cosineSimilarity = structuralSimilarity;
 
 export const EMBEDDING_DIMS = DEFAULT_DIMS;

@@ -3,7 +3,7 @@ import path from "node:path";
 import { encode as encodeGPT } from "gpt-tokenizer";
 
 import { DuckDBClient } from "../shared/duckdb.js";
-import { cosineSimilarity, generateEmbedding } from "../shared/embedding.js";
+import { generateEmbedding, structuralSimilarity } from "../shared/embedding.js";
 
 import { ServerContext } from "./context.js";
 import { coerceProfileName, loadScoringProfile } from "./scoring.js";
@@ -312,25 +312,25 @@ function parseEmbedding(vectorJson: string | null, vectorDims: number | null): n
   }
 }
 
-function applySemanticScores(
+function applyStructuralScores(
   candidates: CandidateInfo[],
   queryEmbedding: number[] | null,
-  semanticWeight: number
+  structuralWeight: number
 ): void {
-  if (!queryEmbedding || semanticWeight <= 0) {
+  if (!queryEmbedding || structuralWeight <= 0) {
     return;
   }
   for (const candidate of candidates) {
     if (!candidate.embedding) {
       continue;
     }
-    const similarity = cosineSimilarity(queryEmbedding, candidate.embedding);
+    const similarity = structuralSimilarity(queryEmbedding, candidate.embedding);
     if (!Number.isFinite(similarity) || similarity <= 0) {
       continue;
     }
     candidate.semanticSimilarity = similarity;
-    candidate.score += semanticWeight * similarity;
-    candidate.reasons.add(`semantic:${similarity.toFixed(2)}`);
+    candidate.score += structuralWeight * similarity;
+    candidate.reasons.add(`structural:${similarity.toFixed(2)}`);
   }
 }
 
@@ -431,19 +431,6 @@ function buildSnippetPreview(content: string, startLine: number, endLine: number
 }
 
 /**
- * トークン数を推定（行ベース）
- * 後方互換性のため、コンテンツなしでも動作する
- *
- * @param startLine - 開始行
- * @param endLine - 終了行
- * @returns 推定トークン数
- */
-function estimateTokens(startLine: number, endLine: number): number {
-  const lineCount = Math.max(1, endLine - startLine + 1);
-  return lineCount * 4;
-}
-
-/**
  * トークン数を推定（コンテンツベース）
  * 実際のGPTトークナイザーを使用して正確にカウント
  *
@@ -463,7 +450,7 @@ function estimateTokensFromContent(content: string, startLine: number, endLine: 
     // 実際のGPTトークナイザーを使用
     return encodeGPT(text).length;
   } catch (error) {
-    // フォールバック: 文字ベース推定
+    // フォールバック: 平均的な英語テキストで4文字 ≈ 1トークン
     console.warn("Token encoding failed, using character-based fallback", error);
     return Math.max(1, Math.ceil(text.length / 4));
   }
@@ -850,7 +837,7 @@ export async function contextBundle(
     return { context: [], tokens_estimate: 0 };
   }
 
-  applySemanticScores(materializedCandidates, queryEmbedding, weights.semantic);
+  applyStructuralScores(materializedCandidates, queryEmbedding, weights.structural);
 
   const sortedCandidates = materializedCandidates
     .sort((a, b) => {
@@ -926,8 +913,9 @@ export async function contextBundle(
     if (candidate && candidate.content) {
       return acc + estimateTokensFromContent(candidate.content, item.range[0], item.range[1]);
     }
-    // フォールバック: 行ベース推定
-    return acc + estimateTokens(item.range[0], item.range[1]);
+    // フォールバック: 行ベース推定（コンテンツが利用不可の場合）
+    const lineCount = Math.max(1, item.range[1] - item.range[0] + 1);
+    return acc + lineCount * 4;
   }, 0);
 
   return { context: results, tokens_estimate: tokensEstimate };
@@ -973,11 +961,11 @@ export async function semanticRerank(
 
   const profileName = coerceProfileName(params.profile ?? null);
   const weights = loadScoringProfile(profileName);
-  const semanticWeight = weights.semantic;
+  const structuralWeight = weights.structural;
   const queryEmbedding = generateEmbedding(text)?.values ?? null;
 
   let embeddingMap = new Map<string, number[]>();
-  if (queryEmbedding && semanticWeight > 0) {
+  if (queryEmbedding && structuralWeight > 0) {
     const paths = uniqueCandidates.map((candidate) => candidate.path);
     embeddingMap = await fetchEmbeddingMap(context.db, context.repoId, paths);
   }
@@ -986,16 +974,16 @@ export async function semanticRerank(
     const base =
       typeof candidate.score === "number" && Number.isFinite(candidate.score) ? candidate.score : 0;
     let semantic = 0;
-    if (queryEmbedding && semanticWeight > 0) {
+    if (queryEmbedding && structuralWeight > 0) {
       const embedding = embeddingMap.get(candidate.path);
       if (embedding) {
-        const similarity = cosineSimilarity(queryEmbedding, embedding);
+        const similarity = structuralSimilarity(queryEmbedding, embedding);
         if (Number.isFinite(similarity) && similarity > 0) {
           semantic = similarity;
         }
       }
     }
-    const combined = base + semanticWeight * semantic;
+    const combined = base + structuralWeight * semantic;
     return {
       path: candidate.path,
       base,

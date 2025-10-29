@@ -17,14 +17,38 @@ export interface ScoringWeights {
   dependency: number;
   /** 近接ファイル（同一ディレクトリ）の重み */
   proximity: number;
-  /** セマンティック類似度の重み */
-  semantic: number;
+  /** 構造的類似度の重み（LSHベース、セマンティック埋め込みではない） */
+  structural: number;
 }
 
 export type ScoringProfileName = "default" | "bugfix" | "testfail" | "typeerror" | "feature";
 
 // プロファイルキャッシュ（起動時に一度だけロード）
 let profilesCache: Record<ScoringProfileName, ScoringWeights> | null = null;
+
+/**
+ * スコアリングウェイトの妥当性を検証
+ * すべてのウェイトが非負の有限数であることを確認
+ */
+function validateWeights(weights: unknown, profileName: string): ScoringWeights {
+  if (typeof weights !== "object" || weights === null) {
+    throw new Error(`Profile '${profileName}' must be an object`);
+  }
+
+  const required = ["textMatch", "editingPath", "dependency", "proximity", "structural"];
+  const obj = weights as Record<string, unknown>;
+
+  for (const key of required) {
+    const value = obj[key];
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+      throw new Error(
+        `Profile '${profileName}' has invalid ${key}: ${String(value)}. Must be a non-negative finite number.`
+      );
+    }
+  }
+
+  return weights as ScoringWeights;
+}
 
 function loadProfilesFromConfig(): Record<ScoringProfileName, ScoringWeights> {
   if (profilesCache) {
@@ -40,7 +64,7 @@ function loadProfilesFromConfig(): Record<ScoringProfileName, ScoringWeights> {
     const configContent = readFileSync(configPath, "utf-8");
     const parsed = parseYAML(configContent) as Record<string, ScoringWeights>;
 
-    // 必須プロファイルの検証
+    // 必須プロファイルの検証とウェイトのバリデーション
     const requiredProfiles: ScoringProfileName[] = [
       "default",
       "bugfix",
@@ -48,13 +72,15 @@ function loadProfilesFromConfig(): Record<ScoringProfileName, ScoringWeights> {
       "typeerror",
       "feature",
     ];
+    const validated: Partial<Record<ScoringProfileName, ScoringWeights>> = {};
     for (const profile of requiredProfiles) {
       if (!parsed[profile]) {
         throw new Error(`Missing required scoring profile: ${profile}`);
       }
+      validated[profile] = validateWeights(parsed[profile], profile);
     }
 
-    profilesCache = parsed as Record<ScoringProfileName, ScoringWeights>;
+    profilesCache = validated as Record<ScoringProfileName, ScoringWeights>;
     return profilesCache;
   } catch (error) {
     console.warn("Failed to load scoring profiles from config, using fallback defaults", error);
@@ -65,29 +91,35 @@ function loadProfilesFromConfig(): Record<ScoringProfileName, ScoringWeights> {
         editingPath: 2.0,
         dependency: 0.5,
         proximity: 0.25,
-        semantic: 0.75,
+        structural: 0.75,
       },
-      bugfix: { textMatch: 1.0, editingPath: 1.8, dependency: 0.7, proximity: 0.35, semantic: 0.9 },
+      bugfix: {
+        textMatch: 1.0,
+        editingPath: 1.8,
+        dependency: 0.7,
+        proximity: 0.35,
+        structural: 0.9,
+      },
       testfail: {
         textMatch: 1.0,
         editingPath: 1.6,
         dependency: 0.85,
         proximity: 0.3,
-        semantic: 0.8,
+        structural: 0.8,
       },
       typeerror: {
         textMatch: 1.0,
         editingPath: 1.4,
         dependency: 0.6,
         proximity: 0.4,
-        semantic: 0.6,
+        structural: 0.6,
       },
       feature: {
         textMatch: 1.0,
         editingPath: 1.5,
         dependency: 0.45,
         proximity: 0.5,
-        semantic: 0.7,
+        structural: 0.7,
       },
     };
     return profilesCache;

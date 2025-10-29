@@ -72,7 +72,7 @@ describe("context.bundle", () => {
     const editing = bundle.context.find((item) => item.path === "src/auth/token.ts");
     expect(editing).toBeDefined();
     expect(editing?.why).toContain("artifact:editing_path");
-    expect(editing?.why.some((reason) => reason.startsWith("semantic:"))).toBe(true);
+    expect(editing?.why.some((reason) => reason.startsWith("structural:"))).toBe(true);
 
     const helper = bundle.context.find((item) => item.path === "src/utils/helper.ts");
     expect(helper).toBeDefined();
