@@ -78,40 +78,39 @@ function isBinaryBuffer(buffer: Buffer): boolean {
   return decoded.includes("\uFFFD");
 }
 
+/**
+ * Ensures a repository record exists in the database, creating it if necessary.
+ * Uses ON CONFLICT with auto-increment to prevent race conditions in concurrent scenarios.
+ *
+ * @param db - Database client instance
+ * @param repoRoot - Absolute path to the repository root
+ * @param defaultBranch - Default branch name (e.g., "main", "master"), or null if unknown
+ * @returns The repository ID (auto-generated on first insert, reused thereafter)
+ */
 async function ensureRepo(
   db: DuckDBClient,
   repoRoot: string,
   defaultBranch: string | null
 ): Promise<number> {
-  // Check if repo exists first
-  const existing = await db.all<{ id: number }>("SELECT id FROM repo WHERE root = ?", [repoRoot]);
-  if (existing.length > 0) {
-    const repoId = existing[0].id;
-    // Update default_branch if provided
-    if (defaultBranch) {
-      await db.run("UPDATE repo SET default_branch = ? WHERE id = ?", [defaultBranch, repoId]);
-    }
-    return repoId;
-  }
-
-  // Generate next ID atomically using a single query
-  // This approach minimizes the race window by using a CTE
-  const result = await db.all<{ id: number }>(
-    `
-    WITH next_id AS (
-      SELECT COALESCE(MAX(id), 0) + 1 AS id FROM repo
-    )
-    INSERT INTO repo (id, root, default_branch, indexed_at)
-    SELECT next_id.id, ?, ?, CURRENT_TIMESTAMP FROM next_id
-    RETURNING id
-    `,
+  // Atomically insert or update using ON CONFLICT to leverage auto-increment
+  // This eliminates the TOCTOU race condition present in manual ID generation
+  await db.run(
+    `INSERT INTO repo (root, default_branch, indexed_at)
+     VALUES (?, ?, CURRENT_TIMESTAMP)
+     ON CONFLICT(root) DO UPDATE SET
+       default_branch = COALESCE(excluded.default_branch, repo.default_branch)`,
     [repoRoot, defaultBranch]
   );
 
-  if (result.length === 0) {
-    throw new Error("Failed to create repository record. Check database constraints.");
+  // Fetch the ID of the existing or newly created repo
+  const rows = await db.all<{ id: number }>("SELECT id FROM repo WHERE root = ?", [repoRoot]);
+
+  if (rows.length === 0) {
+    throw new Error(
+      "Failed to create or find repository record. Check database constraints and schema."
+    );
   }
-  return result[0].id;
+  return rows[0].id;
 }
 
 async function persistBlobs(db: DuckDBClient, blobs: Map<string, BlobRecord>): Promise<void> {
@@ -358,7 +357,7 @@ async function scanFiles(
       // Check file size before reading to prevent memory exhaustion
       if (fileStat.size > MAX_FILE_BYTES) {
         console.warn(
-          `Skipped ${relativePath} as its size (${fileStat.size} bytes) exceeds the ${MAX_FILE_BYTES} byte limit. Configure MAX_FILE_BYTES to adjust this threshold.`
+          `File ${relativePath} exceeds size limit (${fileStat.size} bytes). Increase MAX_FILE_BYTES constant to include it.`
         );
         continue;
       }
@@ -396,7 +395,7 @@ async function scanFiles(
       });
     } catch (error) {
       console.warn(
-        `Skipped ${relativePath} due to read error. Resolve filesystem permissions or remove the file to include it.`
+        `Cannot read ${relativePath} due to filesystem error. Fix file permissions or remove the file.`
       );
       console.warn(error);
     }

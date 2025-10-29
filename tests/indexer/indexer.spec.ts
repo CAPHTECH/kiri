@@ -1,6 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setTimeout } from "node:timers/promises";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -142,5 +143,42 @@ describe("runIndexer", () => {
     expect(dependencyRows).toEqual([
       { src_path: "src/main.ts", dst_kind: "path", dst: "src/util.ts", rel: "import" },
     ]);
+  });
+
+  it("handles concurrent repo creation safely", async () => {
+    const repo = await createTempRepo({
+      "src/test.ts": "export const test = 'concurrent';",
+    });
+    cleanupTargets.push({ dispose: repo.cleanup });
+
+    const dbDir = await mkdtemp(join(tmpdir(), "kiri-db-"));
+    const dbPath = join(dbDir, "index.duckdb");
+    cleanupTargets.push({
+      dispose: async () => await rm(dbDir, { recursive: true, force: true }),
+    });
+
+    // Run three indexers concurrently for the same repo
+    const results = await Promise.allSettled([
+      runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true }),
+      runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true }),
+      runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true }),
+    ]);
+
+    // All should succeed without constraint violations
+    const successCount = results.filter((r) => r.status === "fulfilled").length;
+    expect(successCount).toBe(3);
+
+    // Allow database locks to clear before opening a new connection
+    await setTimeout(100);
+
+    // Verify only one repo record exists
+    const db = await DuckDBClient.connect({ databasePath: dbPath });
+    try {
+      const repoRows = await db.all<{ id: number; root: string }>("SELECT id, root FROM repo");
+      expect(repoRows).toHaveLength(1);
+      expect(repoRows[0].root).toBe(repo.path);
+    } finally {
+      await db.close();
+    }
   });
 });

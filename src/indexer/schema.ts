@@ -2,8 +2,12 @@ import { DuckDBClient } from "../shared/duckdb";
 
 export async function ensureBaseSchema(db: DuckDBClient): Promise<void> {
   await db.run(`
+    CREATE SEQUENCE IF NOT EXISTS repo_id_seq START 1
+  `);
+
+  await db.run(`
     CREATE TABLE IF NOT EXISTS repo (
-      id INTEGER PRIMARY KEY,
+      id INTEGER PRIMARY KEY DEFAULT nextval('repo_id_seq'),
       root TEXT NOT NULL UNIQUE,
       default_branch TEXT,
       indexed_at TIMESTAMP
