@@ -2,6 +2,8 @@
 
 ## 提供ツール一覧
 
+サーバーは MCP 標準エンドポイント `initialize` / `tools/list` を実装しており、AI エージェントは起動直後に能力を自動検出できます。
+
 - `files.search(query, lang?, ext?, path_prefix?, limit=50)`
 - `symbols.find(name, kind?, path_hint?, limit=50)`
 - `deps.closure(paths[], direction="out"|"in", depth=2)`
@@ -53,13 +55,17 @@
 
 ## Codex CLI 設定例
 
+KIRI は CLI バイナリ `kiri` を通じて MCP 標準の `stdio` トランスポートで起動するのが既定です。`--repo` と `--db` のみ渡せば、`initialize` / `tools/list` で自動検出されます。
+
 ```json
 {
   "mcpServers": {
     "kiri": {
-      "command": "/usr/local/bin/kiri-mcp",
-      "args": ["--db", "/abs/path/index.duckdb", "--repo", "/abs/path/repo"]
+      "command": "kiri",
+      "args": ["--repo", "/abs/path/repo", "--db", "/abs/path/index.duckdb"]
     }
   }
 }
 ```
+
+> 補足: 旧来の HTTP モードを継続利用する場合は `kiri --port 8765 ...` のように `--port` を指定してください（この場合も `/metrics` で監視指標が取得できます）。

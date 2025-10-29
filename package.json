@@ -1,10 +1,17 @@
 {
-  "name": "kiri",
+  "name": "kiri-mcp-server",
   "version": "0.1.0",
-  "private": true,
   "description": "KIRI context extraction platform",
   "type": "module",
   "packageManager": "pnpm@9.0.0",
+  "bin": {
+    "kiri": "./dist/server/main.js"
+  },
+  "files": [
+    "dist/",
+    "config/",
+    "sql/"
+  ],
   "scripts": {
     "bootstrap": "pnpm install",
     "build": "tsc --project tsconfig.build.json",
