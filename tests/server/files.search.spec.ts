@@ -52,7 +52,8 @@ describe("files.search", () => {
 
   it("returns matches for multi-word queries with OR logic", async () => {
     const repo = await createTempRepo({
-      "src/rpc.ts": "export function createRpcHandler() {\n  return tools/call implementation;\n}\n",
+      "src/rpc.ts":
+        "export function createRpcHandler() {\n  return tools/call implementation;\n}\n",
       "src/handlers.ts": "export function filesSearch() {\n  const implementation = 'query';\n}\n",
       "docs/api.md": "The tools system uses call methods for implementation.\n",
     });

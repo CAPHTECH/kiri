@@ -465,7 +465,7 @@ function estimateTokensFromContent(content: string, startLine: number, endLine: 
  */
 function splitQueryWords(query: string): string[] {
   // 空白、スラッシュ、ハイフン、アンダースコアで分割
-  const words = query.split(/[\s\/\-_]+/).filter((w) => w.length > 2);
+  const words = query.split(/[\s/\-_]+/).filter((w) => w.length > 2);
   return words.length > 0 ? words : [query]; // 全て除外された場合は元のクエリを使用
 }
 

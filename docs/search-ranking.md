@@ -5,7 +5,7 @@
 - **一次候補**は文字列一致・シンボル名・依存・パス近接・直近変更など決定的特徴で高速抽出する。
 - **FTSハイブリッド検索**: DuckDB FTS拡張が利用可能な場合はBM25ランキングを使用、利用不可の場合はILIKEフォールバックで動作する（Degrade-First Architecture）
 - **複数単語クエリ**: 空白・スラッシュ・ハイフン・アンダースコアで単語分割し、OR検索ロジックで柔軟にマッチする
-- **ファイルタイプブースト**: 実装ファイル（src/*.ts）を優遇し、ドキュメントファイル（*.md）を減点することで、検索精度を向上
+- **ファイルタイプブースト**: 実装ファイル（src/_.ts）を優遇し、ドキュメントファイル（_.md）を減点することで、検索精度を向上
 - **二次再ランキング**ではオプションの VSS を利用し、概念的な近さを加点する。
 - **目的別プロファイル**（bugfix/testfail/refactor/typeerror/feature）で重み付けを切り替える。
 
@@ -14,44 +14,51 @@
 `boost_profile` パラメータで3つのモードを選択可能:
 
 #### boost_profile: "default" (デフォルト)
+
 実装ファイルを優遇し、ドキュメントを減点
 
 **files.search:**
+
 - `src/*.ts`, `src/*.js`: スコア ×1.5（実装ファイルを優遇）
 - `tests/*.ts`: スコア ×1.2（テストファイルを軽度優遇）
 - `*.md`, `*.yaml`, `*.yml`: スコア ×0.5（ドキュメントを減点）
 
 **context.bundle:**
+
 - `src/*.ts`: スコア +0.5（実装ファイルに追加ボーナス）
 - `*.md`, `*.yaml`, `*.yml`: スコア -0.3（ドキュメントにペナルティ）
 
 #### boost_profile: "docs"
+
 ドキュメントを優遇し、実装ファイルを軽度減点
 
 **files.search:**
+
 - `*.md`, `*.yaml`, `*.yml`: スコア ×1.5（ドキュメントを優遇）
 - `src/*.ts`, `src/*.js`: スコア ×0.7（実装ファイルを軽度減点）
 
 **context.bundle:**
+
 - `*.md`, `*.yaml`, `*.yml`: スコア +0.5（ドキュメントに追加ボーナス）
 - `src/*.ts`: スコア -0.2（実装ファイルに軽度ペナルティ）
 
 #### boost_profile: "none"
+
 ファイルタイプによるブースト無効、純粋なBM25スコアのみ
 
 ### 使用例
 
 ```typescript
 // 実装ファイルを探す（デフォルト）
-filesSearch({ query: "tryCreateFTSIndex" })
+filesSearch({ query: "tryCreateFTSIndex" });
 // → src/*.ts が上位に
 
 // ドキュメントを探す
-filesSearch({ query: "setup instructions", boost_profile: "docs" })
+filesSearch({ query: "setup instructions", boost_profile: "docs" });
 // → *.md が上位に
 
 // 純粋なBM25スコア
-filesSearch({ query: "authentication", boost_profile: "none" })
+filesSearch({ query: "authentication", boost_profile: "none" });
 // → ファイルタイプ関係なく、BM25スコアのみ
 ```
 
@@ -76,6 +83,7 @@ score = w_sem  * semantic_sim          -- VSS 1 - distance（無効可）
 - **FTSハイブリッド検索（複数単語対応）**
 
 FTS拡張が利用可能な場合（BM25ランキング）:
+
 ```sql
 SELECT f.path, f.lang, f.ext, b.content, fts.score
 FROM file f
@@ -91,6 +99,7 @@ LIMIT ?
 ```
 
 FTS拡張が利用不可の場合（ILIKEフォールバック、複数単語OR検索）:
+
 ```sql
 SELECT f.path, f.lang, f.ext, b.content
 FROM file f
@@ -125,6 +134,7 @@ LIMIT 100;
 - **依存クロージャ（双方向対応、深さ2）**
 
 Outbound（このファイルが何を使用しているか）:
+
 ```sql
 WITH RECURSIVE walk(step, path) AS (
   SELECT 0, ?
@@ -137,6 +147,7 @@ SELECT DISTINCT path FROM walk;
 ```
 
 Inbound（どのファイルがこれを使用しているか）:
+
 ```sql
 WITH RECURSIVE walk(step, path) AS (
   SELECT 0, ?

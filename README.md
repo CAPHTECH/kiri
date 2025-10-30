@@ -90,17 +90,18 @@ node dist/src/server/main.js --repo . --db var/index.duckdb --port 8765 --watch
 
 KIRI provides 5 MCP tools for code exploration:
 
-| Tool                | Description                                                                 |
-| ------------------- | --------------------------------------------------------------------------- |
-| **context.bundle**  | Extract relevant code context based on task goals                           |
-| **semantic.rerank** | Re-rank candidates by semantic similarity                                   |
-| **files.search**    | Full-text search with multi-word queries (FTS/BM25 or ILIKE fallback)      |
-| **snippets.get**    | Retrieve code snippets with symbol boundaries                               |
-| **deps.closure**    | Get dependency graph neighborhood (outbound/inbound)                        |
+| Tool                | Description                                                           |
+| ------------------- | --------------------------------------------------------------------- |
+| **context.bundle**  | Extract relevant code context based on task goals                     |
+| **semantic.rerank** | Re-rank candidates by semantic similarity                             |
+| **files.search**    | Full-text search with multi-word queries (FTS/BM25 or ILIKE fallback) |
+| **snippets.get**    | Retrieve code snippets with symbol boundaries                         |
+| **deps.closure**    | Get dependency graph neighborhood (outbound/inbound)                  |
 
 ### Search Query Syntax
 
 **files.search** supports multi-word queries automatically:
+
 - `"tools call implementation"` → Finds files containing ANY of these words (OR logic)
 - `"MCP-server-handler"` → Splits on hyphens and searches for each part
 - Single words work as expected: `"DuckDB"` → Exact match
@@ -111,19 +112,19 @@ When DuckDB's FTS extension is available, searches use BM25 ranking for better r
 
 Control search ranking behavior with the `boost_profile` parameter:
 
-- **`"default"`** (default): Prioritizes implementation files (src/*.ts) over documentation
-- **`"docs"`**: Prioritizes documentation files (*.md) over implementation
+- **`"default"`** (default): Prioritizes implementation files (src/\*.ts) over documentation
+- **`"docs"`**: Prioritizes documentation files (\*.md) over implementation
 - **`"none"`**: Pure BM25 scoring without file type adjustments
 
 ```javascript
 // Find implementation files (default behavior)
-mcp__kiri__files_search({ query: "filesSearch implementation" })
+mcp__kiri__files_search({ query: "filesSearch implementation" });
 
 // Find documentation
-mcp__kiri__files_search({ query: "setup guide", boost_profile: "docs" })
+mcp__kiri__files_search({ query: "setup guide", boost_profile: "docs" });
 
 // Pure BM25 ranking
-mcp__kiri__files_search({ query: "authentication", boost_profile: "none" })
+mcp__kiri__files_search({ query: "authentication", boost_profile: "none" });
 ```
 
 ## 🔧 Configuration

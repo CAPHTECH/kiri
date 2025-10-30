@@ -503,7 +503,6 @@ export function createRpcHandler(
   return async (payload: JsonRpcRequest): Promise<RpcHandleResult> => {
     try {
       let result: unknown;
-      let isMcpToolCall = false;
 
       switch (payload.method) {
         case "initialize": {
@@ -517,7 +516,6 @@ export function createRpcHandler(
         }
         case "tools/call": {
           // MCP standard tool invocation
-          isMcpToolCall = true;
           const paramsRecord = payload.params as Record<string, unknown> | null | undefined;
           if (!paramsRecord || typeof paramsRecord !== "object") {
             return {
@@ -586,23 +584,53 @@ export function createRpcHandler(
         }
         // Legacy direct method invocation (backward compatibility)
         case "context.bundle": {
-          result = await executeToolByName("context.bundle", payload.params, context, degrade, allowDegrade);
+          result = await executeToolByName(
+            "context.bundle",
+            payload.params,
+            context,
+            degrade,
+            allowDegrade
+          );
           break;
         }
         case "semantic.rerank": {
-          result = await executeToolByName("semantic.rerank", payload.params, context, degrade, allowDegrade);
+          result = await executeToolByName(
+            "semantic.rerank",
+            payload.params,
+            context,
+            degrade,
+            allowDegrade
+          );
           break;
         }
         case "files.search": {
-          result = await executeToolByName("files.search", payload.params, context, degrade, allowDegrade);
+          result = await executeToolByName(
+            "files.search",
+            payload.params,
+            context,
+            degrade,
+            allowDegrade
+          );
           break;
         }
         case "snippets.get": {
-          result = await executeToolByName("snippets.get", payload.params, context, degrade, allowDegrade);
+          result = await executeToolByName(
+            "snippets.get",
+            payload.params,
+            context,
+            degrade,
+            allowDegrade
+          );
           break;
         }
         case "deps.closure": {
-          result = await executeToolByName("deps.closure", payload.params, context, degrade, allowDegrade);
+          result = await executeToolByName(
+            "deps.closure",
+            payload.params,
+            context,
+            degrade,
+            allowDegrade
+          );
           break;
         }
         default: {
