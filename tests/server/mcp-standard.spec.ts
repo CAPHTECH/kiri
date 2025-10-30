@@ -160,7 +160,9 @@ describe("MCP標準エンドポイント", () => {
     expect(content[0]).toHaveProperty("text");
 
     // Parse the JSON result and verify it contains search results
-    const searchResults = JSON.parse(content[0].text);
+    const firstContent = content[0];
+    if (!firstContent) throw new Error("Content array is empty");
+    const searchResults = JSON.parse(firstContent.text);
     expect(Array.isArray(searchResults)).toBe(true);
     expect(searchResults.length).toBeGreaterThan(0);
   });
@@ -211,7 +213,9 @@ describe("MCP標準エンドポイント", () => {
 
     const content = result.content as Array<{ type: string; text: string }>;
     expect(Array.isArray(content)).toBe(true);
-    expect(content[0].text).toContain("Unknown tool");
+    const firstContent = content[0];
+    if (!firstContent) throw new Error("Content array is empty");
+    expect(firstContent.text).toContain("Unknown tool");
   });
 
   it("tools/call が無効なパラメータで JSON-RPC エラーを返す", async () => {

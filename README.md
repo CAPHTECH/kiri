@@ -18,6 +18,17 @@
 - **🔌 MCP Integration**: JSON-RPC 2.0 over stdio/HTTP
 - **👁️ Watch Mode**: Automatic re-indexing on file changes with debouncing
 
+## 📝 Supported Languages
+
+KIRI currently supports AST-based symbol extraction for:
+
+| Language       | Extensions    | Symbol Types                                                                   | Parser                  |
+| -------------- | ------------- | ------------------------------------------------------------------------------ | ----------------------- |
+| **TypeScript** | `.ts`, `.tsx` | `class`, `interface`, `enum`, `function`, `method`                             | TypeScript Compiler API |
+| **Swift**      | `.swift`      | `class`, `struct`, `protocol`, `enum`, `extension`, `func`, `init`, `property` | tree-sitter-swift       |
+
+Other languages are detected and indexed but use full-file snippets instead of symbol-level extraction. Support for additional languages (Rust, Go, Python, etc.) is planned.
+
 ## 🚀 Quick Start
 
 ### Installation
