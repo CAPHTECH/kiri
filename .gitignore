@@ -5,3 +5,4 @@ var/
 .env*
 .DS_Store
 coverage/
+.claude/settings.local.json

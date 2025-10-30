@@ -10,6 +10,7 @@ import { analyzeSource, buildFallbackSnippet } from "./codeintel.js";
 import { getDefaultBranch, getHeadCommit, gitLsFiles } from "./git.js";
 import { detectLanguage } from "./language.js";
 import { ensureBaseSchema } from "./schema.js";
+import { IndexWatcher } from "./watch.js";
 
 interface IndexerOptions {
   repoRoot: string;
@@ -546,15 +547,41 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
   const databasePath = resolve(parseArg("--db") ?? "var/index.duckdb");
   const full = process.argv.includes("--full");
   const since = parseArg("--since");
+  const watch = process.argv.includes("--watch");
+  const debounceMs = parseInt(parseArg("--debounce") ?? "500", 10);
 
   const options: IndexerOptions = { repoRoot, databasePath, full: full || !since };
   if (since) {
     options.since = since;
   }
 
-  runIndexer(options).catch((error) => {
-    console.error("Failed to index repository. Retry after resolving the logged error.");
-    console.error(error);
-    process.exitCode = 1;
-  });
+  // Run initial indexing
+  runIndexer(options)
+    .then(async () => {
+      if (watch) {
+        // Start watch mode after initial indexing completes
+        const abortController = new AbortController();
+        const watcher = new IndexWatcher({
+          repoRoot,
+          databasePath,
+          debounceMs,
+          signal: abortController.signal,
+        });
+
+        // Handle graceful shutdown on SIGINT/SIGTERM
+        const shutdownHandler = () => {
+          process.stderr.write("\n🛑 Received shutdown signal. Stopping watch mode...\n");
+          abortController.abort();
+        };
+        process.on("SIGINT", shutdownHandler);
+        process.on("SIGTERM", shutdownHandler);
+
+        await watcher.start();
+      }
+    })
+    .catch((error) => {
+      console.error("Failed to index repository. Retry after resolving the logged error.");
+      console.error(error);
+      process.exitCode = 1;
+    });
 }

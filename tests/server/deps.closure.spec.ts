@@ -63,4 +63,96 @@ describe("deps.closure", () => {
     const edges = closure.edges.map((edge) => `${edge.from}->${edge.to}:${edge.kind}`);
     expect(edges).toEqual(["src/a.ts->src/b.ts:path", "src/b.ts->src/c.ts:path"]);
   });
+
+  it("returns inbound dependency closure (reverse dependencies)", async () => {
+    const repo = await createTempRepo({
+      "src/a.ts": [
+        "import { b } from './b.js';",
+        "",
+        "export function a() {",
+        "  return b();",
+        "}",
+      ].join("\n"),
+      "src/b.ts": [
+        "import { c } from './c.js';",
+        "",
+        "export function b() {",
+        "  return c();",
+        "}",
+      ].join("\n"),
+      "src/c.ts": ["export function c() {", "  return 'c';", "}"].join("\n"),
+    });
+    cleanupTargets.push({ dispose: repo.cleanup });
+
+    const dbDir = await mkdtemp(join(tmpdir(), "kiri-inbound-"));
+    const dbPath = join(dbDir, "index.duckdb");
+    cleanupTargets.push({ dispose: async () => await rm(dbDir, { recursive: true, force: true }) });
+
+    await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+    const db = await DuckDBClient.connect({ databasePath: dbPath });
+    cleanupTargets.push({ dispose: async () => await db.close() });
+
+    const repoId = await resolveRepoId(db, repo.path);
+    const context: ServerContext = { db, repoId };
+
+    // src/c.ts を使用しているファイルを探す (inbound)
+    const closure = await depsClosure(context, {
+      path: "src/c.ts",
+      direction: "inbound",
+      max_depth: 5,
+    });
+
+    expect(closure.root).toBe("src/c.ts");
+    expect(closure.direction).toBe("inbound");
+
+    // src/c.ts <- src/b.ts <- src/a.ts
+    const nodes = closure.nodes.map((node) => `${node.kind}:${node.target}`);
+    expect(nodes).toEqual(["path:src/c.ts", "path:src/b.ts", "path:src/a.ts"]);
+
+    const edges = closure.edges.map((edge) => `${edge.from}->${edge.to}:${edge.kind}`);
+    expect(edges).toEqual(["src/b.ts->src/c.ts:path", "src/a.ts->src/b.ts:path"]);
+  });
+
+  it("handles files with no inbound dependencies", async () => {
+    const repo = await createTempRepo({
+      "src/a.ts": [
+        "import { b } from './b.js';",
+        "",
+        "export function a() {",
+        "  return b();",
+        "}",
+      ].join("\n"),
+      "src/b.ts": ["export function b() {", "  return 'b';", "}"].join("\n"),
+    });
+    cleanupTargets.push({ dispose: repo.cleanup });
+
+    const dbDir = await mkdtemp(join(tmpdir(), "kiri-no-inbound-"));
+    const dbPath = join(dbDir, "index.duckdb");
+    cleanupTargets.push({ dispose: async () => await rm(dbDir, { recursive: true, force: true }) });
+
+    await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+    const db = await DuckDBClient.connect({ databasePath: dbPath });
+    cleanupTargets.push({ dispose: async () => await db.close() });
+
+    const repoId = await resolveRepoId(db, repo.path);
+    const context: ServerContext = { db, repoId };
+
+    // src/a.ts はどのファイルからも使用されていない
+    const closure = await depsClosure(context, {
+      path: "src/a.ts",
+      direction: "inbound",
+      max_depth: 5,
+    });
+
+    expect(closure.root).toBe("src/a.ts");
+    expect(closure.direction).toBe("inbound");
+
+    // ルートファイルのみ
+    const nodes = closure.nodes.map((node) => `${node.kind}:${node.target}`);
+    expect(nodes).toEqual(["path:src/a.ts"]);
+
+    expect(closure.edges).toEqual([]);
+  });
 });

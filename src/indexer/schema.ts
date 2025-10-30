@@ -111,3 +111,29 @@ export async function ensureBaseSchema(db: DuckDBClient): Promise<void> {
     )
   `);
 }
+
+/**
+ * FTS（全文検索）インデックスの作成を試行
+ * @param db - DuckDBクライアント
+ * @returns FTS拡張が利用可能な場合true、それ以外false
+ */
+export async function tryCreateFTSIndex(db: DuckDBClient): Promise<boolean> {
+  try {
+    // FTS拡張の利用可能性を確認
+    await db.run(`
+      INSTALL fts;
+      LOAD fts;
+    `);
+
+    // blob.content に FTS インデックスを作成
+    await db.run(`
+      PRAGMA create_fts_index('blob', 'hash', 'content', overwrite=1);
+    `);
+
+    return true;
+  } catch (error) {
+    // FTS拡張が利用できない場合は警告を出してfalseを返す
+    console.warn("FTS extension unavailable, using ILIKE fallback:", error);
+    return false;
+  }
+}

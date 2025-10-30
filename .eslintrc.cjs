@@ -18,7 +18,10 @@ module.exports = {
         "alphabetize": { "order": "asc", "caseInsensitive": true },
         "newlines-between": "always"
       }
-    ]
+    ],
+    // TypeScript handles these checks, so we disable ESLint's JS-only version
+    "no-undef": "off",
+    "@typescript-eslint/no-unused-vars": ["error", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }]
   },
   ignorePatterns: ["dist", "var"]
 };

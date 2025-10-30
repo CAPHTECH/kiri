@@ -2,6 +2,12 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Use KIRI MCP Tools
+
+**This project has KIRI MCP server configured**. Use KIRI tools when exploring this codebase.
+
+---
+
 ## Project Overview
 
 **KIRI** is a context extraction platform for LLMs that indexes Git repositories into DuckDB and provides MCP (Model Context Protocol) tools for semantic code search. It extracts minimal, relevant code fragments (snippets) based on structure, history, and proximity to minimize LLM token usage.

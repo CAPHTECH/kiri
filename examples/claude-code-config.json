@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "kiri": {
+      "command": "kiri",
+      "args": ["--repo", ".", "--db", ".kiri/index.duckdb"]
+    }
+  }
+}

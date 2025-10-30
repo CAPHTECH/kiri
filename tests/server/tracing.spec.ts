@@ -1,4 +1,3 @@
-/* eslint-disable no-undef */
 import { describe, expect, it, vi } from "vitest";
 
 import { withSpan } from "../../src/server/observability/tracing.js";

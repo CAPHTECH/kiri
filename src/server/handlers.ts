@@ -13,6 +13,7 @@ export interface FilesSearchParams {
   ext?: string;
   path_prefix?: string;
   limit?: number;
+  boost_profile?: "default" | "docs" | "none";
 }
 
 export interface FilesSearchResult {
@@ -51,6 +52,7 @@ export interface ContextBundleParams {
   artifacts?: ContextBundleArtifacts;
   limit?: number;
   profile?: string;
+  boost_profile?: "default" | "docs" | "none";
 }
 
 export interface ContextBundleItem {
@@ -158,7 +160,7 @@ export interface DepsClosureEdge {
 
 export interface DepsClosureResult {
   root: string;
-  direction: "outbound";
+  direction: "outbound" | "inbound";
   nodes: DepsClosureNode[];
   edges: DepsClosureEdge[];
 }
@@ -168,6 +170,7 @@ interface FileRow {
   lang: string | null;
   ext: string | null;
   content: string | null;
+  score?: number; // FTS検索時のBM25スコア
 }
 
 interface FileWithBinaryRow extends FileRow {
@@ -455,6 +458,60 @@ function estimateTokensFromContent(content: string, startLine: number, endLine: 
   }
 }
 
+/**
+ * 複数単語クエリを単語分割してOR検索条件を構築
+ * @param query - 検索クエリ文字列
+ * @returns 単語配列（2文字以下を除外）
+ */
+function splitQueryWords(query: string): string[] {
+  // 空白、スラッシュ、ハイフン、アンダースコアで分割
+  const words = query.split(/[\s/\-_]+/).filter((w) => w.length > 2);
+  return words.length > 0 ? words : [query]; // 全て除外された場合は元のクエリを使用
+}
+
+/**
+ * ファイルタイプに基づいてスコアをブーストする
+ * プロファイルに応じて実装ファイルまたはドキュメントを優遇
+ * @param path - ファイルパス
+ * @param baseScore - 元のスコア
+ * @param profile - ブーストプロファイル ("default" | "docs" | "none")
+ * @returns ブースト適用後のスコア
+ */
+function applyFileTypeBoost(
+  path: string,
+  baseScore: number,
+  profile: "default" | "docs" | "none" = "default"
+): number {
+  // ブースト無効
+  if (profile === "none") {
+    return baseScore;
+  }
+
+  // ドキュメントモード: ドキュメントを優遇、実装ファイルを軽度減点
+  if (profile === "docs") {
+    if (path.endsWith(".md") || path.endsWith(".yaml") || path.endsWith(".yml")) {
+      return baseScore * 1.5; // ドキュメント優遇
+    }
+    if (path.startsWith("src/") && (path.endsWith(".ts") || path.endsWith(".js"))) {
+      return baseScore * 0.7; // 実装ファイル軽度減点
+    }
+    return baseScore;
+  }
+
+  // デフォルトモード: 実装ファイルを優遇、ドキュメントを減点
+  if (path.startsWith("src/") && (path.endsWith(".ts") || path.endsWith(".js"))) {
+    return baseScore * 1.5; // 実装ファイル優遇
+  }
+  if (path.startsWith("tests/") && path.endsWith(".ts")) {
+    return baseScore * 1.2; // テストファイル軽度優遇
+  }
+  if (path.endsWith(".md") || path.endsWith(".yaml") || path.endsWith(".yml")) {
+    return baseScore * 0.5; // ドキュメント減点
+  }
+
+  return baseScore;
+}
+
 export async function filesSearch(
   context: ServerContext,
   params: FilesSearchParams
@@ -468,48 +525,107 @@ export async function filesSearch(
   }
 
   const limit = normalizeLimit(params.limit);
-  const conditions = ["f.repo_id = ?", "b.content IS NOT NULL", "b.content ILIKE '%' || ? || '%'"];
-  const values: unknown[] = [repoId, query];
+  const hasFTS = context.features?.fts ?? false;
 
-  if (params.lang) {
-    conditions.push("COALESCE(f.lang, '') = ?");
-    values.push(params.lang);
+  let sql: string;
+  let values: unknown[];
+
+  if (hasFTS) {
+    // FTS拡張利用可能: fts_main_blob.match_bm25 を使用
+    const conditions = ["f.repo_id = ?"];
+    values = [repoId];
+
+    // 言語・拡張子フィルタ
+    if (params.lang) {
+      conditions.push("COALESCE(f.lang, '') = ?");
+      values.push(params.lang);
+    }
+    if (params.ext) {
+      conditions.push("COALESCE(f.ext, '') = ?");
+      values.push(params.ext);
+    }
+    if (params.path_prefix) {
+      conditions.push("f.path LIKE ?");
+      values.push(`${params.path_prefix}%`);
+    }
+
+    // FTS検索（BM25スコアリング）
+    sql = `
+      SELECT f.path, f.lang, f.ext, b.content, fts.score
+      FROM file f
+      JOIN blob b ON b.hash = f.blob_hash
+      JOIN (
+        SELECT hash, fts_main_blob.match_bm25(hash, ?) AS score
+        FROM blob
+        WHERE score IS NOT NULL
+      ) fts ON fts.hash = b.hash
+      WHERE ${conditions.join(" AND ")}
+      ORDER BY fts.score DESC
+      LIMIT ?
+    `;
+
+    values.unshift(query); // FTSクエリを先頭に追加
+    values.push(limit);
+  } else {
+    // FTS拡張利用不可: ILIKE検索（Phase 1の単語分割ロジック）
+    const conditions = ["f.repo_id = ?", "b.content IS NOT NULL"];
+    values = [repoId];
+
+    const words = splitQueryWords(query);
+    if (words.length === 1) {
+      conditions.push("b.content ILIKE '%' || ? || '%'");
+      values.push(query);
+    } else {
+      const wordConditions = words.map(() => "b.content ILIKE '%' || ? || '%'");
+      conditions.push(`(${wordConditions.join(" OR ")})`);
+      values.push(...words);
+    }
+
+    if (params.lang) {
+      conditions.push("COALESCE(f.lang, '') = ?");
+      values.push(params.lang);
+    }
+    if (params.ext) {
+      conditions.push("COALESCE(f.ext, '') = ?");
+      values.push(params.ext);
+    }
+    if (params.path_prefix) {
+      conditions.push("f.path LIKE ?");
+      values.push(`${params.path_prefix}%`);
+    }
+
+    sql = `
+      SELECT f.path, f.lang, f.ext, b.content
+      FROM file f
+      JOIN blob b ON b.hash = f.blob_hash
+      WHERE ${conditions.join(" AND ")}
+      ORDER BY f.path
+      LIMIT ?
+    `;
+
+    values.push(limit);
   }
-
-  if (params.ext) {
-    conditions.push("COALESCE(f.ext, '') = ?");
-    values.push(params.ext);
-  }
-
-  if (params.path_prefix) {
-    conditions.push("f.path LIKE ?");
-    values.push(`${params.path_prefix}%`);
-  }
-
-  const sql = `
-    SELECT f.path, f.lang, f.ext, b.content
-    FROM file f
-    JOIN blob b ON b.hash = f.blob_hash
-    WHERE ${conditions.join(" AND ")}
-    ORDER BY f.path
-    LIMIT ?
-  `;
-
-  values.push(limit);
 
   const rows = await db.all<FileRow>(sql, values);
 
-  return rows.map((row) => {
-    const { preview, line } = buildPreview(row.content ?? "", query);
-    return {
-      path: row.path,
-      preview,
-      matchLine: line,
-      lang: row.lang,
-      ext: row.ext,
-      score: 1.0,
-    };
-  });
+  const boostProfile = params.boost_profile ?? "default";
+
+  return rows
+    .map((row) => {
+      const { preview, line } = buildPreview(row.content ?? "", query);
+      const baseScore = row.score ?? 1.0; // FTS時はBM25スコア、ILIKE時は1.0
+      const boostedScore = applyFileTypeBoost(row.path, baseScore, boostProfile);
+
+      return {
+        path: row.path,
+        preview,
+        matchLine: line,
+        lang: row.lang,
+        ext: row.ext,
+        score: boostedScore,
+      };
+    })
+    .sort((a, b) => b.score - a.score); // スコアの高い順に再ソート
 }
 
 export async function snippetsGet(
@@ -694,6 +810,32 @@ export async function contextBundle(
       const candidate = ensureCandidate(candidates, row.path);
       candidate.score += weights.textMatch;
       candidate.reasons.add(`text:${keyword}`);
+
+      // ファイルタイプブーストを適用（boost_profileに応じて）
+      const boostProfile = params.boost_profile ?? "default";
+      if (boostProfile === "docs") {
+        // ドキュメントモード
+        if (row.path.endsWith(".md") || row.path.endsWith(".yaml") || row.path.endsWith(".yml")) {
+          candidate.score += 0.5; // ドキュメントに追加ボーナス
+          candidate.reasons.add("boost:doc-file");
+        }
+        if (row.path.startsWith("src/") && row.ext === ".ts") {
+          candidate.score -= 0.2; // 実装ファイルに軽度ペナルティ
+          candidate.reasons.add("penalty:impl-file");
+        }
+      } else if (boostProfile === "default") {
+        // デフォルトモード
+        if (row.path.startsWith("src/") && row.ext === ".ts") {
+          candidate.score += 0.5; // 実装ファイルに追加ボーナス
+          candidate.reasons.add("boost:impl-file");
+        }
+        if (row.path.endsWith(".md") || row.path.endsWith(".yaml") || row.path.endsWith(".yml")) {
+          candidate.score -= 0.3; // ドキュメントにペナルティ
+          candidate.reasons.add("penalty:doc-file");
+        }
+      }
+      // boostProfile === "none" の場合はブースト適用なし
+
       const { line } = buildPreview(row.content, keyword);
       candidate.matchLine =
         candidate.matchLine === null ? line : Math.min(candidate.matchLine, line);
@@ -1015,10 +1157,7 @@ export async function depsClosure(
     );
   }
 
-  if (params.direction && params.direction !== "outbound") {
-    throw new Error("deps.closure currently supports only outbound direction. Use outbound.");
-  }
-
+  const direction = params.direction ?? "outbound";
   const maxDepth = params.max_depth ?? 3;
   const includePackages = params.include_packages ?? true;
 
@@ -1031,12 +1170,25 @@ export async function depsClosure(
     [repoId]
   );
 
+  // outbound: このファイルが使用する依存関係
   const outbound = new Map<string, DependencyRow[]>();
+  // inbound: このファイルを使用しているファイル
+  const inbound = new Map<string, DependencyRow[]>();
+
   for (const row of dependencyRows) {
+    // outbound マップ構築
     if (!outbound.has(row.src_path)) {
       outbound.set(row.src_path, []);
     }
     outbound.get(row.src_path)?.push(row);
+
+    // inbound マップ構築（dst が path の場合のみ）
+    if (row.dst_kind === "path") {
+      if (!inbound.has(row.dst)) {
+        inbound.set(row.dst, []);
+      }
+      inbound.get(row.dst)?.push(row);
+    }
   }
 
   interface Pending {
@@ -1073,31 +1225,53 @@ export async function depsClosure(
     if (current.depth >= maxDepth) {
       continue;
     }
-    const edges = outbound.get(current.path) ?? [];
+
+    // direction に応じて使用するマップを選択
+    const edgeMap = direction === "inbound" ? inbound : outbound;
+    const edges = edgeMap.get(current.path) ?? [];
+
     for (const edge of edges) {
       const nextDepth = current.depth + 1;
-      if (edge.dst_kind === "path") {
+
+      if (direction === "inbound") {
+        // inbound: edge.src_path がこのファイルを使用している
         recordEdge({
-          from: current.path,
-          to: edge.dst,
+          from: edge.src_path,
+          to: current.path,
           kind: "path",
           rel: edge.rel,
           depth: nextDepth,
         });
-        recordNode({ kind: "path", target: edge.dst, depth: nextDepth });
-        if (!visitedPaths.has(edge.dst)) {
-          visitedPaths.add(edge.dst);
-          queue.push({ path: edge.dst, depth: nextDepth });
+        recordNode({ kind: "path", target: edge.src_path, depth: nextDepth });
+        if (!visitedPaths.has(edge.src_path)) {
+          visitedPaths.add(edge.src_path);
+          queue.push({ path: edge.src_path, depth: nextDepth });
         }
-      } else if (edge.dst_kind === "package" && includePackages) {
-        recordEdge({
-          from: current.path,
-          to: edge.dst,
-          kind: "package",
-          rel: edge.rel,
-          depth: nextDepth,
-        });
-        recordNode({ kind: "package", target: edge.dst, depth: nextDepth });
+      } else {
+        // outbound: このファイルが edge.dst を使用している
+        if (edge.dst_kind === "path") {
+          recordEdge({
+            from: current.path,
+            to: edge.dst,
+            kind: "path",
+            rel: edge.rel,
+            depth: nextDepth,
+          });
+          recordNode({ kind: "path", target: edge.dst, depth: nextDepth });
+          if (!visitedPaths.has(edge.dst)) {
+            visitedPaths.add(edge.dst);
+            queue.push({ path: edge.dst, depth: nextDepth });
+          }
+        } else if (edge.dst_kind === "package" && includePackages) {
+          recordEdge({
+            from: current.path,
+            to: edge.dst,
+            kind: "package",
+            rel: edge.rel,
+            depth: nextDepth,
+          });
+          recordNode({ kind: "package", target: edge.dst, depth: nextDepth });
+        }
       }
     }
   }
@@ -1122,7 +1296,7 @@ export async function depsClosure(
 
   return {
     root: params.path,
-    direction: "outbound",
+    direction,
     nodes,
     edges,
   };

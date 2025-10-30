@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "kiri": {
+      "command": "node",
+      "args": ["dist/src/server/main.js", "--repo", ".", "--db", "var/mcp.duckdb", "--watch"]
+    }
+  }
+}

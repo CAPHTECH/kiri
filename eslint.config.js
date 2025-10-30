@@ -27,7 +27,16 @@ export default [
         __filename: "readonly",
         exports: "writable",
         module: "writable",
-        require: "readonly"
+        require: "readonly",
+        // Node.js globals
+        AbortController: "readonly",
+        AbortSignal: "readonly",
+        setTimeout: "readonly",
+        clearTimeout: "readonly",
+        setInterval: "readonly",
+        clearInterval: "readonly",
+        // TypeScript/Node.js namespace
+        NodeJS: "readonly"
       }
     },
     plugins: {
@@ -42,6 +51,10 @@ export default [
           alphabetize: { order: "asc", caseInsensitive: true },
           "newlines-between": "always"
         }
+      ],
+      "@typescript-eslint/no-unused-vars": [
+        "error",
+        { argsIgnorePattern: "^_", varsIgnorePattern: "^_" }
       ]
     }
   },
