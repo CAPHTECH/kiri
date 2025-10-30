@@ -133,7 +133,7 @@ describe("DaemonLifecycle", () => {
     // process.exit をモック
     const exitSpy = vi
       .spyOn(process, "exit")
-      .mockImplementation((() => {}) as (code?: number) => never);
+      .mockImplementation((() => {}) as (code?: string | number | null) => never);
 
     const shutdownCallback = vi.fn();
     lifecycle.onShutdown(async () => {
