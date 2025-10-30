@@ -509,6 +509,16 @@ export function createRpcHandler(
           result = INITIALIZE_PAYLOAD;
           break;
         }
+        case "ping": {
+          // Health check endpoint - returns server info and uptime
+          result = {
+            status: "ok",
+            serverInfo: SERVER_INFO,
+            pid: process.pid,
+            uptime: process.uptime(),
+          };
+          break;
+        }
         case "tools/list": {
           // MCP standard format: tools array without nextCursor (no pagination)
           result = { tools: TOOL_DESCRIPTORS };

@@ -5,7 +5,9 @@
   "type": "module",
   "packageManager": "pnpm@9.0.0",
   "bin": {
-    "kiri": "./dist/src/server/main.js"
+    "kiri": "./dist/src/client/proxy.js",
+    "kiri-server": "./dist/src/server/main.js",
+    "kiri-daemon": "./dist/src/daemon/daemon.js"
   },
   "files": [
     "dist/",

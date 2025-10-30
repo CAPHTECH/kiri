@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Use KIRI MCP Tools
 
-**This project has KIRI MCP server configured**. Use KIRI tools when exploring this codebase.
+**This project uses KIRI MCP**. Use KIRI mcp tools when exploring this codebase.
 
 ---
 
