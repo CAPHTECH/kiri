@@ -1,5 +1,5 @@
 import { existsSync, unlinkSync } from "node:fs";
-import { access, constants } from "node:fs/promises";
+import { access, constants, mkdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
 import { runIndexer } from "../indexer/cli.js";
@@ -47,15 +47,19 @@ export async function ensureDatabaseIndexed(
   }
 
   try {
+    // データベースの親ディレクトリを自動作成（.kiri/ などが存在しない場合）
+    const dbDir = dirname(absoluteDatabasePath);
+    await mkdir(dbDir, { recursive: true });
+
     // Pre-flight filesystem permission checks
     try {
       await access(absoluteRepoRoot, constants.R_OK);
-      await access(dirname(absoluteDatabasePath), constants.W_OK);
+      await access(dbDir, constants.W_OK);
     } catch (error) {
       const err = error as NodeJS.ErrnoException;
       process.stderr.write(`❌ Filesystem permission error: ${err.message}\n`);
       process.stderr.write(`   • Ensure read access to: ${absoluteRepoRoot}\n`);
-      process.stderr.write(`   • Ensure write access to: ${dirname(absoluteDatabasePath)}\n`);
+      process.stderr.write(`   • Ensure write access to: ${dbDir}\n`);
       throw error;
     }
 

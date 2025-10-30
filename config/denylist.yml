@@ -3,3 +3,13 @@ patterns:
   - secrets/**
   - "*.pem"
   - .env*
+  # Binary and archive files
+  - "*.zip"
+  - "*.tar"
+  - "*.tar.gz"
+  - "*.tgz"
+  - "*.rar"
+  - "*.7z"
+  - "*.jar"
+  - "*.war"
+  - "*.ear"

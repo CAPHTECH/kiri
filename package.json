@@ -16,7 +16,8 @@
   ],
   "scripts": {
     "bootstrap": "pnpm install",
-    "build": "tsc --project tsconfig.build.json",
+    "build": "tsc --project tsconfig.build.json && pnpm run build:copy-assets",
+    "build:copy-assets": "cp -r config dist/ && cp -r sql dist/",
     "dev": "tsx src/server/main.ts --port 8765",
     "lint": "eslint \"{src,tests,scripts}/**/*.{ts,tsx}\" && prettier --check \"**/*.{ts,tsx,json,md,yml}\"",
     "test": "vitest run --coverage",

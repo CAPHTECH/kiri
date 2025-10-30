@@ -157,6 +157,10 @@ export async function startDaemon(options: StartDaemonOptions): Promise<void> {
     args.push("--security-lock", securityLockPath);
   }
 
+  // データベースの親ディレクトリを自動作成（.kiri/ などが存在しない場合）
+  const dbDir = path.dirname(databasePath);
+  await fs.mkdir(dbDir, { recursive: true });
+
   // デーモンログファイル
   const logFilePath = `${databasePath}.daemon.log`;
   const logFile = await fs.open(logFilePath, "a");

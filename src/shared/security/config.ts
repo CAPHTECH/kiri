@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { z } from "zod";
 
@@ -33,7 +34,8 @@ const SecurityConfigSchema = z.object({
 });
 
 export function loadSecurityConfig(configPath?: string): { config: SecurityConfig; hash: string } {
-  const path = resolve(configPath ?? "config/security.yml");
+  const path =
+    configPath ?? join(fileURLToPath(import.meta.url), "../../../../config/security.yml");
   const content = readFileSync(path, "utf8");
   const parsed = parseSimpleYaml(content);
 
@@ -59,9 +61,10 @@ export function readSecurityLock(lockPath?: string): string | null {
 export function evaluateSecurityStatus(configPath?: string, lockPath?: string): SecurityStatus {
   const { config, hash } = loadSecurityConfig(configPath);
   const stored = readSecurityLock(lockPath);
+  const defaultConfigPath = join(fileURLToPath(import.meta.url), "../../../../config/security.yml");
   return {
     config,
-    configPath: resolve(configPath ?? "config/security.yml"),
+    configPath: configPath ?? defaultConfigPath,
     lockPath: resolve(lockPath ?? "var/security.lock"),
     hash,
     lockHash: stored,

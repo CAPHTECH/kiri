@@ -57,9 +57,10 @@ function loadProfilesFromConfig(): Record<ScoringProfileName, ScoringWeights> {
 
   try {
     // 環境変数でカスタムパスを指定可能
+    // 本番環境（npm install）では dist/config/ を、開発環境では config/ を参照
     const configPath =
       process.env.KIRI_SCORING_CONFIG ??
-      join(fileURLToPath(import.meta.url), "../../../config/scoring-profiles.yml");
+      join(fileURLToPath(import.meta.url), "../../config/scoring-profiles.yml");
 
     const configContent = readFileSync(configPath, "utf-8");
     const parsed = parseSimpleYaml(configContent) as unknown as Record<string, ScoringWeights>;

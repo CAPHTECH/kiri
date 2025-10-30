@@ -76,6 +76,9 @@ pnpm install
 # Build (outputs ESM to dist/)
 pnpm run build
 
+# Link the package globally (makes 'kiri' command available)
+npm link
+
 # Start MCP server on port 8765 with hot reload
 pnpm run dev
 
@@ -90,6 +93,9 @@ pnpm exec vitest run tests/server/handlers.spec.ts
 
 # Lint and test together
 pnpm run check
+
+# Unlink the package (if needed)
+npm unlink -g kiri-mcp-server
 ```
 
 ## DuckDB Schema Design

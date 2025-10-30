@@ -205,29 +205,34 @@ async function persistSymbols(
 ): Promise<void> {
   if (records.length === 0) return;
 
-  const placeholders = records.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?)").join(", ");
-  const sql = `
-    INSERT OR REPLACE INTO symbol (
-      repo_id, path, symbol_id, name, kind, range_start_line, range_end_line, signature, doc
-    ) VALUES ${placeholders}
-  `;
+  // バッチサイズを1000に制限してスタックオーバーフローを防ぐ
+  const BATCH_SIZE = 1000;
+  for (let i = 0; i < records.length; i += BATCH_SIZE) {
+    const batch = records.slice(i, i + BATCH_SIZE);
+    const placeholders = batch.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?)").join(", ");
+    const sql = `
+      INSERT OR REPLACE INTO symbol (
+        repo_id, path, symbol_id, name, kind, range_start_line, range_end_line, signature, doc
+      ) VALUES ${placeholders}
+    `;
 
-  const params: unknown[] = [];
-  for (const record of records) {
-    params.push(
-      repoId,
-      record.path,
-      record.symbolId,
-      record.name,
-      record.kind,
-      record.rangeStartLine,
-      record.rangeEndLine,
-      record.signature,
-      record.doc
-    );
+    const params: unknown[] = [];
+    for (const record of batch) {
+      params.push(
+        repoId,
+        record.path,
+        record.symbolId,
+        record.name,
+        record.kind,
+        record.rangeStartLine,
+        record.rangeEndLine,
+        record.signature,
+        record.doc
+      );
+    }
+
+    await db.run(sql, params);
   }
-
-  await db.run(sql, params);
 }
 
 async function persistSnippets(
@@ -237,26 +242,31 @@ async function persistSnippets(
 ): Promise<void> {
   if (records.length === 0) return;
 
-  const placeholders = records.map(() => "(?, ?, ?, ?, ?, ?)").join(", ");
-  const sql = `
-    INSERT OR REPLACE INTO snippet (
-      repo_id, path, snippet_id, start_line, end_line, symbol_id
-    ) VALUES ${placeholders}
-  `;
+  // バッチサイズを1000に制限してスタックオーバーフローを防ぐ
+  const BATCH_SIZE = 1000;
+  for (let i = 0; i < records.length; i += BATCH_SIZE) {
+    const batch = records.slice(i, i + BATCH_SIZE);
+    const placeholders = batch.map(() => "(?, ?, ?, ?, ?, ?)").join(", ");
+    const sql = `
+      INSERT OR REPLACE INTO snippet (
+        repo_id, path, snippet_id, start_line, end_line, symbol_id
+      ) VALUES ${placeholders}
+    `;
 
-  const params: unknown[] = [];
-  for (const record of records) {
-    params.push(
-      repoId,
-      record.path,
-      record.snippetId,
-      record.startLine,
-      record.endLine,
-      record.symbolId
-    );
+    const params: unknown[] = [];
+    for (const record of batch) {
+      params.push(
+        repoId,
+        record.path,
+        record.snippetId,
+        record.startLine,
+        record.endLine,
+        record.symbolId
+      );
+    }
+
+    await db.run(sql, params);
   }
-
-  await db.run(sql, params);
 }
 
 async function persistDependencies(
@@ -266,19 +276,24 @@ async function persistDependencies(
 ): Promise<void> {
   if (records.length === 0) return;
 
-  const placeholders = records.map(() => "(?, ?, ?, ?, ?)").join(", ");
-  const sql = `
-    INSERT OR REPLACE INTO dependency (
-      repo_id, src_path, dst_kind, dst, rel
-    ) VALUES ${placeholders}
-  `;
+  // バッチサイズを1000に制限してスタックオーバーフローを防ぐ
+  const BATCH_SIZE = 1000;
+  for (let i = 0; i < records.length; i += BATCH_SIZE) {
+    const batch = records.slice(i, i + BATCH_SIZE);
+    const placeholders = batch.map(() => "(?, ?, ?, ?, ?)").join(", ");
+    const sql = `
+      INSERT OR REPLACE INTO dependency (
+        repo_id, src_path, dst_kind, dst, rel
+      ) VALUES ${placeholders}
+    `;
 
-  const params: unknown[] = [];
-  for (const record of records) {
-    params.push(repoId, record.srcPath, record.dstKind, record.dst, record.rel);
+    const params: unknown[] = [];
+    for (const record of batch) {
+      params.push(repoId, record.srcPath, record.dstKind, record.dst, record.rel);
+    }
+
+    await db.run(sql, params);
   }
-
-  await db.run(sql, params);
 }
 
 async function persistEmbeddings(

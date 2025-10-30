@@ -53,6 +53,9 @@ pnpm install
 
 # Build the project
 pnpm run build
+
+# Link the package globally (makes 'kiri' command available)
+npm link
 ```
 
 ### Start MCP Server
@@ -165,7 +168,7 @@ node dist/src/server/main.js --repo . --db var/index.duckdb --port 8765 --watch
 
 ### MCP Client Integration
 
-#### Option 1: Global Installation (Recommended)
+#### Option 1: Global Installation (Recommended for End Users)
 
 ```bash
 npm install -g kiri-mcp-server
@@ -177,7 +180,7 @@ Create `~/.config/codex/mcp.json` or `.claude/mcp.json`:
 {
   "mcpServers": {
     "kiri": {
-      "command": "kiri-mcp-server",
+      "command": "kiri",
       "args": [
         "--repo",
         "/path/to/your/project",
@@ -211,24 +214,28 @@ Create `~/.config/codex/mcp.json` or `.claude/mcp.json`:
 
 **Note**: `npx` automatically downloads and caches the package on first use. Subsequent starts are faster.
 
-#### Option 3: Local Development
+#### Option 3: Local Development (with npm link)
+
+After running `npm link` in the KIRI repository:
 
 ```json
 {
   "mcpServers": {
     "kiri": {
-      "command": "node",
+      "command": "kiri",
       "args": [
-        "/absolute/path/to/kiri/dist/src/server/main.js",
         "--repo",
         "/path/to/your/project",
         "--db",
-        "/path/to/your/project/.kiri/index.duckdb"
+        "/path/to/your/project/.kiri/index.duckdb",
+        "--watch"
       ]
     }
   }
 }
 ```
+
+**Note**: The `kiri` command will use the symlinked version from your local development directory. Changes require rebuilding with `pnpm run build`.
 
 See [examples/README.md](examples/README.md) for detailed usage examples.
 

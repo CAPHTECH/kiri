@@ -9,6 +9,7 @@
 import * as path from "path";
 import { parseArgs } from "util";
 
+import { ensureDatabaseIndexed } from "../server/indexBootstrap.js";
 import { createRpcHandler } from "../server/rpc.js";
 import { createServerRuntime } from "../server/runtime.js";
 import type { ServerRuntime } from "../server/runtime.js";
@@ -86,6 +87,14 @@ async function main() {
     await lifecycle.createPidFile();
     console.error(`[Daemon] PID: ${process.pid}`);
 
+    // データベースが存在しない場合、自動的にインデックスを作成
+    await ensureDatabaseIndexed(
+      options.repoRoot,
+      options.databasePath,
+      options.allowDegrade,
+      false
+    );
+
     // ServerRuntimeを作成（DuckDB接続、メトリクス、デグレード制御など）
     let runtime: ServerRuntime | null = null;
     try {
@@ -93,6 +102,7 @@ async function main() {
         repoRoot: options.repoRoot,
         databasePath: options.databasePath,
         allowDegrade: options.allowDegrade,
+        allowWriteLock: true, // Daemon mode should auto-create security lock
       };
 
       if (options.securityConfigPath) {

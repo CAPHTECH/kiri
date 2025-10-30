@@ -15,6 +15,7 @@ export interface CommonServerOptions {
   allowDegrade?: boolean;
   securityConfigPath?: string;
   securityLockPath?: string;
+  allowWriteLock?: boolean;
 }
 
 export interface ServerRuntime {
@@ -33,6 +34,9 @@ export async function createServerRuntime(options: CommonServerOptions): Promise
   }
   if (options.securityLockPath) {
     bootstrapOptions.securityLockPath = options.securityLockPath;
+  }
+  if (options.allowWriteLock !== undefined) {
+    bootstrapOptions.allowWriteLock = options.allowWriteLock;
   }
   const bootstrap = bootstrapServer(bootstrapOptions);
 
