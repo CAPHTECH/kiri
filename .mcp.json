@@ -2,13 +2,7 @@
   "mcpServers": {
     "kiri": {
       "command": "node",
-      "args": [
-        "dist/src/client/proxy.js",
-        "--repo",
-        ".",
-        "--db",
-        "var/index.duckdb"
-      ]
+      "args": ["dist/src/client/proxy.js", "--repo", ".", "--db", "var/index.duckdb"]
     }
   }
 }
