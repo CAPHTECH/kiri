@@ -12,6 +12,7 @@ import {
   type JsonRpcSuccess,
 } from "../../src/server/rpc.js";
 import { createServerRuntime } from "../../src/server/runtime.js";
+import { loadSecurityConfig, updateSecurityLock } from "../../src/shared/security/config.js";
 import { createTempRepo } from "../helpers/test-repo.js";
 
 interface CleanupTarget {
@@ -37,9 +38,17 @@ describe("MCP標準エンドポイント", () => {
     cleanupTargets.push({ dispose: async () => await rm(dbDir, { recursive: true, force: true }) });
 
     const dbPath = join(dbDir, "index.duckdb");
+    const lockPath = join(dbDir, "security.lock");
+    const { hash } = loadSecurityConfig();
+    updateSecurityLock(hash, lockPath);
+
     await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
 
-    const runtime = await createServerRuntime({ repoRoot: repo.path, databasePath: dbPath });
+    const runtime = await createServerRuntime({
+      repoRoot: repo.path,
+      databasePath: dbPath,
+      securityLockPath: lockPath,
+    });
     cleanupTargets.push({ dispose: async () => await runtime.close() });
 
     const handler = createRpcHandler(runtime);
@@ -67,9 +76,17 @@ describe("MCP標準エンドポイント", () => {
     cleanupTargets.push({ dispose: async () => await rm(dbDir, { recursive: true, force: true }) });
 
     const dbPath = join(dbDir, "index.duckdb");
+    const lockPath = join(dbDir, "security.lock");
+    const { hash } = loadSecurityConfig();
+    updateSecurityLock(hash, lockPath);
+
     await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
 
-    const runtime = await createServerRuntime({ repoRoot: repo.path, databasePath: dbPath });
+    const runtime = await createServerRuntime({
+      repoRoot: repo.path,
+      databasePath: dbPath,
+      securityLockPath: lockPath,
+    });
     cleanupTargets.push({ dispose: async () => await runtime.close() });
 
     const handler = createRpcHandler(runtime);
@@ -100,9 +117,17 @@ describe("MCP標準エンドポイント", () => {
     cleanupTargets.push({ dispose: async () => await rm(dbDir, { recursive: true, force: true }) });
 
     const dbPath = join(dbDir, "index.duckdb");
+    const lockPath = join(dbDir, "security.lock");
+    const { hash } = loadSecurityConfig();
+    updateSecurityLock(hash, lockPath);
+
     await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
 
-    const runtime = await createServerRuntime({ repoRoot: repo.path, databasePath: dbPath });
+    const runtime = await createServerRuntime({
+      repoRoot: repo.path,
+      databasePath: dbPath,
+      securityLockPath: lockPath,
+    });
     cleanupTargets.push({ dispose: async () => await runtime.close() });
 
     const handler = createRpcHandler(runtime);
@@ -150,9 +175,17 @@ describe("MCP標準エンドポイント", () => {
     cleanupTargets.push({ dispose: async () => await rm(dbDir, { recursive: true, force: true }) });
 
     const dbPath = join(dbDir, "index.duckdb");
+    const lockPath = join(dbDir, "security.lock");
+    const { hash } = loadSecurityConfig();
+    updateSecurityLock(hash, lockPath);
+
     await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
 
-    const runtime = await createServerRuntime({ repoRoot: repo.path, databasePath: dbPath });
+    const runtime = await createServerRuntime({
+      repoRoot: repo.path,
+      databasePath: dbPath,
+      securityLockPath: lockPath,
+    });
     cleanupTargets.push({ dispose: async () => await runtime.close() });
 
     const handler = createRpcHandler(runtime);
@@ -191,9 +224,17 @@ describe("MCP標準エンドポイント", () => {
     cleanupTargets.push({ dispose: async () => await rm(dbDir, { recursive: true, force: true }) });
 
     const dbPath = join(dbDir, "index.duckdb");
+    const lockPath = join(dbDir, "security.lock");
+    const { hash } = loadSecurityConfig();
+    updateSecurityLock(hash, lockPath);
+
     await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
 
-    const runtime = await createServerRuntime({ repoRoot: repo.path, databasePath: dbPath });
+    const runtime = await createServerRuntime({
+      repoRoot: repo.path,
+      databasePath: dbPath,
+      securityLockPath: lockPath,
+    });
     cleanupTargets.push({ dispose: async () => await runtime.close() });
 
     const handler = createRpcHandler(runtime);
