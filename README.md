@@ -66,38 +66,43 @@ npm link
 
 ```bash
 # Start stdio server (auto-indexes if DB doesn't exist)
-node dist/src/server/main.js --repo . --db var/index.duckdb
+kiri-server --repo . --db .kiri/index.duckdb
 
 # Force re-indexing
-node dist/src/server/main.js --repo . --db var/index.duckdb --reindex
+kiri-server --repo . --db .kiri/index.duckdb --reindex
 
 # Start with watch mode (auto-reindex on file changes)
-node dist/src/server/main.js --repo . --db var/index.duckdb --watch
+kiri-server --repo . --db .kiri/index.duckdb --watch
 
 # Customize debounce timing (default: 500ms)
-node dist/src/server/main.js --repo . --db var/index.duckdb --watch --debounce 1000
+kiri-server --repo . --db .kiri/index.duckdb --watch --debounce 1000
 ```
+
+> インストールなしで試す場合は `npx kiri-mcp-server@latest kiri-server --repo . --db .kiri/index.duckdb` を利用できる。
 
 #### Manual Indexing (Optional)
 
 If you prefer to index manually before starting the server:
 
 ```bash
-# Index current directory into DuckDB
-tsx src/indexer/cli.ts --repo . --db var/index.duckdb --full
+# Run once to create the database, then exit
+kiri-server --repo . --db .kiri/index.duckdb --reindex
+
+# Or use the daemon for background indexing
+kiri-daemon --repo . --db .kiri/index.duckdb --watch
 ```
 
 #### HTTP Mode (for testing)
 
 ```bash
 # Start HTTP server on port 8765
-pnpm run dev
+kiri-server --repo . --db .kiri/index.duckdb --port 8765
 
 # Or specify custom port
-node dist/src/server/main.js --repo . --db var/index.duckdb --port 8765
+kiri-server --repo . --db .kiri/index.duckdb --port 9000
 
 # With watch mode enabled
-node dist/src/server/main.js --repo . --db var/index.duckdb --port 8765 --watch
+kiri-server --repo . --db .kiri/index.duckdb --port 8765 --watch --debounce 1000
 ```
 
 ## 📋 MCP Tools
@@ -155,13 +160,13 @@ Watch mode monitors your repository for file changes and automatically re-indexe
 
 ```bash
 # Enable watch mode with default debounce (500ms)
-node dist/src/server/main.js --repo . --db var/index.duckdb --watch
+kiri-server --repo . --db .kiri/index.duckdb --watch
 
 # Customize debounce timing for slower hardware or network filesystems
-node dist/src/server/main.js --repo . --db var/index.duckdb --watch --debounce 1000
+kiri-server --repo . --db .kiri/index.duckdb --watch --debounce 1000
 
 # Watch mode works with both stdio and HTTP modes
-node dist/src/server/main.js --repo . --db var/index.duckdb --port 8765 --watch
+kiri-server --repo . --db .kiri/index.duckdb --port 8765 --watch
 ```
 
 **Note**: Watch mode runs in parallel with the MCP server. File changes trigger reindexing in the background without interrupting ongoing queries.
@@ -353,15 +358,15 @@ pnpm run dev                  # Start HTTP server with hot reload on :8765
 pnpm run test                 # Run all tests with coverage
 pnpm run check                # Lint + test
 
-# Indexing (optional - server auto-indexes on startup)
-tsx src/indexer/cli.ts --repo <path> --db <db-path> --full
+# Server modes (installed globally or via npx)
+kiri-server --repo <path> --db <db-path>                     # stdio mode (auto-indexes if needed)
+kiri-server --repo <path> --db <db-path> --port 8765        # HTTP mode (auto-indexes if needed)
+kiri-server --repo <path> --db <db-path> --reindex          # Force re-indexing
+kiri-server --repo <path> --db <db-path> --watch            # Enable watch mode
+kiri-server --repo <path> --db <db-path> --watch --debounce 1000  # Custom debounce timing
 
-# Server modes
-node dist/src/server/main.js --repo <path> --db <db-path>                     # stdio mode (auto-indexes if needed)
-node dist/src/server/main.js --repo <path> --db <db-path> --port 8765        # HTTP mode (auto-indexes if needed)
-node dist/src/server/main.js --repo <path> --db <db-path> --reindex          # Force re-indexing
-node dist/src/server/main.js --repo <path> --db <db-path> --watch            # Enable watch mode
-node dist/src/server/main.js --repo <path> --db <db-path> --watch --debounce 1000  # Custom debounce timing
+# npx without global install
+npx kiri-mcp-server@latest kiri-server --repo <path> --db <db-path>
 ```
 
 ## 🤝 Contributing
@@ -389,6 +394,6 @@ Built with:
 
 ---
 
-**Status**: v0.1.0 (Alpha) - Active development
+**Status**: v0.2.0 (Alpha) - Active development
 
 For questions or issues, please open a [GitHub issue](https://github.com/CAPHTECH/kiri/issues).
