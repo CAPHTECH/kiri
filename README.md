@@ -78,7 +78,7 @@ kiri-server --repo . --db .kiri/index.duckdb --watch
 kiri-server --repo . --db .kiri/index.duckdb --watch --debounce 1000
 ```
 
-> インストールなしで試す場合は `npx kiri-mcp-server@latest kiri-server --repo . --db .kiri/index.duckdb` を利用できる。
+> インストールなしで試す場合は `npx kiri-mcp-server@latest --repo . --db .kiri/index.duckdb --watch` を利用できる。
 
 #### Manual Indexing (Optional)
 
@@ -206,11 +206,12 @@ Create `~/.config/codex/mcp.json` or `.claude/mcp.json`:
     "kiri": {
       "command": "npx",
       "args": [
-        "kiri-mcp-server",
+        "kiri-mcp-server@latest",
         "--repo",
         "/path/to/your/project",
         "--db",
-        "/path/to/your/project/.kiri/index.duckdb"
+        "/path/to/your/project/.kiri/index.duckdb",
+        "--watch"
       ]
     }
   }

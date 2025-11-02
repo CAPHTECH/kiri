@@ -17,7 +17,8 @@
   "bin": {
     "kiri": "./dist/src/client/proxy.js",
     "kiri-server": "./dist/src/server/main.js",
-    "kiri-daemon": "./dist/src/daemon/daemon.js"
+    "kiri-daemon": "./dist/src/daemon/daemon.js",
+    "kiri-mcp-server": "./dist/src/client/proxy.js"
   },
   "files": [
     "dist/",
