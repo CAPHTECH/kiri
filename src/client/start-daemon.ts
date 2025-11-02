@@ -21,6 +21,7 @@ export interface StartDaemonOptions {
   allowDegrade: boolean;
   securityConfigPath?: string | undefined;
   securityLockPath?: string | undefined;
+  readyTimeoutMs?: number | undefined;
 }
 
 /**
@@ -190,6 +191,7 @@ export async function startDaemon(options: StartDaemonOptions): Promise<void> {
     allowDegrade,
     securityConfigPath,
     securityLockPath,
+    readyTimeoutMs,
   } = options;
 
   // デーモン実行ファイルのパスを解決
@@ -236,10 +238,17 @@ export async function startDaemon(options: StartDaemonOptions): Promise<void> {
   console.error(`[StartDaemon] Spawned daemon process (PID: ${daemon.pid})`);
   console.error(`[StartDaemon] Daemon log: ${logFilePath}`);
 
-  // ソケットが準備完了するまで待つ（最大10秒）
-  const maxWaitSeconds = 10;
+  // ソケットが準備完了するまで待つ（既定で30秒、環境変数で調整可能）
+  const envTimeoutSeconds = process.env.KIRI_DAEMON_READY_TIMEOUT
+    ? Number.parseFloat(process.env.KIRI_DAEMON_READY_TIMEOUT)
+    : undefined;
+  const effectiveTimeoutMs =
+    readyTimeoutMs ??
+    (Number.isFinite(envTimeoutSeconds) && envTimeoutSeconds! > 0
+      ? envTimeoutSeconds! * 1000
+      : 30_000);
   const pollIntervalMs = 500;
-  const maxAttempts = (maxWaitSeconds * 1000) / pollIntervalMs;
+  const maxAttempts = Math.max(1, Math.ceil(effectiveTimeoutMs / pollIntervalMs));
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
@@ -277,6 +286,6 @@ export async function startDaemon(options: StartDaemonOptions): Promise<void> {
   // タイムアウト
   await logFile.close();
   throw new Error(
-    `Daemon did not become ready within ${maxWaitSeconds} seconds. Check log: ${logFilePath}`
+    `Daemon did not become ready within ${Math.round(effectiveTimeoutMs / 1000)} seconds. Check log: ${logFilePath}`
   );
 }
