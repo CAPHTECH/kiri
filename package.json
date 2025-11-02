@@ -4,6 +4,16 @@
   "description": "KIRI context extraction platform",
   "type": "module",
   "packageManager": "pnpm@9.0.0",
+  "main": "./dist/src/index.js",
+  "module": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/src/index.js"
+    },
+    "./package.json": "./package.json"
+  },
   "bin": {
     "kiri": "./dist/src/client/proxy.js",
     "kiri-server": "./dist/src/server/main.js",
@@ -14,15 +24,39 @@
     "config/",
     "sql/"
   ],
+  "keywords": [
+    "mcp",
+    "duckdb",
+    "context",
+    "llm",
+    "code-search",
+    "indexer"
+  ],
+  "license": "MIT",
+  "author": "CAPHTECH",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/CAPHTECH/kiri.git"
+  },
+  "bugs": {
+    "url": "https://github.com/CAPHTECH/kiri/issues"
+  },
+  "homepage": "https://github.com/CAPHTECH/kiri#readme",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "bootstrap": "pnpm install",
     "build": "tsc --project tsconfig.build.json && pnpm run build:copy-assets",
-    "build:copy-assets": "cp -r config dist/ && cp -r sql dist/",
+    "build:copy-assets": "tsx scripts/build/copy-assets.ts",
     "dev": "tsx src/server/main.ts --port 8765",
     "lint": "eslint \"{src,tests,scripts}/**/*.{ts,tsx}\" && prettier --check \"**/*.{ts,tsx,json,md,yml}\"",
     "test": "vitest run --coverage",
     "check": "pnpm run lint && pnpm run test",
-    "prepare": "pnpm exec simple-git-hooks"
+    "prepublishOnly": "pnpm run build"
   },
   "dependencies": {
     "chokidar": "^4.0.3",

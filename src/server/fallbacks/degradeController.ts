@@ -137,13 +137,20 @@ export class DegradeController {
 
   private walkFiles(
     root: string,
-    visitor: (absolute: string, relative: string, stats: ReturnType<typeof statSync>) => void
+    visitor: (
+      absolute: string,
+      relative: string,
+      stats: NonNullable<ReturnType<typeof statSync>>
+    ) => void
   ): void {
     const entries = readdirSync(root);
     for (const entry of entries) {
       const absolute = join(root, entry);
       const relative = relativePath(this.repoRoot, absolute);
-      const stats = statSync(absolute);
+      const stats = statSync(absolute, { throwIfNoEntry: false });
+      if (stats == null) {
+        continue;
+      }
       if (stats.isDirectory()) {
         this.walkFiles(absolute, visitor);
       } else if (stats.isFile()) {

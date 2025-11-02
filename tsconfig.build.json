@@ -3,7 +3,9 @@
   "compilerOptions": {
     "noEmit": false,
     "outDir": "dist",
-    "sourceMap": true
+    "sourceMap": true,
+    "declaration": true,
+    "declarationMap": true
   },
   "exclude": ["tests", "scripts", "var", "dist"]
 }

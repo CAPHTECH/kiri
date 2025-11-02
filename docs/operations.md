@@ -17,3 +17,12 @@
 - **DuckDB ロック衝突**: 読み込みは許可し、書き込みはステージング→バッチに統一して再試行。
 - **依存解決不能**: `dst_kind="package"` として保持し、パス近接の重み付けを増やす。
 - **blame 計算コスト増**: 差分のみ逐次更新し、巨大ファイルは週次フル再計算に限定する。
+
+## npm 公開フロー
+
+1. `pnpm install` → `pnpm run check` を実行し、Lint とテストがすべて成功することを確認する。
+2. `package.json` の `version` を SemVer に従って更新し、変更点を `CHANGELOG.md`（追記が必要な場合）へ反映する。
+3. `pnpm run build` を実行して `dist/` を再生成し、`git status` で不要な生成物が残っていないか検証する。
+4. `npm login`（初回のみ）後、公開アクセスの場合は `pnpm publish --access public` を実行する。プライベート公開の場合は `--access restricted` を指定する。
+5. 公開完了後にタグ付け `git tag v<version>` → `git push origin --tags` を行い、GitHub Release と npm のバージョンを同期させる。
+6. パッケージをグローバルインストールして動作確認 (`npm install -g kiri-mcp-server` → `kiri-server --help`) を行い、問題があれば速やかに `npm deprecate` とパッチリリースで対処する。
