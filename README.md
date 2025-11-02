@@ -2,7 +2,7 @@
 
 > Context extraction platform for LLMs - Minimal, relevant code fragments from Git repositories
 
-[![Version](https://img.shields.io/badge/version-0.2.1-blue.svg)](package.json)
+[![Version](https://img.shields.io/badge/version-0.2.2-blue.svg)](package.json)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.6-blue.svg)](https://www.typescriptlang.org/)
 
@@ -395,6 +395,6 @@ Built with:
 
 ---
 
-**Status**: v0.2.1 (Alpha) - Active development
+**Status**: v0.2.2 (Alpha) - Active development
 
 For questions or issues, please open a [GitHub issue](https://github.com/CAPHTECH/kiri/issues).

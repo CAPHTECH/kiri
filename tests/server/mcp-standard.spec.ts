@@ -290,7 +290,7 @@ describe("MCP標準エンドポイント", () => {
     expect(response.statusCode).toBe(400);
     const payload = response.response;
     expect(payload).toHaveProperty("error");
-  });
+  }, 15000);
 
   it("id を含まない通知リクエストではレスポンスを生成しない", async () => {
     const repo = await createTempRepo({

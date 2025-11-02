@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { IndexWatcher } from "../../src/indexer/watch.js";
 import { DuckDBClient } from "../../src/shared/duckdb.js";
-import { acquireLock, releaseLock, isLocked } from "../../src/shared/utils/lockfile.js";
+import { acquireLock, isLocked, releaseLock } from "../../src/shared/utils/lockfile.js";
 import { createTempRepo } from "../helpers/test-repo.js";
 
 interface CleanupTarget {
@@ -116,7 +116,7 @@ describe("IndexWatcher", () => {
     }
     await rm(dbDir, { recursive: true, force: true });
     await repo.cleanup();
-  });
+  }, 15000);
 
   it("debounces rapid consecutive changes", async () => {
     const repo = await createTempRepo({

@@ -3,11 +3,10 @@
  */
 
 import * as fs from "fs/promises";
-import * as net from "net";
 import * as os from "os";
 import * as path from "path";
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { stopDaemon } from "../../src/client/start-daemon.js";
 
