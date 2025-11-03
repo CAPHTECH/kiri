@@ -53,12 +53,13 @@ export interface ContextBundleParams {
   limit?: number;
   profile?: string;
   boost_profile?: "default" | "docs" | "none";
+  compact?: boolean; // If true, omit preview field to reduce token usage
 }
 
 export interface ContextBundleItem {
   path: string;
   range: [number, number];
-  preview: string;
+  preview?: string; // Omitted when compact: true
   why: string[];
   score: number;
 }
@@ -93,14 +94,14 @@ export interface SemanticRerankResult {
 
 const DEFAULT_SEARCH_LIMIT = 50;
 const DEFAULT_SNIPPET_WINDOW = 150;
-const DEFAULT_BUNDLE_LIMIT = 12;
+const DEFAULT_BUNDLE_LIMIT = 7; // Reduced from 12 to optimize token usage
 const MAX_BUNDLE_LIMIT = 20;
 const MAX_KEYWORDS = 12;
 const MAX_MATCHES_PER_KEYWORD = 40;
 const MAX_DEPENDENCY_SEEDS = 8;
 const MAX_DEPENDENCY_SEEDS_QUERY_LIMIT = 100; // SQL injection防御用の上限
 const NEARBY_LIMIT = 6;
-const FALLBACK_SNIPPET_WINDOW = 120;
+const FALLBACK_SNIPPET_WINDOW = 40; // Reduced from 120 to optimize token usage
 const MAX_RERANK_LIMIT = 50;
 
 const STOP_WORDS = new Set([
@@ -426,10 +427,10 @@ function buildSnippetPreview(content: string, startLine: number, endLine: number
   const startIndex = Math.max(0, Math.min(startLine - 1, lines.length));
   const endIndex = Math.max(startIndex, Math.min(endLine, lines.length));
   const snippet = lines.slice(startIndex, endIndex).join("\n");
-  if (snippet.length <= 480) {
+  if (snippet.length <= 240) {
     return snippet;
   }
-  return `${snippet.slice(0, 479)}…`;
+  return `${snippet.slice(0, 239)}…`;
 }
 
 /**
@@ -482,34 +483,137 @@ function applyFileTypeBoost(
   baseScore: number,
   profile: "default" | "docs" | "none" = "default"
 ): number {
-  // ブースト無効
+  // Blacklisted directories that are almost always irrelevant for code context
+  const blacklistedDirs = [
+    ".cursor/",
+    ".devcontainer/",
+    ".serena/",
+    "__mocks__/",
+    "docs/",
+    ".git/",
+    "node_modules/",
+  ];
+  if (blacklistedDirs.some((dir) => path.startsWith(dir))) {
+    return -100; // Effectively remove it
+  }
+
   if (profile === "none") {
     return baseScore;
   }
 
-  // ドキュメントモード: ドキュメントを優遇、実装ファイルを軽度減点
   if (profile === "docs") {
     if (path.endsWith(".md") || path.endsWith(".yaml") || path.endsWith(".yml")) {
-      return baseScore * 1.5; // ドキュメント優遇
+      return baseScore * 1.8; // Stronger boost for docs
     }
-    if (path.startsWith("src/") && (path.endsWith(".ts") || path.endsWith(".js"))) {
-      return baseScore * 0.7; // 実装ファイル軽度減点
+    if (
+      path.startsWith("src/") &&
+      (path.endsWith(".ts") || path.endsWith(".js") || path.endsWith(".tsx"))
+    ) {
+      return baseScore * 0.5; // Stronger penalty for implementation files
     }
     return baseScore;
   }
 
-  // デフォルトモード: 実装ファイルを優遇、ドキュメントを減点
-  if (path.startsWith("src/") && (path.endsWith(".ts") || path.endsWith(".js"))) {
-    return baseScore * 1.5; // 実装ファイル優遇
+  // Default profile: prioritize implementation files, heavily penalize docs
+  const docExtensions = [".md", ".yaml", ".yml", ".mdc", ".json"];
+  if (docExtensions.some((ext) => path.endsWith(ext))) {
+    return baseScore * 0.1; // Heavy penalty for docs
   }
-  if (path.startsWith("tests/") && path.endsWith(".ts")) {
-    return baseScore * 1.2; // テストファイル軽度優遇
+
+  if (path.startsWith("src/app/")) {
+    return baseScore * 1.8;
   }
-  if (path.endsWith(".md") || path.endsWith(".yaml") || path.endsWith(".yml")) {
-    return baseScore * 0.5; // ドキュメント減点
+  if (path.startsWith("src/components/")) {
+    return baseScore * 1.7;
+  }
+  if (path.startsWith("src/lib/")) {
+    return baseScore * 1.6;
+  }
+  if (
+    path.startsWith("src/") &&
+    (path.endsWith(".ts") || path.endsWith(".js") || path.endsWith(".tsx"))
+  ) {
+    return baseScore * 1.5;
+  }
+  if (path.startsWith("tests/") || path.startsWith("test/")) {
+    return baseScore * 0.2; // Also penalize tests in default mode
   }
 
   return baseScore;
+}
+
+/**
+ * contextBundle専用のブーストプロファイル適用
+ * candidateのスコアと理由を直接変更する
+ * @param candidate - スコアリング対象の候補
+ * @param row - ファイル情報（path, ext）
+ * @param profile - ブーストプロファイル
+ */
+function applyBoostProfile(
+  candidate: CandidateInfo,
+  row: { path: string; ext: string | null },
+  profile: "default" | "docs" | "none"
+): void {
+  if (profile === "none") {
+    return;
+  }
+
+  const { path, ext } = row;
+
+  // Blacklisted directories that are almost always irrelevant for code context
+  const blacklistedDirs = [
+    ".cursor/",
+    ".devcontainer/",
+    ".serena/",
+    "__mocks__/",
+    "docs/",
+    "test/",
+    "tests/",
+    ".git/",
+    "node_modules/",
+  ];
+  if (blacklistedDirs.some((dir) => path.startsWith(dir))) {
+    candidate.score = -100; // Effectively remove it
+    candidate.reasons.add("penalty:blacklisted-dir");
+    return;
+  }
+
+  if (profile === "docs") {
+    // DOCS PROFILE: Boost docs, penalize code
+    if (path.endsWith(".md") || path.endsWith(".yaml") || path.endsWith(".yml")) {
+      candidate.score += 0.8;
+      candidate.reasons.add("boost:doc-file");
+    } else if (path.startsWith("src/") && (ext === ".ts" || ext === ".tsx" || ext === ".js")) {
+      candidate.score -= 0.5;
+      candidate.reasons.add("penalty:impl-file");
+    }
+  } else if (profile === "default") {
+    // DEFAULT PROFILE: Penalize docs heavily, boost implementation files.
+
+    // Penalize documentation and other non-code files
+    const docExtensions = [".md", ".yaml", ".yml", ".mdc", ".json"];
+    if (docExtensions.some((docExt) => path.endsWith(docExt))) {
+      candidate.score -= 1.0; // Strong penalty to overcome structural similarity
+      candidate.reasons.add("penalty:doc-file");
+    }
+
+    // Boost implementation files, with more specific paths getting higher scores
+    if (path.startsWith("src/app/")) {
+      candidate.score += 0.8;
+      candidate.reasons.add("boost:app-file");
+    } else if (path.startsWith("src/components/")) {
+      candidate.score += 0.7;
+      candidate.reasons.add("boost:component-file");
+    } else if (path.startsWith("src/lib/")) {
+      candidate.score += 0.6;
+      candidate.reasons.add("boost:lib-file");
+    } else if (path.startsWith("src/")) {
+      if (ext === ".ts" || ext === ".tsx" || ext === ".js") {
+        candidate.score += 0.5;
+        candidate.reasons.add("boost:impl-file");
+      }
+    }
+  }
 }
 
 export async function filesSearch(
@@ -811,30 +915,9 @@ export async function contextBundle(
       candidate.score += weights.textMatch;
       candidate.reasons.add(`text:${keyword}`);
 
-      // ファイルタイプブーストを適用（boost_profileに応じて）
+      // Apply boost profile to prioritize/penalize files based on type and location
       const boostProfile = params.boost_profile ?? "default";
-      if (boostProfile === "docs") {
-        // ドキュメントモード
-        if (row.path.endsWith(".md") || row.path.endsWith(".yaml") || row.path.endsWith(".yml")) {
-          candidate.score += 0.5; // ドキュメントに追加ボーナス
-          candidate.reasons.add("boost:doc-file");
-        }
-        if (row.path.startsWith("src/") && row.ext === ".ts") {
-          candidate.score -= 0.2; // 実装ファイルに軽度ペナルティ
-          candidate.reasons.add("penalty:impl-file");
-        }
-      } else if (boostProfile === "default") {
-        // デフォルトモード
-        if (row.path.startsWith("src/") && row.ext === ".ts") {
-          candidate.score += 0.5; // 実装ファイルに追加ボーナス
-          candidate.reasons.add("boost:impl-file");
-        }
-        if (row.path.endsWith(".md") || row.path.endsWith(".yaml") || row.path.endsWith(".yml")) {
-          candidate.score -= 0.3; // ドキュメントにペナルティ
-          candidate.reasons.add("penalty:doc-file");
-        }
-      }
-      // boostProfile === "none" の場合はブースト適用なし
+      applyBoostProfile(candidate, row, boostProfile);
 
       const { line } = buildPreview(row.content, keyword);
       candidate.matchLine =
@@ -1031,7 +1114,6 @@ export async function contextBundle(
       endLine = startLine;
     }
 
-    const preview = buildSnippetPreview(candidate.content, startLine, endLine);
     const reasons = new Set(candidate.reasons);
     if (selected && selected.symbol_name) {
       reasons.add(`symbol:${selected.symbol_name}`);
@@ -1039,13 +1121,19 @@ export async function contextBundle(
 
     const normalizedScore = maxScore > 0 ? candidate.score / maxScore : 0;
 
-    results.push({
+    const item: ContextBundleItem = {
       path: candidate.path,
       range: [startLine, endLine],
-      preview,
       why: Array.from(reasons).sort(),
       score: Number.isFinite(normalizedScore) ? normalizedScore : 0,
-    });
+    };
+
+    // Add preview only if not in compact mode
+    if (!params.compact) {
+      item.preview = buildSnippetPreview(candidate.content, startLine, endLine);
+    }
+
+    results.push(item);
   }
 
   // コンテンツベースのトークン推定を使用（より正確）

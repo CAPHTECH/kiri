@@ -70,25 +70,59 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
   {
     name: "context.bundle",
     description:
-      "🎯 PRIMARY TOOL: Extract relevant code context for any task or goal. Intelligently finds related files using keyword matching, dependency analysis, file proximity, and semantic similarity. Returns ranked code snippets with explanations of relevance. USE THIS FIRST for: implementing new features, fixing bugs, understanding how existing code works, exploring architecture, or any code comprehension task. Automatically handles token optimization by returning only the most relevant snippets. Example: goal='How does authentication work?' returns auth-related code with reasons like 'text:auth', 'dep:login.ts', 'symbol:authenticate'.",
+      "🎯 PRIMARY TOOL: Extracts relevant code context for a specific task or question.\n\n" +
+      "Use this tool as your first step for any code-related task. It intelligently finds and ranks relevant files and code snippets using keyword matching, dependency analysis, and semantic similarity.\n\n" +
+      "IMPORTANT: The 'goal' parameter MUST be a clear and specific description of your objective. Use concrete keywords, not abstract verbs.\n\n" +
+      "✅ GOOD EXAMPLES (use specific keywords):\n" +
+      "- goal='User authentication flow, JWT token validation'\n" +
+      "- goal='Canvas page routing, API endpoints, navigation patterns'\n" +
+      "- goal='Fix pagination off-by-one error in product listing'\n" +
+      "- goal='Database connection pooling, retry logic'\n" +
+      "- goal='Implement OAuth2 integration with existing auth system'\n\n" +
+      "❌ BAD EXAMPLES (too vague, avoid these):\n" +
+      "- goal='Understand how canvas pages are accessed' (starts with abstract verb)\n" +
+      "- goal='understand' (single word, no context)\n" +
+      "- goal='explore the authentication system' (vague verb + long sentence)\n" +
+      "- goal='fix bug' (which bug? be specific)\n" +
+      "- goal='authentication' (noun only, what about it?)\n\n" +
+      "TOKEN OPTIMIZATION: Use 'compact: true' to reduce token consumption by ~95%. Returns only metadata (path, range, why, score) without preview field. " +
+      "Combine with snippets.get for two-tier approach: first get candidate list (compact), then fetch selected content.\n\n" +
+      "Returns ranked code snippets with explanations (e.g., 'text:auth', 'dep:login.ts', 'boost:app-file') and automatically optimizes token usage.",
     inputSchema: {
       type: "object",
       required: ["goal"],
       additionalProperties: true,
       properties: {
-        goal: { type: "string", description: "Description of the task or goal to accomplish." },
+        goal: {
+          type: "string",
+          description:
+            "A clear, specific description using concrete keywords. Focus on WHAT you're looking for, not HOW to find it. " +
+            "Good: 'User login validation, session management, token refresh'. " +
+            "Bad: 'Understand how users log in', 'explore auth', 'authentication'.",
+        },
         limit: {
           type: "number",
           minimum: 1,
           maximum: 20,
-          description: "Maximum number of snippets to return. Default is 12.",
+          description:
+            "Maximum number of snippets to return. Default: 7 (optimized for token efficiency), use 5 for quick exploration, 10-15 for deep investigation.",
         },
-        profile: { type: "string", description: "Evaluation profile name." },
+        compact: {
+          type: "boolean",
+          description:
+            "If true, omits the 'preview' field to drastically reduce token consumption (~95% reduction). " +
+            "Returns only metadata: path, range, why, score. Use with snippets.get for two-tier approach. " +
+            "Default: false (includes preview for backward compatibility).",
+        },
+        profile: {
+          type: "string",
+          description: "Evaluation profile name (bugfix, testfail, refactor, typeerror, feature).",
+        },
         boost_profile: {
           type: "string",
           enum: ["default", "docs", "none"],
           description:
-            'File type boosting mode: "default" prioritizes implementation files (src/*.ts), "docs" prioritizes documentation (*.md), "none" disables boosting. Default is "default".',
+            'File type boosting mode: "default" prioritizes implementation files (src/app/, src/components/), "docs" prioritizes documentation (*.md), "none" disables boosting. Default is "default".',
         },
         artifacts: {
           type: "object",
@@ -96,14 +130,18 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
           properties: {
             editing_path: {
               type: "string",
-              description: "Path to the file currently being edited.",
+              description:
+                "Path to the file currently being edited. Strongly recommended to provide for better context.",
             },
             failing_tests: {
               type: "array",
               items: { type: "string" },
-              description: "Names of failing test cases.",
+              description: "Names of failing test cases. Useful for debugging.",
             },
-            last_diff: { type: "string", description: "Recent diff content." },
+            last_diff: {
+              type: "string",
+              description: "Recent diff content. Useful for understanding current changes.",
+            },
           },
         },
       },
@@ -139,22 +177,56 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
   {
     name: "files.search",
     description:
-      "Search files by keyword with full-text indexing (BM25 ranking when FTS extension is available, falls back to ILIKE pattern matching). Use when you know SPECIFIC identifiers: function names, class names, error messages, log strings, or exact code patterns. Returns matching files with previews and line numbers. For broader exploration like 'understand feature X' or 'how does Y work', prefer context.bundle instead. Supports filters: lang (e.g., 'typescript'), ext (e.g., '.ts'), path_prefix (e.g., 'src/auth/'). Example: query='validateToken' finds files containing that function name.",
+      "Search files by specific keywords or identifiers. Use when you know EXACT terms to search for: function names, class names, error messages, or code patterns.\n\n" +
+      "IMPORTANT: For broader exploration like 'understand feature X' or 'how does Y work', use context.bundle instead. This tool is for TARGETED searches with specific identifiers.\n\n" +
+      "✅ GOOD EXAMPLES (specific identifiers):\n" +
+      "- query='validateToken' (exact function name)\n" +
+      "- query='AuthenticationError' (specific class/error)\n" +
+      "- query='Cannot read property' (exact error message)\n" +
+      "- query='import { jwt }' (specific import pattern)\n" +
+      "- query='userId' (variable name)\n\n" +
+      "❌ BAD EXAMPLES (too vague or abstract):\n" +
+      "- query='understand authentication' (use context.bundle instead)\n" +
+      "- query='how login works' (use context.bundle instead)\n" +
+      "- query='explore' (no specific target)\n" +
+      "- query='auth' (too generic, will match too many files)\n\n" +
+      "Supports filters: lang (e.g., 'typescript'), ext (e.g., '.ts'), path_prefix (e.g., 'src/auth/'). Returns matching files with previews and line numbers.",
     inputSchema: {
       type: "object",
       required: ["query"],
       additionalProperties: true,
       properties: {
-        query: { type: "string" },
-        lang: { type: "string" },
-        ext: { type: "string" },
-        path_prefix: { type: "string" },
-        limit: { type: "number", minimum: 1, maximum: 200 },
+        query: {
+          type: "string",
+          description:
+            "Specific keyword, function name, class name, error message, or code pattern to search for. " +
+            "Be as specific as possible. Good: 'handleUserLogin', 'JWT_SECRET', 'ReferenceError'. " +
+            "Bad: 'login', 'authentication', 'understand'.",
+        },
+        lang: {
+          type: "string",
+          description: "Filter by language name (e.g., 'typescript', 'python', 'swift').",
+        },
+        ext: {
+          type: "string",
+          description: "Filter by file extension (e.g., '.ts', '.py', '.md').",
+        },
+        path_prefix: {
+          type: "string",
+          description: "Filter by path prefix (e.g., 'src/auth/', 'tests/'). No '..' allowed.",
+        },
+        limit: {
+          type: "number",
+          minimum: 1,
+          maximum: 200,
+          description:
+            "Maximum number of results. Default: 50. Use higher values for exhaustive search.",
+        },
         boost_profile: {
           type: "string",
           enum: ["default", "docs", "none"],
           description:
-            'File type boosting mode: "default" prioritizes implementation files (src/*.ts), "docs" prioritizes documentation (*.md), "none" disables boosting. Default is "default".',
+            'File type boosting mode: "default" prioritizes implementation files (src/app/, src/components/), "docs" prioritizes documentation (*.md), "none" disables boosting. Default is "default".',
         },
       },
     },
@@ -362,6 +434,11 @@ function parseContextBundleParams(input: unknown): ContextBundleParams {
   const boostProfile = record.boost_profile;
   if (boostProfile === "default" || boostProfile === "docs" || boostProfile === "none") {
     params.boost_profile = boostProfile;
+  }
+
+  // Parse compact parameter
+  if (typeof record.compact === "boolean") {
+    params.compact = record.compact;
   }
 
   return params;

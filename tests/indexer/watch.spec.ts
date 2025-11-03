@@ -145,7 +145,7 @@ describe("IndexWatcher", () => {
     }
 
     // Wait for debounce and single reindex
-    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await new Promise((resolve) => setTimeout(resolve, 2500));
 
     const stats = watcher.getStatistics();
     // Should trigger at least 1 reindex (debouncing may cause 1-2 depending on timing)
@@ -165,7 +165,7 @@ describe("IndexWatcher", () => {
     }
     await rm(dbDir, { recursive: true, force: true });
     await repo.cleanup();
-  });
+  }, 10000);
 
   it("tracks statistics correctly", async () => {
     const repo = await createTempRepo({

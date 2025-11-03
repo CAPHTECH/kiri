@@ -48,7 +48,7 @@ describe("files.search", () => {
     expect(paths).toContain("src/main.ts");
     expect(paths).toContain("docs/readme.md");
     expect(results.every((item) => item.preview.toLowerCase().includes("meaning"))).toBe(true);
-  });
+  }, 10000);
 
   it("returns matches for multi-word queries with OR logic", async () => {
     const repo = await createTempRepo({

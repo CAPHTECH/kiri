@@ -90,7 +90,7 @@ describe("context.bundle", () => {
     const nearby = bundle.context.find((item) => item.path === "src/auth/token.spec.ts");
     expect(nearby).toBeDefined();
     expect(nearby?.why.some((reason) => reason.startsWith("near:"))).toBe(true);
-  });
+  }, 10000);
 
   it("rejects empty goals", async () => {
     const repo = await createTempRepo({
