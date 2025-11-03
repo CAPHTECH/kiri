@@ -2,11 +2,11 @@
 # Each profile defines weights for different ranking signals
 
 default:
-  textMatch: 1.0 # Text/keyword match weight
+  textMatch: 0.8 # Text/keyword match weight (reduced to decrease noise from broad matches)
   editingPath: 2.0 # Currently editing file weight
-  dependency: 0.5 # Dependency relationship weight
+  dependency: 0.6 # Dependency relationship weight (increased to prioritize connected implementation files)
   proximity: 0.25 # Same directory weight
-  structural: 0.75 # Structural similarity weight (LSH-based, not semantic embeddings)
+  structural: 1.0 # Structural similarity weight (increased to improve semantic matching for broad terms)
 
 bugfix:
   textMatch: 1.0

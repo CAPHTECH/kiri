@@ -559,6 +559,8 @@ function applyBoostProfile(
   }
 
   const { path, ext } = row;
+  const lowerPath = path.toLowerCase();
+  const fileName = path.split("/").pop() ?? "";
 
   // Blacklisted directories that are almost always irrelevant for code context
   const blacklistedDirs = [
@@ -571,10 +573,80 @@ function applyBoostProfile(
     "tests/",
     ".git/",
     "node_modules/",
+    "db/migrate/",
+    "db/migrations/",
+    "config/",
+    "dist/",
+    "build/",
+    "out/",
+    "coverage/",
+    ".vscode/",
+    ".idea/",
+    "tmp/",
+    "temp/",
   ];
   if (blacklistedDirs.some((dir) => path.startsWith(dir))) {
     candidate.score = -100; // Effectively remove it
     candidate.reasons.add("penalty:blacklisted-dir");
+    return;
+  }
+
+  // Penalize test files explicitly (even if outside test directories)
+  const testPatterns = [".spec.ts", ".spec.js", ".test.ts", ".test.js", ".spec.tsx", ".test.tsx"];
+  if (testPatterns.some((pattern) => lowerPath.endsWith(pattern))) {
+    candidate.score -= 2.0; // Strong penalty for test files
+    candidate.reasons.add("penalty:test-file");
+    return;
+  }
+
+  // Penalize lock files and package manifests
+  const lockFiles = [
+    "package-lock.json",
+    "pnpm-lock.yaml",
+    "yarn.lock",
+    "bun.lockb",
+    "Gemfile.lock",
+    "Cargo.lock",
+    "poetry.lock",
+  ];
+  if (lockFiles.some((lockFile) => fileName === lockFile)) {
+    candidate.score -= 3.0; // Very strong penalty for lock files
+    candidate.reasons.add("penalty:lock-file");
+    return;
+  }
+
+  // Penalize configuration files
+  const configPatterns = [
+    ".config.js",
+    ".config.ts",
+    ".config.mjs",
+    ".config.cjs",
+    "tsconfig.json",
+    "jsconfig.json",
+    "package.json",
+    ".eslintrc",
+    ".prettierrc",
+    "jest.config",
+    "vite.config",
+    "vitest.config",
+    "webpack.config",
+    "rollup.config",
+  ];
+  if (
+    configPatterns.some((pattern) => lowerPath.endsWith(pattern) || fileName.startsWith(".env")) ||
+    fileName === "Dockerfile" ||
+    fileName === "docker-compose.yml" ||
+    fileName === "docker-compose.yaml"
+  ) {
+    candidate.score -= 1.5; // Strong penalty for config files
+    candidate.reasons.add("penalty:config-file");
+    return;
+  }
+
+  // Penalize migration files (by path content)
+  if (lowerPath.includes("migrate") || lowerPath.includes("migration")) {
+    candidate.score -= 2.0; // Strong penalty for migrations
+    candidate.reasons.add("penalty:migration-file");
     return;
   }
 
@@ -1064,6 +1136,7 @@ export async function contextBundle(
   applyStructuralScores(materializedCandidates, queryEmbedding, weights.structural);
 
   const sortedCandidates = materializedCandidates
+    .filter((candidate) => candidate.score > 0) // Filter out candidates with negative or zero scores
     .sort((a, b) => {
       if (b.score === a.score) {
         return a.path.localeCompare(b.path);
