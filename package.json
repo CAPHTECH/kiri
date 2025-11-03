@@ -1,6 +1,6 @@
 {
   "name": "kiri-mcp-server",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "KIRI context extraction platform",
   "type": "module",
   "packageManager": "pnpm@9.0.0",
