@@ -135,6 +135,7 @@ describe("context_bundle", () => {
     const bundle = await contextBundle(context, {
       goal: "test project documentation",
       limit: 5,
+      boost_profile: "docs", // Explicitly search for documentation
     });
 
     expect(bundle.context.length).toBeGreaterThan(0);
@@ -500,4 +501,295 @@ describe("context_bundle", () => {
       expect(routerIndex).toBeLessThan(docsIndex);
     }
   });
+
+  it("preserves hyphenated terms like 'page-agent' and prioritizes matching paths", async () => {
+    const repo = await createTempRepo({
+      "lambda/page-agent/src/handler.ts": `export function handlePageAgent() {\n  return "page-agent handler";\n}\n`,
+      "lambda/page-agent/src/runtime.ts": `export function pageAgentRuntime() {\n  return "runtime";\n}\n`,
+      "lambda/canvas-agent/src/handler.ts": `export function handleCanvasAgent() {\n  return "canvas-agent handler";\n}\n`,
+      "lambda/ai/handlers/PageEditHandler.ts": `export class PageEditHandler {\n  handle() {\n    return "page edit";\n  }\n}\n`,
+      "src/page/viewer.ts": `export function viewPage() {\n  return "page viewer";\n}\n`,
+    });
+    cleanupTargets.push({ dispose: repo.cleanup });
+
+    const dbDir = await mkdtemp(join(tmpdir(), "kiri-db-"));
+    const dbPath = join(dbDir, "index.duckdb");
+    cleanupTargets.push({ dispose: async () => await rm(dbDir, { recursive: true, force: true }) });
+
+    await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+    const db = await DuckDBClient.connect({ databasePath: dbPath });
+    cleanupTargets.push({ dispose: async () => await db.close() });
+
+    const repoId = await resolveRepoId(db, repo.path);
+    const context: ServerContext = { db, repoId };
+
+    const bundle = await contextBundle(context, {
+      goal: "page-agent Lambda handler implementation",
+      limit: 10,
+    });
+
+    expect(bundle.context.length).toBeGreaterThan(0);
+
+    // page-agent ディレクトリのファイルが最上位にランクされるべき
+    const pageAgentHandler = bundle.context.find(
+      (item) => item.path === "lambda/page-agent/src/handler.ts"
+    );
+    expect(pageAgentHandler).toBeDefined();
+    expect(pageAgentHandler?.why.some((reason) => reason.includes("phrase:page-agent"))).toBe(true);
+
+    // path-based matchingでブーストされるべき
+    const hasPathMatch = pageAgentHandler?.why.some(
+      (reason) => reason.startsWith("path-phrase:") || reason.startsWith("path-segment:")
+    );
+    expect(hasPathMatch).toBe(true);
+
+    // canvas-agent は含まれるべきでない、または page-agent より下位にランクされるべき
+    const canvasAgentHandler = bundle.context.find(
+      (item) => item.path === "lambda/canvas-agent/src/handler.ts"
+    );
+    if (canvasAgentHandler && pageAgentHandler) {
+      const pageAgentIndex = bundle.context.indexOf(pageAgentHandler);
+      const canvasAgentIndex = bundle.context.indexOf(canvasAgentHandler);
+      expect(pageAgentIndex).toBeLessThan(canvasAgentIndex);
+    }
+  }, 15000);
+
+  it("supports hyphenated terms as phrases and path matching", async () => {
+    const repo = await createTempRepo({
+      "src/auth/oauth-handler.ts": `export function handleOAuth() {\n  return "oauth-handler implementation";\n}\n`,
+      "src/auth/password-handler.ts": `export function handlePassword() {\n  return "password auth";\n}\n`,
+      "src/utils/helper.ts": `export function formatOAuth() {\n  return "helper OAuth";\n}\n`,
+    });
+    cleanupTargets.push({ dispose: repo.cleanup });
+
+    const dbDir = await mkdtemp(join(tmpdir(), "kiri-db-"));
+    const dbPath = join(dbDir, "index.duckdb");
+    cleanupTargets.push({ dispose: async () => await rm(dbDir, { recursive: true, force: true }) });
+
+    await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+    const db = await DuckDBClient.connect({ databasePath: dbPath });
+    cleanupTargets.push({ dispose: async () => await db.close() });
+
+    const repoId = await resolveRepoId(db, repo.path);
+    const context: ServerContext = { db, repoId };
+
+    // ハイフン区切り用語を使用（引用符なし）
+    const bundle = await contextBundle(context, {
+      goal: "oauth-handler authentication implementation",
+      limit: 10,
+    });
+
+    expect(bundle.context.length).toBeGreaterThan(0);
+
+    // oauth-handler.ts が最上位にランクされるべき
+    const oauthHandler = bundle.context.find((item) => item.path === "src/auth/oauth-handler.ts");
+    expect(oauthHandler).toBeDefined();
+
+    // フレーズマッチまたはパスマッチの理由が含まれるべき
+    const hasMatch =
+      oauthHandler?.why.some((reason) => reason.startsWith("phrase:")) ||
+      oauthHandler?.why.some((reason) => reason.startsWith("path-"));
+    expect(hasMatch).toBe(true);
+  }, 15000);
+
+  it("applies path-based scoring boost when keywords appear in file paths", async () => {
+    const repo = await createTempRepo({
+      "src/features/user-profile/handler.ts": `export function handleProfile() {\n  return "profile handler";\n}\n`,
+      "src/features/user-profile/service.ts": `export function profileService() {\n  return "service";\n}\n`,
+      "src/utils/profile.ts": `export function formatProfile() {\n  return "formatter";\n}\n`,
+      "tests/profile.spec.ts": `test("profile works", () => {});\n`,
+    });
+    cleanupTargets.push({ dispose: repo.cleanup });
+
+    const dbDir = await mkdtemp(join(tmpdir(), "kiri-db-"));
+    const dbPath = join(dbDir, "index.duckdb");
+    cleanupTargets.push({ dispose: async () => await rm(dbDir, { recursive: true, force: true }) });
+
+    await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+    const db = await DuckDBClient.connect({ databasePath: dbPath });
+    cleanupTargets.push({ dispose: async () => await db.close() });
+
+    const repoId = await resolveRepoId(db, repo.path);
+    const context: ServerContext = { db, repoId };
+
+    const bundle = await contextBundle(context, {
+      goal: "user-profile handler implementation",
+      limit: 10,
+    });
+
+    expect(bundle.context.length).toBeGreaterThan(0);
+
+    // user-profile ディレクトリのファイルがパスマッチでブーストされるべき
+    const profileHandler = bundle.context.find(
+      (item) => item.path === "src/features/user-profile/handler.ts"
+    );
+    expect(profileHandler).toBeDefined();
+
+    // path-based boostingの理由が含まれるべき
+    const hasPathBoost = profileHandler?.why.some(
+      (reason) =>
+        reason.startsWith("path-phrase:") ||
+        reason.startsWith("path-segment:") ||
+        reason.startsWith("path-keyword:")
+    );
+    expect(hasPathBoost).toBe(true);
+
+    // user-profileディレクトリ内のファイルがディレクトリ外のファイルより上位にランクされるべき
+    const utilsProfile = bundle.context.find((item) => item.path === "src/utils/profile.ts");
+    if (utilsProfile && profileHandler) {
+      const handlerIndex = bundle.context.indexOf(profileHandler);
+      const utilsIndex = bundle.context.indexOf(utilsProfile);
+      expect(handlerIndex).toBeLessThan(utilsIndex);
+    }
+  }, 15000);
+
+  it("reduces structural similarity weight to prevent false positives", async () => {
+    const repo = await createTempRepo({
+      "src/auth/login-handler.ts": `// login-handler implementation for user authentication\nexport function handleLogin(credentials: { user: string, pass: string }) {\n  const authenticated = verifyCredentials(credentials);\n  if (!authenticated) {\n    throw new Error("Login failed");\n  }\n  return { success: true };\n}\n\nfunction verifyCredentials(creds: { user: string, pass: string }): boolean {\n  return creds.pass.length > 8;\n}\n`,
+      "src/auth/logout-handler.ts": `// logout-handler implementation for session termination\nexport function handleLogout(sessionId: string) {\n  const session = findSession(sessionId);\n  if (!session) {\n    throw new Error("Logout failed");\n  }\n  return { success: true };\n}\n\nfunction findSession(id: string): unknown {\n  return {};\n}\n`,
+    });
+    cleanupTargets.push({ dispose: repo.cleanup });
+
+    const dbDir = await mkdtemp(join(tmpdir(), "kiri-db-"));
+    const dbPath = join(dbDir, "index.duckdb");
+    cleanupTargets.push({ dispose: async () => await rm(dbDir, { recursive: true, force: true }) });
+
+    await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+    const db = await DuckDBClient.connect({ databasePath: dbPath });
+    cleanupTargets.push({ dispose: async () => await db.close() });
+
+    const repoId = await resolveRepoId(db, repo.path);
+    const context: ServerContext = { db, repoId };
+
+    // "login-handler" を検索して、構造的に似ている "logout-handler" が
+    // 誤ってマッチしないことを確認
+    const bundle = await contextBundle(context, {
+      goal: "login-handler user authentication",
+      limit: 10,
+    });
+
+    expect(bundle.context.length).toBeGreaterThan(0);
+
+    // login-handler が最上位にランクされるべき
+    const loginHandler = bundle.context.find((item) => item.path === "src/auth/login-handler.ts");
+    expect(loginHandler).toBeDefined();
+
+    // logout-handler は含まれるべきでない、またはランクが低いべき
+    const logoutHandler = bundle.context.find((item) => item.path === "src/auth/logout-handler.ts");
+    if (logoutHandler && loginHandler) {
+      const loginIndex = bundle.context.indexOf(loginHandler);
+      const logoutIndex = bundle.context.indexOf(logoutHandler);
+      expect(loginIndex).toBeLessThan(logoutIndex);
+
+      // 構造的類似度による誤ったブーストが過度でないことを確認
+      const loginScore = loginHandler.score;
+      const logoutScore = logoutHandler.score;
+      expect(loginScore).toBeGreaterThan(logoutScore);
+    }
+  }, 15000);
+
+  // Regression test for original reported issue
+  it("correctly ranks lambda/page-agent over canvas-agent and legacy handlers", async () => {
+    const repo = await createTempRepo({
+      "lambda/page-agent/src/handler.ts": `
+// Lambda handler for page-agent
+export async function handlePageAgent(event: any) {
+  console.log("Processing page agent request");
+  return { statusCode: 200, body: "Page agent handler" };
+}`,
+      "lambda/canvas-agent/src/handler.ts": `
+// Lambda handler for canvas-agent
+export async function handleCanvasAgent(event: any) {
+  console.log("Processing canvas agent request");
+  return { statusCode: 200, body: "Canvas agent handler" };
+}`,
+      "src/legacy/PageEditHandler.ts": `
+// Legacy page edit handler (deprecated)
+export class PageEditHandler {
+  async handleEdit(pageId: string, content: string) {
+    console.log("Editing page with legacy handler");
+    return { success: true };
+  }
+}`,
+      "lambda/page-agent/README.md": `
+# Page Agent Lambda
+
+This Lambda function handles page-agent operations.
+`,
+      "lambda/canvas-agent/README.md": `
+# Canvas Agent Lambda
+
+This Lambda function handles canvas-agent operations.
+`,
+    });
+    cleanupTargets.push({ dispose: repo.cleanup });
+
+    const dbDir = await mkdtemp(join(tmpdir(), "kiri-db-"));
+    const dbPath = join(dbDir, "index.duckdb");
+    cleanupTargets.push({ dispose: async () => await rm(dbDir, { recursive: true, force: true }) });
+
+    await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+    const db = await DuckDBClient.connect({ databasePath: dbPath });
+    cleanupTargets.push({ dispose: async () => await db.close() });
+
+    const repoId = await resolveRepoId(db, repo.path);
+    const context: ServerContext = { db, repoId };
+
+    // This is the exact query from the original problem report
+    const bundle = await contextBundle(context, {
+      goal: "page-agent Lambda handler",
+      limit: 10,
+    });
+
+    // Find the relevant files
+    const pageAgentHandler = bundle.context.find(
+      (item) => item.path === "lambda/page-agent/src/handler.ts"
+    );
+    const canvasAgentHandler = bundle.context.find(
+      (item) => item.path === "lambda/canvas-agent/src/handler.ts"
+    );
+    const legacyHandler = bundle.context.find(
+      (item) => item.path === "src/legacy/PageEditHandler.ts"
+    );
+
+    // Assertions
+    expect(pageAgentHandler).toBeDefined();
+    expect(pageAgentHandler!.path).toBe("lambda/page-agent/src/handler.ts");
+
+    // Verify phrase matching is working
+    const hasPhraseMatch = pageAgentHandler!.why.some(
+      (reason) => reason.includes("phrase:page-agent") || reason.includes("phrase:page")
+    );
+    expect(hasPhraseMatch).toBe(true);
+
+    // Verify path-based scoring is applied
+    const hasPathBoost = pageAgentHandler!.why.some(
+      (reason) =>
+        reason.startsWith("path-phrase:") ||
+        reason.startsWith("path-segment:") ||
+        reason.startsWith("path-keyword:")
+    );
+    expect(hasPathBoost).toBe(true);
+
+    // Critical: page-agent handler should rank higher than canvas-agent
+    if (canvasAgentHandler) {
+      expect(pageAgentHandler!.score).toBeGreaterThan(canvasAgentHandler.score);
+    }
+
+    // Critical: page-agent handler should rank higher than legacy handler
+    if (legacyHandler) {
+      expect(pageAgentHandler!.score).toBeGreaterThan(legacyHandler.score);
+    }
+
+    // Ideally, page-agent should be in top 3 results
+    const pageAgentRank = bundle.context.findIndex(
+      (item) => item.path === "lambda/page-agent/src/handler.ts"
+    );
+    expect(pageAgentRank).toBeLessThan(3);
+  }, 15000);
 });

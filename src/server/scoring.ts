@@ -11,6 +11,8 @@ import { parseSimpleYaml } from "../shared/utils/simpleYaml.js";
 export interface ScoringWeights {
   /** テキストマッチ（キーワード検索）の重み */
   textMatch: number;
+  /** パスマッチ（ファイルパスにキーワードが含まれる）の重み */
+  pathMatch: number;
   /** 編集中ファイル（editing_path）の重み */
   editingPath: number;
   /** 依存関係の重み */
@@ -35,7 +37,14 @@ function validateWeights(weights: unknown, profileName: string): ScoringWeights 
     throw new Error(`Profile '${profileName}' must be an object`);
   }
 
-  const required = ["textMatch", "editingPath", "dependency", "proximity", "structural"];
+  const required = [
+    "textMatch",
+    "pathMatch",
+    "editingPath",
+    "dependency",
+    "proximity",
+    "structural",
+  ];
   const obj = weights as Record<string, unknown>;
 
   for (const key of required) {
@@ -89,6 +98,7 @@ function loadProfilesFromConfig(): Record<ScoringProfileName, ScoringWeights> {
     profilesCache = {
       default: {
         textMatch: 1.0,
+        pathMatch: 1.5,
         editingPath: 2.0,
         dependency: 0.5,
         proximity: 0.25,
@@ -96,6 +106,7 @@ function loadProfilesFromConfig(): Record<ScoringProfileName, ScoringWeights> {
       },
       bugfix: {
         textMatch: 1.0,
+        pathMatch: 1.5,
         editingPath: 1.8,
         dependency: 0.7,
         proximity: 0.35,
@@ -103,6 +114,7 @@ function loadProfilesFromConfig(): Record<ScoringProfileName, ScoringWeights> {
       },
       testfail: {
         textMatch: 1.0,
+        pathMatch: 1.5,
         editingPath: 1.6,
         dependency: 0.85,
         proximity: 0.3,
@@ -110,6 +122,7 @@ function loadProfilesFromConfig(): Record<ScoringProfileName, ScoringWeights> {
       },
       typeerror: {
         textMatch: 1.0,
+        pathMatch: 1.5,
         editingPath: 1.4,
         dependency: 0.6,
         proximity: 0.4,
@@ -117,6 +130,7 @@ function loadProfilesFromConfig(): Record<ScoringProfileName, ScoringWeights> {
       },
       feature: {
         textMatch: 1.0,
+        pathMatch: 1.5,
         editingPath: 1.5,
         dependency: 0.45,
         proximity: 0.5,

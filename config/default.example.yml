@@ -4,6 +4,15 @@ mcp:
   tools:
     - context_bundle
     - files_search
+
+# Tokenization configuration for keyword extraction
+tokenization:
+  # Strategy: "phrase-aware" (default), "legacy", or "hybrid"
+  # - phrase-aware: Preserves hyphenated terms (e.g., "page-agent" stays as one unit)
+  # - legacy: Splits on hyphens (e.g., "page-agent" → ["page", "agent"])
+  # - hybrid: Emits both phrases and split keywords
+  strategy: "phrase-aware"
+
 indexer:
   repoRoot: "../../target-repo"
   database: "var/index.duckdb"

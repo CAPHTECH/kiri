@@ -1,19 +1,13 @@
 import { createHash } from "node:crypto";
 
+import { tokenizeText } from "./tokenizer.js";
+
 export interface EmbeddingVector {
   dims: number;
   values: number[];
 }
 
 const DEFAULT_DIMS = 64;
-
-function tokenize(text: string): string[] {
-  return text
-    .toLowerCase()
-    .split(/[^\p{L}\p{N}_]+/u)
-    .map((token) => token.trim())
-    .filter((token) => token.length > 0);
-}
 
 function hashToken(token: string): number {
   const digest = createHash("sha256").update(token).digest();
@@ -48,7 +42,7 @@ export function generateEmbedding(text: string, dims = DEFAULT_DIMS): EmbeddingV
   if (!text || text.trim().length === 0) {
     return null;
   }
-  const tokens = tokenize(text);
+  const tokens = tokenizeText(text);
   if (tokens.length === 0) {
     return null;
   }

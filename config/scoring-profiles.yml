@@ -2,36 +2,41 @@
 # Each profile defines weights for different ranking signals
 
 default:
-  textMatch: 0.8 # Text/keyword match weight (reduced to decrease noise from broad matches)
+  textMatch: 1.0 # Text/keyword match weight (increased to prioritize literal matches)
+  pathMatch: 1.5 # Path-based match weight (new - prioritizes files with keywords in paths)
   editingPath: 2.0 # Currently editing file weight
   dependency: 0.6 # Dependency relationship weight (increased to prioritize connected implementation files)
   proximity: 0.25 # Same directory weight
-  structural: 1.0 # Structural similarity weight (increased to improve semantic matching for broad terms)
+  structural: 0.6 # Structural similarity weight (reduced to prevent false positives from similar structure)
 
 bugfix:
   textMatch: 1.0
+  pathMatch: 1.5
   editingPath: 1.8
   dependency: 0.7 # Higher: bugs often in dependencies
   proximity: 0.35
-  structural: 0.9 # Higher: structural understanding helps
+  structural: 0.7 # Reduced: prevent canvas-agent matching when searching page-agent
 
 testfail:
   textMatch: 1.0
+  pathMatch: 1.5
   editingPath: 1.6
   dependency: 0.85 # Very high: failed tests reveal dependencies
   proximity: 0.3
-  structural: 0.8
+  structural: 0.7 # Reduced: focus on actual test dependencies
 
 typeerror:
   textMatch: 1.0
+  pathMatch: 1.5
   editingPath: 1.4
   dependency: 0.6
   proximity: 0.4 # Higher: type errors cluster in modules
-  structural: 0.6 # Lower: type errors are structural
+  structural: 0.6 # Already balanced for type analysis
 
 feature:
   textMatch: 1.0
+  pathMatch: 1.5
   editingPath: 1.5
   dependency: 0.45 # Lower: new features less dependent
   proximity: 0.5 # Higher: features cluster spatially
-  structural: 0.7
+  structural: 0.6 # Reduced: focus on actual feature files
