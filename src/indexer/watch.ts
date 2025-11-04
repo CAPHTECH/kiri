@@ -51,8 +51,9 @@ export interface WatcherStatistics {
  * - Statistics: Tracks reindex count, duration, and queue depth
  *
  * Implementation Note:
- * Uses full reindex (not incremental) for simplicity and consistency.
- * This approach ensures no stale data or broken dependencies.
+ * Uses incremental reindex (hash-based change detection) for performance.
+ * Only files with changed content hashes are re-parsed and updated in the database.
+ * This provides significant speedup for watch mode while maintaining consistency.
  */
 export class IndexWatcher {
   private readonly options: {
@@ -198,7 +199,7 @@ export class IndexWatcher {
   }
 
   /**
-   * Executes a full reindex operation.
+   * Executes an incremental reindex operation for changed files only.
    *
    * If a reindex is already in progress, marks a pending flag to trigger
    * another reindex after the current one completes.
@@ -222,6 +223,9 @@ export class IndexWatcher {
     this.isReindexing = true;
     this.pendingReindex = false;
     this.stats.lastReindexStart = performance.now();
+
+    // Capture pending files for incremental indexing
+    const changedPaths = Array.from(this.pendingFiles);
 
     // Create and store the reindex promise for proper shutdown handling
     this.reindexPromise = (async () => {
@@ -247,14 +251,15 @@ export class IndexWatcher {
           throw error;
         }
 
-        // Run full reindex
+        // Run incremental reindex for changed files only
         const start = performance.now();
-        process.stderr.write(`🔄 Reindexing ${this.options.repoRoot}...\n`);
+        process.stderr.write(`🔄 Incrementally reindexing ${changedPaths.length} file(s)...\n`);
 
         await runIndexer({
           repoRoot: this.options.repoRoot,
           databasePath: this.options.databasePath,
-          full: true,
+          full: false,
+          changedPaths,
         });
 
         const duration = performance.now() - start;
@@ -262,7 +267,7 @@ export class IndexWatcher {
         this.stats.lastReindexDuration = duration;
         this.stats.queueDepth = 0;
 
-        process.stderr.write(`✅ Reindex complete in ${Math.round(duration)}ms\n`);
+        process.stderr.write(`✅ Incremental reindex complete in ${Math.round(duration)}ms\n`);
 
         // Periodic statistics (every 10 reindexes)
         if (this.stats.reindexCount % 10 === 0) {
