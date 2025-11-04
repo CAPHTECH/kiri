@@ -21,6 +21,10 @@ export interface ScoringWeights {
   proximity: number;
   /** 構造的類似度の重み（LSHベース、セマンティック埋め込みではない） */
   structural: number;
+  /** ドキュメントファイルへの乗算的ペナルティ（0.0-1.0、デフォルト: 0.3 = 70%削減） */
+  docPenaltyMultiplier: number;
+  /** 実装ファイルへの乗算的ブースト（1.0以上、デフォルト: 1.3 = 30%ブースト） */
+  implBoostMultiplier: number;
 }
 
 export type ScoringProfileName = "default" | "bugfix" | "testfail" | "typeerror" | "feature";
@@ -44,6 +48,8 @@ function validateWeights(weights: unknown, profileName: string): ScoringWeights 
     "dependency",
     "proximity",
     "structural",
+    "docPenaltyMultiplier",
+    "implBoostMultiplier",
   ];
   const obj = weights as Record<string, unknown>;
 
@@ -103,6 +109,8 @@ function loadProfilesFromConfig(): Record<ScoringProfileName, ScoringWeights> {
         dependency: 0.5,
         proximity: 0.25,
         structural: 0.75,
+        docPenaltyMultiplier: 0.3,
+        implBoostMultiplier: 1.3,
       },
       bugfix: {
         textMatch: 1.0,
@@ -111,6 +119,8 @@ function loadProfilesFromConfig(): Record<ScoringProfileName, ScoringWeights> {
         dependency: 0.7,
         proximity: 0.35,
         structural: 0.9,
+        docPenaltyMultiplier: 0.3,
+        implBoostMultiplier: 1.3,
       },
       testfail: {
         textMatch: 1.0,
@@ -119,6 +129,8 @@ function loadProfilesFromConfig(): Record<ScoringProfileName, ScoringWeights> {
         dependency: 0.85,
         proximity: 0.3,
         structural: 0.8,
+        docPenaltyMultiplier: 0.3,
+        implBoostMultiplier: 1.3,
       },
       typeerror: {
         textMatch: 1.0,
@@ -127,6 +139,8 @@ function loadProfilesFromConfig(): Record<ScoringProfileName, ScoringWeights> {
         dependency: 0.6,
         proximity: 0.4,
         structural: 0.6,
+        docPenaltyMultiplier: 0.3,
+        implBoostMultiplier: 1.3,
       },
       feature: {
         textMatch: 1.0,
@@ -135,6 +149,8 @@ function loadProfilesFromConfig(): Record<ScoringProfileName, ScoringWeights> {
         dependency: 0.45,
         proximity: 0.5,
         structural: 0.7,
+        docPenaltyMultiplier: 0.3,
+        implBoostMultiplier: 1.3,
       },
     };
     return profilesCache;

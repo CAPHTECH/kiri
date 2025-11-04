@@ -5,7 +5,7 @@ import { generateEmbedding, structuralSimilarity } from "../shared/embedding.js"
 import { encode as encodeGPT, tokenizeText } from "../shared/tokenizer.js";
 
 import { ServerContext } from "./context.js";
-import { coerceProfileName, loadScoringProfile } from "./scoring.js";
+import { coerceProfileName, loadScoringProfile, type ScoringWeights } from "./scoring.js";
 
 export interface FilesSearchParams {
   query: string;
@@ -228,6 +228,7 @@ function buildPreview(content: string, query: string): { preview: string; line: 
 interface CandidateInfo {
   path: string;
   score: number;
+  scoreMultiplier: number; // Accumulated boost/penalty multiplier (1.0 = no change)
   reasons: Set<string>;
   matchLine: number | null;
   content: string | null;
@@ -421,6 +422,7 @@ function ensureCandidate(map: Map<string, CandidateInfo>, filePath: string): Can
     candidate = {
       path: filePath,
       score: 0,
+      scoreMultiplier: 1.0, // Default: no boost or penalty
       reasons: new Set<string>(),
       matchLine: null,
       content: null,
@@ -693,12 +695,21 @@ function applyFileTypeBoost(
  * @param row - ファイル情報（path, ext）
  * @param profile - ブーストプロファイル
  */
+/**
+ * Apply file type boost/penalty multipliers based on profile
+ * Uses multiplicative penalties (v0.7.0+) instead of additive penalties
+ *
+ * CRITICAL SAFETY RULES:
+ * 1. Multipliers are stored in candidate.scoreMultiplier, applied AFTER all additive scoring
+ * 2. profile="docs" skips documentation penalties (allows doc-focused queries)
+ * 3. Blacklist/test/lock/config files keep additive penalties (already very strong)
+ */
 function applyBoostProfile(
   candidate: CandidateInfo,
   row: { path: string; ext: string | null },
   profile: "default" | "docs" | "none",
-  extractedTerms?: ExtractedTerms,
-  pathMatchWeight?: number
+  weights: ScoringWeights,
+  extractedTerms?: ExtractedTerms
 ): void {
   if (profile === "none") {
     return;
@@ -709,11 +720,12 @@ function applyBoostProfile(
   const fileName = path.split("/").pop() ?? "";
 
   // パスベースのスコアリング: goalのキーワード/フレーズがファイルパスに含まれる場合にブースト
-  if (extractedTerms && pathMatchWeight && pathMatchWeight > 0) {
+  // NOTE: These remain ADDITIVE (not multiplicative) because they add new information
+  if (extractedTerms && weights.pathMatch > 0) {
     // フレーズがパスに完全一致する場合（最高の重み）
     for (const phrase of extractedTerms.phrases) {
       if (lowerPath.includes(phrase)) {
-        candidate.score += pathMatchWeight * 1.5; // 1.5倍のブースト
+        candidate.score += weights.pathMatch * 1.5; // 1.5倍のブースト
         candidate.reasons.add(`path-phrase:${phrase}`);
         break; // 最初のマッチのみ適用
       }
@@ -723,7 +735,7 @@ function applyBoostProfile(
     const pathParts = lowerPath.split("/");
     for (const segment of extractedTerms.pathSegments) {
       if (pathParts.includes(segment)) {
-        candidate.score += pathMatchWeight;
+        candidate.score += weights.pathMatch;
         candidate.reasons.add(`path-segment:${segment}`);
         break; // 最初のマッチのみ適用
       }
@@ -732,14 +744,14 @@ function applyBoostProfile(
     // 通常のキーワードがパスに含まれる場合（低い重み）
     for (const keyword of extractedTerms.keywords) {
       if (lowerPath.includes(keyword)) {
-        candidate.score += pathMatchWeight * 0.5; // 0.5倍のブースト
+        candidate.score += weights.pathMatch * 0.5; // 0.5倍のブースト
         candidate.reasons.add(`path-keyword:${keyword}`);
         break; // 最初のマッチのみ適用
       }
     }
   }
 
-  // Blacklisted directories that are almost always irrelevant for code context
+  // Blacklisted directories - keep ADDITIVE penalty (already very strong)
   const blacklistedDirs = [
     ".cursor/",
     ".devcontainer/",
@@ -768,7 +780,7 @@ function applyBoostProfile(
     return;
   }
 
-  // Penalize test files explicitly (even if outside test directories)
+  // Test files - keep ADDITIVE penalty
   const testPatterns = [".spec.ts", ".spec.js", ".test.ts", ".test.js", ".spec.tsx", ".test.tsx"];
   if (testPatterns.some((pattern) => lowerPath.endsWith(pattern))) {
     candidate.score -= 2.0; // Strong penalty for test files
@@ -776,7 +788,7 @@ function applyBoostProfile(
     return;
   }
 
-  // Penalize lock files and package manifests
+  // Lock files - keep ADDITIVE penalty
   const lockFiles = [
     "package-lock.json",
     "pnpm-lock.yaml",
@@ -792,7 +804,7 @@ function applyBoostProfile(
     return;
   }
 
-  // Penalize configuration files
+  // Configuration files - keep ADDITIVE penalty
   const configPatterns = [
     ".config.js",
     ".config.ts",
@@ -820,45 +832,48 @@ function applyBoostProfile(
     return;
   }
 
-  // Penalize migration files (by path content)
+  // Migration files - keep ADDITIVE penalty
   if (lowerPath.includes("migrate") || lowerPath.includes("migration")) {
     candidate.score -= 2.0; // Strong penalty for migrations
     candidate.reasons.add("penalty:migration-file");
     return;
   }
 
+  // ✅ CRITICAL SAFETY: profile="docs" mode boosts docs, skips penalties
   if (profile === "docs") {
-    // DOCS PROFILE: Boost docs, penalize code
-    if (path.endsWith(".md") || path.endsWith(".yaml") || path.endsWith(".yml")) {
-      candidate.score += 0.8;
+    const docExtensions = [".md", ".yaml", ".yml", ".mdc"];
+    if (docExtensions.some((docExt) => path.endsWith(docExt))) {
+      // Boost documentation files multiplicatively
+      candidate.scoreMultiplier *= 1.5; // 50% boost for docs
       candidate.reasons.add("boost:doc-file");
-    } else if (path.startsWith("src/") && (ext === ".ts" || ext === ".tsx" || ext === ".js")) {
-      candidate.score -= 0.5;
-      candidate.reasons.add("penalty:impl-file");
     }
-  } else if (profile === "default") {
-    // DEFAULT PROFILE: Penalize docs heavily, boost implementation files.
+    // No penalty for implementation files in "docs" mode
+    return;
+  }
 
-    // Penalize documentation and other non-code files
+  // DEFAULT PROFILE: Use MULTIPLICATIVE penalties for docs, MULTIPLICATIVE boosts for impl files
+  if (profile === "default") {
     const docExtensions = [".md", ".yaml", ".yml", ".mdc", ".json"];
     if (docExtensions.some((docExt) => path.endsWith(docExt))) {
-      candidate.score -= 2.0; // Strong penalty to overcome doc-heavy keyword matches
+      // ✅ MULTIPLICATIVE penalty (v0.7.0): 70% reduction (Phase 1 conservative)
+      candidate.scoreMultiplier *= weights.docPenaltyMultiplier;
       candidate.reasons.add("penalty:doc-file");
+      return; // Don't apply impl boosts to docs
     }
 
-    // Boost implementation files, with more specific paths getting higher scores
+    // ✅ MULTIPLICATIVE boost for implementation files
     if (path.startsWith("src/app/")) {
-      candidate.score += 0.8;
+      candidate.scoreMultiplier *= weights.implBoostMultiplier * 1.4; // Extra boost for app files
       candidate.reasons.add("boost:app-file");
     } else if (path.startsWith("src/components/")) {
-      candidate.score += 0.7;
+      candidate.scoreMultiplier *= weights.implBoostMultiplier * 1.3;
       candidate.reasons.add("boost:component-file");
     } else if (path.startsWith("src/lib/")) {
-      candidate.score += 0.6;
+      candidate.scoreMultiplier *= weights.implBoostMultiplier * 1.2;
       candidate.reasons.add("boost:lib-file");
     } else if (path.startsWith("src/")) {
       if (ext === ".ts" || ext === ".tsx" || ext === ".js") {
-        candidate.score += 0.5;
+        candidate.scoreMultiplier *= weights.implBoostMultiplier;
         candidate.reasons.add("boost:impl-file");
       }
     }
@@ -1192,7 +1207,7 @@ export async function contextBundle(
       }
 
       // Apply boost profile once per file
-      applyBoostProfile(candidate, row, boostProfile, extractedTerms, weights.pathMatch);
+      applyBoostProfile(candidate, row, boostProfile, weights, extractedTerms);
 
       // Use first matched phrase for preview (guaranteed to exist due to length check above)
       const { line } = buildPreview(row.content, matchedPhrases[0]!);
@@ -1264,7 +1279,7 @@ export async function contextBundle(
       }
 
       // Apply boost profile once per file
-      applyBoostProfile(candidate, row, boostProfile, extractedTerms, weights.pathMatch);
+      applyBoostProfile(candidate, row, boostProfile, weights, extractedTerms);
 
       // Use first matched keyword for preview (guaranteed to exist due to length check above)
       const { line } = buildPreview(row.content, matchedKeywords[0]!);
@@ -1410,6 +1425,14 @@ export async function contextBundle(
   }
 
   applyStructuralScores(materializedCandidates, queryEmbedding, weights.structural);
+
+  // ✅ CRITICAL SAFETY: Apply multipliers AFTER all additive scoring (v0.7.0)
+  // Only apply to positive scores to prevent negative score inversion
+  for (const candidate of materializedCandidates) {
+    if (candidate.scoreMultiplier !== 1.0 && candidate.score > 0) {
+      candidate.score *= candidate.scoreMultiplier;
+    }
+  }
 
   const sortedCandidates = materializedCandidates
     .filter((candidate) => candidate.score > 0) // Filter out candidates with negative or zero scores
