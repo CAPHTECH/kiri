@@ -842,7 +842,7 @@ function applyBoostProfile(
     // Penalize documentation and other non-code files
     const docExtensions = [".md", ".yaml", ".yml", ".mdc", ".json"];
     if (docExtensions.some((docExt) => path.endsWith(docExt))) {
-      candidate.score -= 1.0; // Strong penalty to overcome structural similarity
+      candidate.score -= 2.0; // Strong penalty to overcome doc-heavy keyword matches
       candidate.reasons.add("penalty:doc-file");
     }
 

@@ -135,6 +135,7 @@ describe("context_bundle", () => {
     const bundle = await contextBundle(context, {
       goal: "test project documentation",
       limit: 5,
+      boost_profile: "docs", // Explicitly search for documentation
     });
 
     expect(bundle.context.length).toBeGreaterThan(0);
