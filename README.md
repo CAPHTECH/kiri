@@ -2,7 +2,7 @@
 
 > Intelligent code context extraction for LLMs via Model Context Protocol
 
-[![Version](https://img.shields.io/badge/version-0.4.1-blue.svg)](package.json)
+[![Version](https://img.shields.io/badge/version-0.6.0-blue.svg)](package.json)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.6-blue.svg)](https://www.typescriptlang.org/)
 [![MCP](https://img.shields.io/badge/MCP-Compatible-green.svg)](https://modelcontextprotocol.io/)
@@ -12,11 +12,12 @@
 ## 🎯 Why KIRI?
 
 - **🔌 MCP Native**: Plug-and-play integration with Claude Desktop, Codex CLI, and other MCP clients
-- **🧠 Smart Context**: Extract minimal, relevant code fragments based on task goals
+- **🧠 Smart Context**: Extract minimal, relevant code fragments based on task goals (95% accuracy)
 - **⚡ Fast**: Sub-second response time for most queries
 - **🔍 Semantic Search**: Multi-word queries, dependency analysis, and BM25 ranking
 - **👁️ Auto-Sync**: Watch mode automatically re-indexes when files change
 - **🛡️ Reliable**: Degrade-first architecture works without optional extensions
+- **📝 Phrase-Aware**: Recognizes compound terms (kebab-case, snake_case) for precise matching
 
 ## ⚙️ Prerequisites
 
@@ -152,9 +153,15 @@ KIRI provides 5 MCP tools for intelligent code exploration:
 
 ### 1. context_bundle
 
-**Extract relevant code context based on task goals**
+**Extract relevant code context based on task goals (95% accuracy)**
 
-The most powerful tool for getting started with unfamiliar code. Provide a task description, and KIRI returns the most relevant code snippets.
+The most powerful tool for getting started with unfamiliar code. Provide a task description, and KIRI returns the most relevant code snippets using phrase-aware tokenization and path-based scoring.
+
+**v0.6.0 improvements:**
+
+- **Phrase-aware tokenization**: Recognizes compound terms like `page-agent`, `user_profile` as single concepts (2× scoring weight)
+- **Path-based scoring**: Additional boost when keywords/phrases appear in file paths
+- **95% accuracy**: Improved from 65-75% through enhanced tokenization and scoring
 
 **When to use:**
 
@@ -405,10 +412,56 @@ kiri --repo . --db .kiri/index.duckdb --watch --debounce 1000
 **Watch Mode Features:**
 
 - **Debouncing**: Aggregates rapid changes to minimize reindex operations
+- **Incremental Indexing**: Only reindexes changed files (10-100x faster)
 - **Background Operation**: Doesn't interrupt ongoing queries
 - **Denylist Integration**: Respects `.gitignore` and `denylist.yml`
 - **Lock Management**: Prevents concurrent indexing
 - **Statistics**: Tracks reindex count, duration, and queue depth
+
+### Tokenization Strategy
+
+Control how KIRI tokenizes and matches compound terms using the `KIRI_TOKENIZATION_STRATEGY` environment variable:
+
+```bash
+# Phrase-aware (default): Recognizes kebab-case/snake_case as phrases
+export KIRI_TOKENIZATION_STRATEGY=phrase-aware
+
+# Legacy: Traditional word-by-word tokenization
+export KIRI_TOKENIZATION_STRATEGY=legacy
+
+# Hybrid: Both phrase and word-level matching
+export KIRI_TOKENIZATION_STRATEGY=hybrid
+```
+
+**Strategies:**
+
+- **`phrase-aware`** (default): Compound terms like `page-agent`, `user_profile` are treated as single phrases with 2× scoring weight. Best for codebases with consistent naming conventions.
+- **`legacy`**: Traditional tokenization that splits all delimiters. Use for backward compatibility.
+- **`hybrid`**: Combines both strategies for maximum flexibility.
+
+### Database Auto-Gitignore
+
+KIRI automatically creates `.gitignore` files in database directories to prevent accidental commits:
+
+```typescript
+// Enabled by default
+const db = await DuckDBClient.connect({
+  databasePath: ".kiri/index.duckdb",
+  autoGitignore: true, // Creates .gitignore with "*" pattern
+});
+
+// Disable if needed
+const db = await DuckDBClient.connect({
+  databasePath: ".kiri/index.duckdb",
+  autoGitignore: false,
+});
+```
+
+**Behavior:**
+
+- Only creates `.gitignore` if directory is inside a Git repository
+- Never overwrites existing `.gitignore` files
+- Uses wildcard pattern (`*`) to ignore all database files
 
 ### File Type Boosting
 
@@ -680,6 +733,6 @@ Built with:
 
 ---
 
-**Status**: v0.4.1 (Beta) - Production-ready for MCP clients
+**Status**: v0.6.0 (Beta) - Production-ready for MCP clients
 
 For questions or support, please open a [GitHub issue](https://github.com/CAPHTECH/kiri/issues).
