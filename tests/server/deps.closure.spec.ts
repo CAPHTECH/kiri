@@ -14,7 +14,7 @@ interface CleanupTarget {
   dispose: () => Promise<void>;
 }
 
-describe("deps.closure", () => {
+describe("deps_closure", () => {
   const cleanupTargets: CleanupTarget[] = [];
 
   afterEach(async () => {

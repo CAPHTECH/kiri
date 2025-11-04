@@ -68,7 +68,7 @@ const SERVER_INFO = {
 
 const TOOL_DESCRIPTORS: ToolDescriptor[] = [
   {
-    name: "context.bundle",
+    name: "context_bundle",
     description:
       "🎯 PRIMARY TOOL: Extracts relevant code context for a specific task or question.\n\n" +
       "Use this tool as your first step for any code-related task. It intelligently finds and ranks relevant files and code snippets using keyword matching, dependency analysis, and semantic similarity.\n\n" +
@@ -148,7 +148,7 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
     },
   },
   {
-    name: "semantic.rerank",
+    name: "semantic_rerank",
     description:
       "Re-rank a list of file candidates by semantic similarity to a query text. Uses structural embeddings to compute similarity scores and combines them with existing scores. Use as a REFINEMENT step after files.search or when you have a list of candidates and want to prioritize them by semantic relevance. Not needed with context.bundle (which already does semantic ranking internally). Returns candidates sorted by combined score (base + semantic similarity). Example: after getting 20 search results, rerank them by semantic similarity to 'user authentication flow' to surface the most contextually relevant files.",
     inputSchema: {
@@ -175,7 +175,7 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
     },
   },
   {
-    name: "files.search",
+    name: "files_search",
     description:
       "Search files by specific keywords or identifiers. Use when you know EXACT terms to search for: function names, class names, error messages, or code patterns.\n\n" +
       "IMPORTANT: For broader exploration like 'understand feature X' or 'how does Y work', use context.bundle instead. This tool is for TARGETED searches with specific identifiers.\n\n" +
@@ -232,7 +232,7 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
     },
   },
   {
-    name: "snippets.get",
+    name: "snippets_get",
     description:
       "Retrieve code snippets from a specific file path. Intelligently extracts relevant code sections using symbol boundaries (functions, classes, methods) when available. Use when you already know the exact file path and want to read its content efficiently without loading the entire file. Automatically selects appropriate snippet based on start_line or returns symbol-aligned chunks. Reduces token usage compared to reading full files. Use context.bundle instead if you don't know which file to read. Example: path='src/auth/login.ts' returns the most relevant function or class in that file.",
     inputSchema: {
@@ -247,7 +247,7 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
     },
   },
   {
-    name: "deps.closure",
+    name: "deps_closure",
     description:
       "Traverse the dependency graph from a starting file. Finds all files that depend on the target (inbound) or that the target depends on (outbound). Essential for impact analysis: understanding what breaks if you change a file, tracing import chains, or mapping module relationships. Returns nodes (files/packages) and edges (import statements) with depth levels. Use when: planning refactoring, understanding module boundaries, finding circular dependencies, or analyzing affected files. Example: path='src/utils.ts', direction='inbound' shows all files importing utils.ts. Set max_depth to limit traversal (default 3).",
     inputSchema: {
@@ -528,19 +528,19 @@ async function executeToolByName(
   allowDegrade: boolean
 ): Promise<unknown> {
   switch (toolName) {
-    case "context.bundle": {
+    case "context_bundle": {
       const params = parseContextBundleParams(toolParams);
       const handler = async () =>
-        await withSpan("context.bundle", async () => await contextBundle(context, params));
-      return await degrade.withResource(handler, "duckdb:context.bundle");
+        await withSpan("context_bundle", async () => await contextBundle(context, params));
+      return await degrade.withResource(handler, "duckdb:context_bundle");
     }
-    case "semantic.rerank": {
+    case "semantic_rerank": {
       const params = parseSemanticRerankParams(toolParams);
       const handler = async () =>
-        await withSpan("semantic.rerank", async () => await semanticRerank(context, params));
-      return await degrade.withResource(handler, "duckdb:semantic.rerank");
+        await withSpan("semantic_rerank", async () => await semanticRerank(context, params));
+      return await degrade.withResource(handler, "duckdb:semantic_rerank");
     }
-    case "files.search": {
+    case "files_search": {
       const params = parseFilesSearchParams(toolParams);
       if (degrade.current.active && allowDegrade) {
         return {
@@ -556,21 +556,21 @@ async function executeToolByName(
         };
       } else {
         const handler = async () =>
-          await withSpan("files.search", async () => await filesSearch(context, params));
-        return await degrade.withResource(handler, "duckdb:files.search");
+          await withSpan("files_search", async () => await filesSearch(context, params));
+        return await degrade.withResource(handler, "duckdb:files_search");
       }
     }
-    case "snippets.get": {
+    case "snippets_get": {
       const params = parseSnippetsGetParams(toolParams);
       const handler = async () =>
-        await withSpan("snippets.get", async () => await snippetsGet(context, params));
-      return await degrade.withResource(handler, "duckdb:snippets.get");
+        await withSpan("snippets_get", async () => await snippetsGet(context, params));
+      return await degrade.withResource(handler, "duckdb:snippets_get");
     }
-    case "deps.closure": {
+    case "deps_closure": {
       const params = parseDepsClosureParams(toolParams);
       const handler = async () =>
-        await withSpan("deps.closure", async () => await depsClosure(context, params));
-      return await degrade.withResource(handler, "duckdb:deps.closure");
+        await withSpan("deps_closure", async () => await depsClosure(context, params));
+      return await degrade.withResource(handler, "duckdb:deps_closure");
     }
     default:
       throw new Error(`Unknown tool: ${toolName}`);
@@ -684,9 +684,9 @@ export function createRpcHandler(
           break;
         }
         // Legacy direct method invocation (backward compatibility)
-        case "context.bundle": {
+        case "context_bundle": {
           result = await executeToolByName(
-            "context.bundle",
+            "context_bundle",
             payload.params,
             context,
             degrade,
@@ -694,9 +694,9 @@ export function createRpcHandler(
           );
           break;
         }
-        case "semantic.rerank": {
+        case "semantic_rerank": {
           result = await executeToolByName(
-            "semantic.rerank",
+            "semantic_rerank",
             payload.params,
             context,
             degrade,
@@ -704,9 +704,9 @@ export function createRpcHandler(
           );
           break;
         }
-        case "files.search": {
+        case "files_search": {
           result = await executeToolByName(
-            "files.search",
+            "files_search",
             payload.params,
             context,
             degrade,
@@ -714,9 +714,9 @@ export function createRpcHandler(
           );
           break;
         }
-        case "snippets.get": {
+        case "snippets_get": {
           result = await executeToolByName(
-            "snippets.get",
+            "snippets_get",
             payload.params,
             context,
             degrade,
@@ -724,9 +724,9 @@ export function createRpcHandler(
           );
           break;
         }
-        case "deps.closure": {
+        case "deps_closure": {
           result = await executeToolByName(
-            "deps.closure",
+            "deps_closure",
             payload.params,
             context,
             degrade,
@@ -740,7 +740,7 @@ export function createRpcHandler(
                 statusCode: 404,
                 response: errorResponse(
                   payload.id as string | number,
-                  "Requested method is not available. Use tools/call, or legacy methods: context.bundle, semantic.rerank, files.search, snippets.get, or deps.closure.",
+                  "Requested method is not available. Use tools/call, or legacy methods: context_bundle, semantic_rerank, files_search, snippets_get, or deps_closure.",
                   -32601
                 ),
               }
@@ -777,8 +777,8 @@ export function createRpcHandler(
               response: errorResponse(
                 payload.id as string | number,
                 degrade.current.reason
-                  ? `Backend degraded due to ${degrade.current.reason}. Only files.search is operational.`
-                  : "Backend degraded. Only files.search is operational."
+                  ? `Backend degraded due to ${degrade.current.reason}. Only files_search is operational.`
+                  : "Backend degraded. Only files_search is operational."
               ),
             }
           : null;

@@ -14,7 +14,7 @@ interface CleanupTarget {
   dispose: () => Promise<void>;
 }
 
-describe("files.search", () => {
+describe("files_search", () => {
   const cleanupTargets: CleanupTarget[] = [];
 
   afterEach(async () => {

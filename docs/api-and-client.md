@@ -4,24 +4,24 @@
 
 サーバーは MCP 標準エンドポイント `initialize` / `tools/list` を実装しており、AI エージェントは起動直後に能力を自動検出できます。
 
-- `files.search(query, lang?, ext?, path_prefix?, limit=50)`
+- `files_search(query, lang?, ext?, path_prefix?, limit=50)`
 - `symbols.find(name, kind?, path_hint?, limit=50)`
-- `deps.closure(paths[], direction="out"|"in", depth=2)`
+- `deps_closure(paths[], direction="out"|"in", depth=2)`
 - `recent.changed(since="30d", path_prefix?)`
 - `who.owns(path)` → `blame_summary` を要約
-- `snippets.get(path, start_line, end_line)`
-- `semantic.rerank(candidates[], text, k=20)`（VSS 有効時のみ）
-- `context.bundle(goal, artifacts)` ← **最重要**
+- `snippets_get(path, start_line, end_line)`
+- `semantic_rerank(candidates[], text, k=20)`（VSS 有効時のみ）
+- `context_bundle(goal, artifacts)` ← **最重要**
   - `goal`: 自然文（例: "Auth の失敗テスト test_verify_token を修す"）
   - `artifacts`: {`editing_path`?, `failing_tests`?, `last_diff`?}
   - 出力: 断片リスト（path, [start,end], why[], score, preview）と `tokens_estimate`
 
-## `context.bundle` リクエスト/レスポンス例
+## `context_bundle` リクエスト/レスポンス例
 
 ```json
 // request
 {
-  "method": "context.bundle",
+  "method": "context_bundle",
   "params": {
     "goal": "fix failing test: JwtVerifier rejects expired tokens",
     "artifacts": {

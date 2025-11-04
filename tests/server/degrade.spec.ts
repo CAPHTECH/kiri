@@ -43,7 +43,7 @@ describe("DegradeController", () => {
         throw new Error(
           "Requested snippet file was not indexed. Re-run the indexer or choose another path."
         );
-      }, "duckdb:snippets.get")
+      }, "duckdb:snippets_get")
     ).rejects.toThrow();
 
     expect(controller.current.active).toBe(false);

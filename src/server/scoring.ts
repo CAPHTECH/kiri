@@ -6,7 +6,7 @@ import { parseSimpleYaml } from "../shared/utils/simpleYaml.js";
 
 /**
  * スコアリングウェイトの設定
- * context.bundle の候補ファイルに対するスコアリング重みを定義
+ * context_bundle の候補ファイルに対するスコアリング重みを定義
  */
 export interface ScoringWeights {
   /** テキストマッチ（キーワード検索）の重み */

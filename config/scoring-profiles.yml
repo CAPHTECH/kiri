@@ -1,4 +1,4 @@
-# Scoring weight profiles for context.bundle
+# Scoring weight profiles for context_bundle
 # Each profile defines weights for different ranking signals
 
 default:

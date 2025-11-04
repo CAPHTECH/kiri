@@ -230,7 +230,7 @@ describe.skip("Daemon Integration", () => {
       id: 1,
       method: "tools/call",
       params: {
-        name: "files.search",
+        name: "files_search",
         arguments: {
           query: "hello",
           limit: 5,

@@ -102,8 +102,8 @@ describe("MCP標準エンドポイント", () => {
         tool && typeof tool === "object" ? (tool as Record<string, unknown>).name : null
       )
       .filter((name): name is string => typeof name === "string");
-    expect(toolNames).toContain("context.bundle");
-    expect(toolNames).toContain("files.search");
+    expect(toolNames).toContain("context_bundle");
+    expect(toolNames).toContain("files_search");
   });
 
   it("resources/list が空配列を返しクライアント互換性を保つ", async () => {
@@ -170,7 +170,7 @@ describe("MCP標準エンドポイント", () => {
       id: 3,
       method: "tools/call",
       params: {
-        name: "files.search",
+        name: "files_search",
         arguments: {
           query: "meaning",
         },

@@ -54,7 +54,7 @@ kiri --repo /path/to/your/project --db /path/to/your/project/.kiri/index.duckdb 
 
 **Codex の動作**:
 
-1. KIRI の `files.search` ツールを使用
+1. KIRI の `files_search` ツールを使用
 2. "authentication" をキーワードに全文検索
 3. 関連ファイルのリストを返却
 
@@ -75,7 +75,7 @@ kiri --repo /path/to/your/project --db /path/to/your/project/.kiri/index.duckdb 
 
 **Codex の動作**:
 
-1. `context.bundle` ツールでゴールに基づいてコンテキスト抽出
+1. `context_bundle` ツールでゴールに基づいてコンテキスト抽出
 2. 関連するコードスニペットを収集
 3. 依存関係も含めて提示
 
@@ -108,7 +108,7 @@ return Date.now() < expires;
 
 **Codex の動作**:
 
-1. `deps.closure` ツールで依存グラフを取得
+1. `deps_closure` ツールで依存グラフを取得
 2. outbound 方向（依存先）を取得
 3. ツリー構造で表示
 
@@ -132,7 +132,7 @@ src/main.ts の依存関係:
 
 **Codex の動作**:
 
-1. `snippets.get` ツールでファイル取得
+1. `snippets_get` ツールでファイル取得
 2. シンボル（関数）境界を検出
 3. 該当部分のみ抽出
 
@@ -157,8 +157,8 @@ export function verifyToken(token: string): boolean {
 
 **Codex の動作**:
 
-1. まず `files.search` で候補を取得
-2. `semantic.rerank` で類似度計算
+1. まず `files_search` で候補を取得
+2. `semantic_rerank` で類似度計算
 3. スコア順にソート
 
 **期待される結果**:
@@ -181,7 +181,7 @@ export function verifyToken(token: string): boolean {
 ユーザー: "認証トークンの有効期限チェックにバグがあるみたい。関連するコードを全部見せて"
 
 Codex:
-1. context.bundle で "認証トークン 有効期限 バグ" をゴールに設定
+1. context_bundle で "認証トークン 有効期限 バグ" をゴールに設定
 2. 関連ファイル、テスト、依存関係を包括的に取得
 3. 最も関連性の高いスニペットから順に提示
 ```
@@ -192,7 +192,7 @@ Codex:
 ユーザー: "calculateExpiry 関数を変更したら、どこに影響が出る？"
 
 Codex:
-1. deps.closure で inbound 方向（呼び出し元）を取得
+1. deps_closure で inbound 方向（呼び出し元）を取得
 2. 影響範囲をツリー表示
 3. テストファイルも含めて提示
 ```
@@ -203,7 +203,7 @@ Codex:
 ユーザー: "メール認証機能を追加したいんだけど、どこに実装すればいい？"
 
 Codex:
-1. files.search で "auth" "mail" "email" などを検索
+1. files_search で "auth" "mail" "email" などを検索
 2. 既存の認証実装パターンを分析
 3. 適切な実装場所とパターンを提案
 ```
@@ -265,7 +265,7 @@ cat ~/.config/codex/mcp.json
 **Q: 検索結果が空**
 
 ```
-files.search { query: "test" }
+files_search { query: "test" }
 → 0 results
 ```
 

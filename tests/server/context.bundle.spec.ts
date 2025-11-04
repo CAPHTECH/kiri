@@ -37,7 +37,7 @@ describe("startServer", () => {
   });
 });
 
-describe("context.bundle", () => {
+describe("context_bundle", () => {
   const cleanupTargets: CleanupTarget[] = [];
 
   afterEach(async () => {

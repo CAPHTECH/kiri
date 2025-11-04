@@ -2,8 +2,8 @@ mcp:
   port: 8765
   host: 127.0.0.1
   tools:
-    - context.bundle
-    - files.search
+    - context_bundle
+    - files_search
 indexer:
   repoRoot: "../../target-repo"
   database: "var/index.duckdb"

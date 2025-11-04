@@ -63,7 +63,7 @@ The codebase follows a three-tier architecture:
 
 1. **Indexer** (`src/indexer/`): Scans Git worktrees, extracts file metadata, content, and language info, then persists to DuckDB using a blob/tree separation pattern (similar to Git's internal model). This avoids duplicate content storage and handles file renames efficiently.
 
-2. **MCP Server** (`src/server/`): JSON-RPC 2.0 server exposing tools like `files.search` and `snippets.get` over HTTP. Queries DuckDB to return ranked code fragments. Each request includes repo context resolution via `resolveRepoId`.
+2. **MCP Server** (`src/server/`): JSON-RPC 2.0 server exposing tools like `files_search` and `snippets_get` over HTTP. Queries DuckDB to return ranked code fragments. Each request includes repo context resolution via `resolveRepoId`.
 
 3. **Shared** (`src/shared/`): Common utilities including `DuckDBClient` wrapper for async database operations and transaction support.
 
@@ -161,7 +161,7 @@ Examples:
 - **Indentation**: 2 spaces
 - **Naming**: `camelCase` for variables/functions, `PascalCase` for classes/types, `SCREAMING_SNAKE_CASE` for constants
 - **SQL conventions**: Keywords in UPPERCASE, identifiers in `snake_case`
-- **MCP tool naming**: `<domain>.<verb>` format (e.g., `files.search`, `snippets.get`)
+- **MCP tool naming**: `<domain>.<verb>` format (e.g., `files_search`, `snippets_get`)
 - All TypeScript uses strict mode with `noUncheckedIndexedAccess` enabled
 
 ## File Organization

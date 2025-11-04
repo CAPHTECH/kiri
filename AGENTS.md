@@ -18,11 +18,11 @@ Node.js 20 と pnpm を前提とします。主要コマンドは以下のとお
 
 ## コーディングスタイルと命名
 
-TypeScript 5 系を採用し、インデントは 2 スペース、セミコロンは常に付与します。変数・関数は `camelCase`、クラスと型は `PascalCase`、定数は `SCREAMING_SNAKE_CASE` を用いてください。`tsconfig.json` の `strict` と `noUncheckedIndexedAccess` は必ず有効化し、`eslint-config-standard-with-typescript` と `prettier` を pre-commit で実行します。SQL 定義は `sql/` に `.sql` 拡張子で保存し、キーワードは大文字、識別子は `snake_case` に統一します。MCP ツール名は `<領域>.<動詞>`（例: `context.bundle`）の形式とし、例外メッセージは「原因→対処」を 2 文で記述してください。
+TypeScript 5 系を採用し、インデントは 2 スペース、セミコロンは常に付与します。変数・関数は `camelCase`、クラスと型は `PascalCase`、定数は `SCREAMING_SNAKE_CASE` を用いてください。`tsconfig.json` の `strict` と `noUncheckedIndexedAccess` は必ず有効化し、`eslint-config-standard-with-typescript` と `prettier` を pre-commit で実行します。SQL 定義は `sql/` に `.sql` 拡張子で保存し、キーワードは大文字、識別子は `snake_case` に統一します。MCP ツール名は `<領域>.<動詞>`（例: `context_bundle`）の形式とし、例外メッセージは「原因→対処」を 2 文で記述してください。
 
 ## テスト指針
 
-テストは `vitest` を標準とし、`tests/server/context.bundle.spec.ts` のように対象モジュールを明示する命名を徹底します。DuckDB を利用するテストは `tmp` ディレクトリにワークファイルを生成し、`afterEach` で削除してください。検索品質など長時間の評価は `tests/eval/*.spec.ts` にゴールデンデータを置き、P@10 と TTFU をメトリクスとして `vitest --runInBand` で収集します。Pull Request では新規機能に対して 80% 以上のステートメントカバレッジを確保してください。
+テストは `vitest` を標準とし、`tests/server/context_bundle.spec.ts` のように対象モジュールを明示する命名を徹底します。DuckDB を利用するテストは `tmp` ディレクトリにワークファイルを生成し、`afterEach` で削除してください。検索品質など長時間の評価は `tests/eval/*.spec.ts` にゴールデンデータを置き、P@10 と TTFU をメトリクスとして `vitest --runInBand` で収集します。Pull Request では新規機能に対して 80% 以上のステートメントカバレッジを確保してください。
 
 ## コミットとプルリクガイド
 

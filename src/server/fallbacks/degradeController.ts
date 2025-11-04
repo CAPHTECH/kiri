@@ -88,7 +88,7 @@ export class DegradeController {
   async withResource<T>(operation: () => Promise<T>, reason: string): Promise<T> {
     if (this.state.active) {
       throw new Error(
-        `Server is running in degrade mode: ${this.state.reason ?? "unknown"}. Only files.search is available.`
+        `Server is running in degrade mode: ${this.state.reason ?? "unknown"}. Only files_search is available.`
       );
     }
     try {

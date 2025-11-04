@@ -696,7 +696,7 @@ export async function filesSearch(
   const { query } = params;
   if (!query || query.trim().length === 0) {
     throw new Error(
-      "files.search requires a non-empty query. Provide a search keyword to continue."
+      "files_search requires a non-empty query. Provide a search keyword to continue."
     );
   }
 
@@ -811,7 +811,7 @@ export async function snippetsGet(
   const { db, repoId } = context;
   if (!params.path) {
     throw new Error(
-      "snippets.get requires a file path. Specify a tracked text file path to continue."
+      "snippets_get requires a file path. Specify a tracked text file path to continue."
     );
   }
 
@@ -923,7 +923,7 @@ export async function contextBundle(
   const goal = params.goal?.trim() ?? "";
   if (goal.length === 0) {
     throw new Error(
-      "context.bundle requires a non-empty goal. Describe your objective to receive context."
+      "context_bundle requires a non-empty goal. Describe your objective to receive context."
     );
   }
 
@@ -1230,7 +1230,7 @@ export async function semanticRerank(
   const text = params.text?.trim() ?? "";
   if (text.length === 0) {
     throw new Error(
-      "semantic.rerank requires non-empty text. Describe the intent to compute semantic similarity."
+      "semantic_rerank requires non-empty text. Describe the intent to compute semantic similarity."
     );
   }
 
@@ -1314,7 +1314,7 @@ export async function depsClosure(
   const { db, repoId } = context;
   if (!params.path) {
     throw new Error(
-      "deps.closure requires a file path. Provide a tracked source file path to continue."
+      "deps_closure requires a file path. Provide a tracked source file path to continue."
     );
   }
 

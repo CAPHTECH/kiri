@@ -45,5 +45,5 @@
 ```
 
 - **Indexer** が Git から構造・履歴・本文・埋め込みを DuckDB に書き込む。
-- **MCP Server** が DuckDB を叩き、`files.search` や `context.bundle` などのツールを公開する。
-- **Client** は `context.bundle` で得た断片を LLM プロンプトへ注入する。
+- **MCP Server** が DuckDB を叩き、`files_search` や `context_bundle` などのツールを公開する。
+- **Client** は `context_bundle` で得た断片を LLM プロンプトへ注入する。

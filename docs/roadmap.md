@@ -2,10 +2,10 @@
 
 ## マイルストーン
 
-1. **M0 (2–3日)**: `file/blob/tree` 取り込み、`files.search`、`snippets.get`（シンボルなし固定チャンク）。
-2. **M1 (1–2週)**: tree-sitter 導入で `symbol` / `snippet` をシンボル境界化し、`deps.closure` を追加。
-3. **M2 (1週)**: `context.bundle`（文字列/依存/近接ベース）と評価基盤（P@k / TTFU）を整備。
-4. **M3 (1–2週)**: VSS を追加し `semantic.rerank` とプロファイル別重みを実装。
+1. **M0 (2–3日)**: `file/blob/tree` 取り込み、`files_search`、`snippets_get`（シンボルなし固定チャンク）。
+2. **M1 (1–2週)**: tree-sitter 導入で `symbol` / `snippet` をシンボル境界化し、`deps_closure` を追加。
+3. **M2 (1週)**: `context_bundle`（文字列/依存/近接ベース）と評価基盤（P@k / TTFU）を整備。
+4. **M3 (1–2週)**: VSS を追加し `semantic_rerank` とプロファイル別重みを実装。
 5. **M4 (1週)**: セキュリティ、denylist、マスキング、可観測性、Degrade 周りを仕上げる。
 
 ### M4 の詳細タスク
@@ -27,7 +27,7 @@
 
 4. **可観測性 (Observability)**
    - `src/server/observability/metrics.ts` を追加し、Prometheus 形式の HTTP エンドポイント `/metrics` を提供する。主要メトリクスはリクエスト数、レスポンスタイム、マスク適用件数、denylist ヒット数。
-   - OpenTelemetry のトレースを `src/server/main.ts` へ導入し、`context.bundle` など主要ツールの span を発行する。
+   - OpenTelemetry のトレースを `src/server/main.ts` へ導入し、`context_bundle` など主要ツールの span を発行する。
    - `scripts/diag/health.ts` でメトリクスとトレースの疎通確認を自動化し、CI では `pnpm run diag -- health` を追加する。
 
 5. **Degrade / フォールバック戦略**

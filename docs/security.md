@@ -36,7 +36,7 @@ secrets/**, **/*.pem, **/*.key, **/.env*, **/config/*.prod.*, **/node_modules/**
 
 ## MCP 応答のマスキング
 
-- `src/shared/security/masker.ts` でマスキングユーティリティを提供し、`context.bundle` などサーバー側で返却するすべてのペイロード
+- `src/shared/security/masker.ts` でマスキングユーティリティを提供し、`context_bundle` などサーバー側で返却するすべてのペイロード
   に対して `***` へ置換する。
 - **ReDoS 対策**: マスキングパターンは起動時に検証され、長さ（最大100文字）と複雑度（ネストした量指定子の禁止）がチェックされる。
   悪意のあるパターンによる CPU 使用率の急上昇を防止する。

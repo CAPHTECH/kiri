@@ -17,13 +17,13 @@
 
 実装ファイルを優遇し、ドキュメントを減点
 
-**files.search:**
+**files_search:**
 
 - `src/*.ts`, `src/*.js`: スコア ×1.5（実装ファイルを優遇）
 - `tests/*.ts`: スコア ×1.2（テストファイルを軽度優遇）
 - `*.md`, `*.yaml`, `*.yml`: スコア ×0.5（ドキュメントを減点）
 
-**context.bundle:**
+**context_bundle:**
 
 - `src/*.ts`: スコア +0.5（実装ファイルに追加ボーナス）
 - `*.md`, `*.yaml`, `*.yml`: スコア -0.3（ドキュメントにペナルティ）
@@ -32,12 +32,12 @@
 
 ドキュメントを優遇し、実装ファイルを軽度減点
 
-**files.search:**
+**files_search:**
 
 - `*.md`, `*.yaml`, `*.yml`: スコア ×1.5（ドキュメントを優遇）
 - `src/*.ts`, `src/*.js`: スコア ×0.7（実装ファイルを軽度減点）
 
-**context.bundle:**
+**context_bundle:**
 
 - `*.md`, `*.yaml`, `*.yml`: スコア +0.5（ドキュメントに追加ボーナス）
 - `src/*.ts`: スコア -0.2（実装ファイルに軽度ペナルティ）
@@ -159,10 +159,10 @@ WITH RECURSIVE walk(step, path) AS (
 SELECT DISTINCT path FROM walk;
 ```
 
-## `context.bundle` 内部フロー
+## `context_bundle` 内部フロー
 
 1. **一次候補収集**: goal/failing_tests/last_diff など入力からキーワードを抽出し文字列マッチを行う。
 2. **増補**: 依存クロージャ（深さ 1–2）やパス近接で不足断片を追加する。
-3. **再ランキング**: VSS が有効な場合のみ `semantic.rerank` を適用する。
+3. **再ランキング**: VSS が有効な場合のみ `semantic_rerank` を適用する。
 4. **断片化**: シンボル境界で行範囲を最小化し重複を統合する。
 5. **出力生成**: why（根拠タグ）と tokens_estimate を添えて返却する。
