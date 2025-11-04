@@ -71,14 +71,20 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
     name: "context_bundle",
     description:
       "🎯 PRIMARY TOOL: Extracts relevant code context for a specific task or question.\n\n" +
-      "Use this tool as your first step for any code-related task. It intelligently finds and ranks relevant files and code snippets using keyword matching, dependency analysis, and semantic similarity.\n\n" +
+      "Use this tool as your first step for any code-related task. It intelligently finds and ranks relevant files and code snippets using:\n" +
+      "- **Phrase-aware tokenization**: Recognizes compound terms (kebab-case like 'page-agent', snake_case like 'user_profile') as single phrases with 2× scoring weight\n" +
+      "- **Path-based scoring**: Boosts files when keywords appear in their path (e.g., searching 'auth' prioritizes src/auth/login.ts)\n" +
+      "- **File type prioritization**: Uses boost_profile to prioritize implementation files over docs (configurable)\n" +
+      "- **Dependency analysis**: Considers import relationships between files\n" +
+      "- **Semantic similarity**: Ranks by structural similarity to your query\n\n" +
       "IMPORTANT: The 'goal' parameter MUST be a clear and specific description of your objective. Use concrete keywords, not abstract verbs.\n\n" +
       "✅ GOOD EXAMPLES (use specific keywords):\n" +
       "- goal='User authentication flow, JWT token validation'\n" +
       "- goal='Canvas page routing, API endpoints, navigation patterns'\n" +
       "- goal='Fix pagination off-by-one error in product listing'\n" +
       "- goal='Database connection pooling, retry logic'\n" +
-      "- goal='Implement OAuth2 integration with existing auth system'\n\n" +
+      "- goal='page-agent Lambda handler implementation'  (hyphenated terms recognized as phrases)\n" +
+      "- goal='context_bundle scoring logic'  (underscore terms recognized as phrases)\n\n" +
       "❌ BAD EXAMPLES (too vague, avoid these):\n" +
       "- goal='Understand how canvas pages are accessed' (starts with abstract verb)\n" +
       "- goal='understand' (single word, no context)\n" +
@@ -87,7 +93,7 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
       "- goal='authentication' (noun only, what about it?)\n\n" +
       "TOKEN OPTIMIZATION: Use 'compact: true' to reduce token consumption by ~95%. Returns only metadata (path, range, why, score) without preview field. " +
       "Combine with snippets.get for two-tier approach: first get candidate list (compact), then fetch selected content.\n\n" +
-      "Returns ranked code snippets with explanations (e.g., 'text:auth', 'dep:login.ts', 'boost:app-file') and automatically optimizes token usage.",
+      "Returns ranked code snippets with explanations (e.g., 'phrase:page-agent', 'path-keyword:auth', 'dep:login.ts', 'boost:app-file') and automatically optimizes token usage.",
     inputSchema: {
       type: "object",
       required: ["goal"],
