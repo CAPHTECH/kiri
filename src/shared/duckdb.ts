@@ -1,11 +1,12 @@
-import { mkdir } from "node:fs/promises";
-import { dirname } from "node:path";
+import { access, mkdir, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 
 import duckdb from "duckdb";
 
 export interface DuckDBClientOptions {
   databasePath: string;
   ensureDirectory?: boolean;
+  autoGitignore?: boolean;
 }
 
 type QueryParams = unknown[] | Record<string, unknown>;
@@ -29,6 +30,52 @@ function assertNoUndefined(sql: string, params: QueryParams): void {
   }
 }
 
+/**
+ * Check if a directory is inside a Git repository by walking up the directory tree
+ * looking for a .git directory.
+ */
+async function isInGitRepository(dirPath: string): Promise<boolean> {
+  let currentPath = dirPath;
+
+  // Walk up the directory tree until we reach the root
+  while (true) {
+    const gitPath = join(currentPath, ".git");
+    try {
+      await access(gitPath);
+      return true;
+    } catch {
+      // .git not found at this level, continue up
+    }
+
+    const parentPath = dirname(currentPath);
+    // If we've reached the root (parent is same as current), stop
+    if (parentPath === currentPath) {
+      return false;
+    }
+    currentPath = parentPath;
+  }
+}
+
+/**
+ * Create a .gitignore file in the specified directory if it doesn't already exist.
+ * The .gitignore will contain a wildcard pattern to ignore all files in the directory.
+ */
+async function createGitignoreIfNeeded(dirPath: string): Promise<void> {
+  const gitignorePath = join(dirPath, ".gitignore");
+
+  try {
+    await access(gitignorePath);
+    // .gitignore already exists, skip to respect user's configuration
+  } catch {
+    // .gitignore does not exist, create it
+    const content =
+      "# This directory is managed by the application's database client.\n" +
+      "# All files in this directory are ignored to prevent committing database files.\n" +
+      "*\n";
+    await writeFile(gitignorePath, content, "utf-8");
+  }
+}
+
 export class DuckDBClient {
   private readonly database: import("duckdb").Database;
 
@@ -37,9 +84,21 @@ export class DuckDBClient {
   }
 
   static async connect(options: DuckDBClientOptions): Promise<DuckDBClient> {
+    const dbDir = dirname(options.databasePath);
+
     if (options.ensureDirectory) {
-      await mkdir(dirname(options.databasePath), { recursive: true });
+      await mkdir(dbDir, { recursive: true });
     }
+
+    // Auto-create .gitignore if enabled (default: true)
+    const shouldAutoGitignore = options.autoGitignore ?? true;
+    if (shouldAutoGitignore) {
+      const isInGit = await isInGitRepository(dbDir);
+      if (isInGit) {
+        await createGitignoreIfNeeded(dbDir);
+      }
+    }
+
     return new DuckDBClient(options.databasePath);
   }
 
