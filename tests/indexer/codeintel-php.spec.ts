@@ -581,4 +581,140 @@ class MyClass {}`;
       expect(result.dependencies).toHaveLength(0);
     });
   });
+
+  describe("HTML-mixed PHP", () => {
+    it("extracts symbols from HTML-mixed PHP files", () => {
+      const htmlMixedCode = `<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Page</title>
+</head>
+<body>
+    <h1>Welcome</h1>
+    <?php
+    class MyClass {
+        public function test() {
+            return "Hello";
+        }
+    }
+
+    function myFunction() {
+        return 42;
+    }
+    ?>
+    <div>Content</div>
+    <?php
+    $variable = "test";
+    ?>
+</body>
+</html>`;
+
+      const result = analyzeSource("test.php", "PHP", htmlMixedCode, new Set());
+
+      // Should extract class, method, and function
+      expect(result.symbols).toHaveLength(3);
+      expect(result.symbols[0]).toMatchObject({
+        name: "MyClass",
+        kind: "class",
+      });
+      expect(result.symbols[1]).toMatchObject({
+        name: "test",
+        kind: "method",
+      });
+      expect(result.symbols[2]).toMatchObject({
+        name: "myFunction",
+        kind: "function",
+      });
+    });
+
+    it("extracts dependencies from HTML-mixed PHP files", () => {
+      const htmlMixedCode = `<!DOCTYPE html>
+<html>
+<body>
+    <?php
+    use App\\Services\\MyService;
+    use Vendor\\Package\\{ClassA, ClassB};
+
+    class MyClass {
+        public function test() {}
+    }
+    ?>
+</body>
+</html>`;
+
+      const result = analyzeSource("test.php", "PHP", htmlMixedCode, new Set());
+
+      expect(result.dependencies).toHaveLength(3);
+      expect(result.dependencies).toContainEqual({
+        dstKind: "package",
+        dst: "App\\Services\\MyService",
+        rel: "import",
+      });
+      expect(result.dependencies).toContainEqual({
+        dstKind: "package",
+        dst: "Vendor\\Package\\ClassA",
+        rel: "import",
+      });
+      expect(result.dependencies).toContainEqual({
+        dstKind: "package",
+        dst: "Vendor\\Package\\ClassB",
+        rel: "import",
+      });
+    });
+
+    it("handles multiple PHP blocks in HTML", () => {
+      const htmlMixedCode = `<!DOCTYPE html>
+<html>
+<body>
+    <?php
+    class FirstClass {
+        public function first() {}
+    }
+    ?>
+    <div>Some HTML</div>
+    <?php
+    class SecondClass {
+        public function second() {}
+    }
+    ?>
+</body>
+</html>`;
+
+      const result = analyzeSource("test.php", "PHP", htmlMixedCode, new Set());
+
+      expect(result.symbols).toHaveLength(4);
+      expect(result.symbols[0]?.name).toBe("FirstClass");
+      expect(result.symbols[1]?.name).toBe("first");
+      expect(result.symbols[2]?.name).toBe("SecondClass");
+      expect(result.symbols[3]?.name).toBe("second");
+    });
+
+    it("detects pure PHP files correctly", () => {
+      const purePhpCode = `<?php
+class MyClass {
+    public function test() {}
+}`;
+
+      const result = analyzeSource("test.php", "PHP", purePhpCode, new Set());
+
+      expect(result.symbols).toHaveLength(2);
+      expect(result.symbols[0]).toMatchObject({
+        name: "MyClass",
+        kind: "class",
+      });
+    });
+
+    it("handles PHP files without <?php tag as HTML-mixed", () => {
+      const noTagCode = `<html>
+<body>
+    <h1>No PHP here</h1>
+</body>
+</html>`;
+
+      const result = analyzeSource("test.php", "PHP", noTagCode, new Set());
+
+      // Should parse without errors but extract no symbols
+      expect(result.symbols).toHaveLength(0);
+    });
+  });
 });

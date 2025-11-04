@@ -8,9 +8,12 @@ import ts from "typescript";
 // tree-sitter-php is a CommonJS module, so import it using require.
 // Using version 0.22.8 for compatibility with tree-sitter 0.22.4.
 // Version 0.24.2 had a nodeTypeInfo bug that caused runtime errors.
+// php_only: for pure PHP files (<?php at start)
+// php: for HTML-mixed PHP files (HTML with <?php ... ?> tags)
 const require = createRequire(import.meta.url);
 const PHPModule = require("tree-sitter-php");
-const PHP = PHPModule.php_only;
+const PHP_ONLY = PHPModule.php_only;
+const PHP_MIXED = PHPModule.php;
 
 export interface SymbolRecord {
   symbolId: number;
@@ -158,7 +161,24 @@ function toSwiftLineNumber(position: Parser.Point): number {
 type PHPNode = Parser.SyntaxNode;
 
 /**
- * PHPのシグネチャをサニタイズ（本体を除外し、最初の200文字に制限）
+ * Detect whether PHP file is pure PHP or HTML-mixed.
+ * Pure PHP: starts with <?php tag (possibly after whitespace)
+ * HTML-mixed: contains HTML content before <?php tag
+ */
+function detectPHPType(content: string): "pure" | "html-mixed" {
+  const phpTagIndex = content.indexOf("<?php");
+  if (phpTagIndex === -1) {
+    // No <?php tag found - treat as HTML-mixed (likely template file)
+    return "html-mixed";
+  }
+
+  // Check if there's non-whitespace content before <?php tag
+  const beforeTag = content.substring(0, phpTagIndex).trim();
+  return beforeTag.length > 0 ? "html-mixed" : "pure";
+}
+
+/**
+ * Sanitize PHP signature (exclude body, limit to first 200 characters)
  */
 function sanitizePHPSignature(node: PHPNode, content: string): string {
   const nodeText = content.substring(node.startIndex, node.endIndex);
@@ -843,15 +863,20 @@ export function analyzeSource(
     return { symbols: [], snippets: [], dependencies: [] };
   }
 
-  // PHP言語の場合、tree-sitterを使用
+  // PHP language: use tree-sitter
   if (normalizedLang === "PHP") {
     try {
-      // 各ファイルごとに新しいパーサーインスタンスを作成（並行処理の安全性のため）
+      // Create new parser instance for each file (thread-safety for concurrent processing)
       const parser = new Parser();
-      // tree-sitter-phpはphp_onlyとphp（HTML混在）の2つのパーサーを提供
-      // 純粋なPHPファイルのみをサポートするため、php_onlyを使用
+
+      // tree-sitter-php provides two parsers:
+      // - php_only: for pure PHP files (<?php at start)
+      // - php: for HTML-mixed PHP files (HTML with <?php ... ?> tags)
+      const phpType = detectPHPType(content);
+      const language = phpType === "html-mixed" ? PHP_MIXED : PHP_ONLY;
+
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      parser.setLanguage(PHP as any);
+      parser.setLanguage(language as any);
       const tree = parser.parse(content);
       const symbols = createPHPSymbolRecords(tree, content);
 

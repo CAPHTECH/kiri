@@ -8,7 +8,7 @@
 4. **シンボル抽出**: TypeScript (TypeScript Compiler API)、Swift (tree-sitter)、PHP (tree-sitter) で定義・範囲・シグネチャを抽出する。
    - **TypeScript**: `class`, `interface`, `enum`, `function`, `method`
    - **Swift**: `class`, `struct`, `protocol`, `enum`, `extension`, `func`, `init`, `property`
-   - **PHP**: `class`, `interface`, `trait`, `function`, `method`, `property`, `constant`, `namespace`
+   - **PHP**: `class`, `interface`, `trait`, `function`, `method`, `property`, `constant`, `namespace` (pure PHPおよびHTML混在PHPの両方をサポート)
 5. **依存解決**: TypeScript プラグイン（`tsconfig` の paths/alias、`package.json` exports、`pnpm-workspace`）と Swift (`import` 文解析）を基準にし、他言語プラグインは後続拡張とする。
 6. **snippet 切り出し**: 原則シンボル境界を用い、特定できない場合のみ 120–200 行のスライディングウィンドウを適用する。
 7. **埋め込み生成（任意）**: snippet 単位で埋め込みを計算し `snippet_embedding` テーブルへ格納する。
