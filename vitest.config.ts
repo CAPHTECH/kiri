@@ -9,6 +9,8 @@ export default defineConfig({
     poolOptions: {
       forks: {
         singleFork: true,
+        maxForks: 1,
+        minForks: 1,
       },
     },
     coverage: {
