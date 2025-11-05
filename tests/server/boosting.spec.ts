@@ -221,7 +221,7 @@ describe("Unified Boosting Logic (v0.7.0+)", () => {
 
   it("does not apply multiplier to negative scores", async () => {
     const repo = await createTempRepo({
-      ".git/config": `[core]\n  repositoryformatversion = 0\n`,
+      "node_modules/package.json": `{"name": "test-package"}\n`,
       "src/main.ts": `export function main() {}\n`,
     });
     cleanupTargets.push({ dispose: repo.cleanup });
@@ -239,16 +239,16 @@ describe("Unified Boosting Logic (v0.7.0+)", () => {
     const context: ServerContext = { db, repoId };
 
     const bundle = await contextBundle(context, {
-      goal: "repository configuration",
+      goal: "package configuration",
       limit: 10,
     });
 
-    // .git/ files should be blacklisted (score = -100)
+    // node_modules/ files should be blacklisted (score = -100)
     // and multiplier should NOT be applied to make it less negative
-    const gitFile = bundle.context.find((item) => item.path.startsWith(".git/"));
+    const nodeModulesFile = bundle.context.find((item) => item.path.startsWith("node_modules/"));
 
     // Blacklisted files should be filtered out or have very negative scores
-    expect(gitFile).toBeUndefined(); // Should be filtered out entirely
+    expect(nodeModulesFile).toBeUndefined(); // Should be filtered out entirely
   });
 
   it("boost_profile='none' preserves original BM25 scores", async () => {
