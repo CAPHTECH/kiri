@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2025-11-05
+
+### Fixed
+
+- **`boost_profile="docs"` now correctly includes files from `docs/` directory**
+  - **Previous issue**: `docs/` directory was unconditionally blacklisted (score = -100), even when using `boost_profile: "docs"`
+  - **Root cause**: Blacklist check occurred before boost_profile logic with early return, preventing multipliers from ever being applied
+  - **Solution**: Skip `docs/` blacklist entry when `profile="docs"`, allowing documentation files to be ranked normally
+  - **Impact**: Documentation-focused searches now work as originally intended (CHANGELOG v0.7.0 claimed this worked but it didn't)
+  - **Backward compatibility**: Default profile (`boost_profile: "default"`) continues to blacklist `docs/` directory for code-focused queries
+  - **Evidence**: Added integration tests to verify both `boost_profile="docs"` (allows `docs/`) and default profile (blacklists `docs/`)
+
 ## [0.8.0] - 2025-11-05
 
 ### Changed

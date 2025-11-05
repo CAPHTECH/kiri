@@ -928,13 +928,15 @@ function applyPathBasedScoring(
 /**
  * 加算的ファイルペナルティを適用
  * ブラックリストディレクトリ、テストファイル、lockファイル、設定ファイル、マイグレーションファイルに強いペナルティ
+ * @param profile - boost_profile設定（"docs"の場合はdocs/ディレクトリのブラックリストをスキップ）
  * @returns true if penalty was applied and processing should stop
  */
 function applyAdditiveFilePenalties(
   candidate: CandidateInfo,
   path: string,
   lowerPath: string,
-  fileName: string
+  fileName: string,
+  profile: "default" | "docs" | "none"
 ): boolean {
   // Blacklisted directories - effectively remove
   const blacklistedDirs = [
@@ -959,10 +961,17 @@ function applyAdditiveFilePenalties(
     "tmp/",
     "temp/",
   ];
-  if (blacklistedDirs.some((dir) => path.startsWith(dir))) {
-    candidate.score = -100;
-    candidate.reasons.add("penalty:blacklisted-dir");
-    return true;
+  for (const dir of blacklistedDirs) {
+    if (path.startsWith(dir)) {
+      // ✅ FIX (v0.9.0): boost_profile="docs"の場合はdocs/ブラックリストをスキップ
+      // これによりドキュメント検索が正しく機能する
+      if (profile === "docs" && dir === "docs/") {
+        continue; // このブラックリストエントリをスキップ
+      }
+      candidate.score = -100;
+      candidate.reasons.add("penalty:blacklisted-dir");
+      return true;
+    }
   }
 
   // Test files - strong penalty
@@ -1123,7 +1132,7 @@ function applyBoostProfile(
   applyPathBasedScoring(candidate, lowerPath, weights, extractedTerms);
 
   // Step 2: 加算的ペナルティ（ブラックリスト、テスト、lock、設定、マイグレーション）
-  const shouldStop = applyAdditiveFilePenalties(candidate, path, lowerPath, fileName);
+  const shouldStop = applyAdditiveFilePenalties(candidate, path, lowerPath, fileName, profile);
   if (shouldStop) {
     return; // ペナルティが適用された場合は処理終了
   }

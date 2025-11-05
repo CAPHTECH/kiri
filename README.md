@@ -192,12 +192,12 @@ The most powerful tool for getting started with unfamiliar code. Provide a task 
 
 **Parameters:**
 
-| Parameter       | Type    | Required | Description                                                                        |
-| --------------- | ------- | -------- | ---------------------------------------------------------------------------------- |
-| `goal`          | string  | Yes      | Task description or question about the code                                        |
-| `limit`         | number  | No       | Max snippets to return (default: 12, max: 20)                                      |
-| `compact`       | boolean | No       | Return only metadata without preview (default: **true** in v0.8.0+, false in v0.7) |
-| `boost_profile` | string  | No       | File type boosting: "default", "docs", "none"                                      |
+| Parameter       | Type    | Required | Description                                                                                                                                                  |
+| --------------- | ------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `goal`          | string  | Yes      | Task description or question about the code                                                                                                                  |
+| `limit`         | number  | No       | Max snippets to return (default: 12, max: 20)                                                                                                                |
+| `compact`       | boolean | No       | Return only metadata without preview (default: **true** in v0.8.0+, false in v0.7)                                                                           |
+| `boost_profile` | string  | No       | File type boosting: `"default"` (prioritizes src/, blacklists docs/), `"docs"` **(prioritizes .md/.yaml, includes docs/ directory)**, `"none"` (no boosting) |
 
 ### 2. files_search
 
@@ -231,14 +231,14 @@ Fast search across all indexed files. Supports multi-word queries, hyphenated te
 
 **Parameters:**
 
-| Parameter       | Type   | Required | Description                                       |
-| --------------- | ------ | -------- | ------------------------------------------------- |
-| `query`         | string | Yes      | Search keywords or phrase                         |
-| `limit`         | number | No       | Max results to return (default: 50, max: 200)     |
-| `lang`          | string | No       | Filter by language (e.g., "typescript", "python") |
-| `ext`           | string | No       | Filter by extension (e.g., ".ts", ".md")          |
-| `path_prefix`   | string | No       | Filter by path prefix (e.g., "src/auth/")         |
-| `boost_profile` | string | No       | File type boosting: "default", "docs", "none"     |
+| Parameter       | Type   | Required | Description                                                                                                                                                  |
+| --------------- | ------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `query`         | string | Yes      | Search keywords or phrase                                                                                                                                    |
+| `limit`         | number | No       | Max results to return (default: 50, max: 200)                                                                                                                |
+| `lang`          | string | No       | Filter by language (e.g., "typescript", "python")                                                                                                            |
+| `ext`           | string | No       | Filter by extension (e.g., ".ts", ".md")                                                                                                                     |
+| `path_prefix`   | string | No       | Filter by path prefix (e.g., "src/auth/")                                                                                                                    |
+| `boost_profile` | string | No       | File type boosting: `"default"` (prioritizes src/, blacklists docs/), `"docs"` **(prioritizes .md/.yaml, includes docs/ directory)**, `"none"` (no boosting) |
 
 ### 3. snippets_get
 
