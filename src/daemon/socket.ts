@@ -48,6 +48,37 @@ export async function createSocketServer(
         throw err;
       }
     }
+  } else {
+    // Windows: 古い名前付きパイプへの接続を試みて、既存デーモンの検出
+    // 接続失敗 = パイプが存在しない（安全に作成可能）
+    // 接続成功 = 既に他のデーモンが実行中（エラー）
+    const testSocket = net.connect(socketPath);
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        testSocket.destroy();
+        // タイムアウト = パイプが存在するが応答なし（古いパイプの可能性）
+        console.error(`[Daemon] Warning: Stale pipe may exist at ${socketPath}, proceeding...`);
+        resolve();
+      }, 1000);
+
+      testSocket.on("connect", () => {
+        clearTimeout(timeout);
+        testSocket.destroy();
+        reject(
+          new Error(`Daemon already running on pipe: ${socketPath}. Stop existing daemon first.`)
+        );
+      });
+
+      testSocket.on("error", (err: NodeJS.ErrnoException) => {
+        clearTimeout(timeout);
+        // ENOENT/ECONNREFUSED = パイプが存在しない（正常）
+        // その他 = 異常状態（ログに記録して続行）
+        if (err.code !== "ENOENT" && err.code !== "ECONNREFUSED") {
+          console.error(`[Daemon] Warning: Pipe error during check: ${err.message}`);
+        }
+        resolve();
+      });
+    });
   }
 
   const server = net.createServer((socket) => {
@@ -59,7 +90,24 @@ export async function createSocketServer(
     server.listen(socketPath, () => {
       resolve();
     });
-    server.on("error", reject);
+
+    server.on("error", (err: NodeJS.ErrnoException) => {
+      // プラットフォーム固有のエラーメッセージを提供
+      if (err.code === "EADDRINUSE") {
+        const msg = isWindows
+          ? `Named pipe already in use: ${socketPath}. Another daemon may be running.`
+          : `Socket file in use: ${socketPath}. Another daemon may be running or stale socket exists.`;
+        reject(new Error(msg));
+      } else if (err.code === "EACCES") {
+        reject(
+          new Error(
+            `Permission denied for socket: ${socketPath}. Run as administrator or check permissions.`
+          )
+        );
+      } else {
+        reject(new Error(`Failed to listen on ${socketPath}: ${err.message} (code: ${err.code})`));
+      }
+    });
   });
 
   // Unix系の場合: ソケットファイルのパーミッションを0600に設定（所有者のみアクセス可能）

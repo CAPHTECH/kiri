@@ -16,6 +16,14 @@ import * as path from "path";
  * Windows環境では名前付きパイプ形式（\\.\pipe\kiri-<hash>）を使用し、
  * Unix系環境ではファイルシステムパス（<databasePath>.sock）を使用する。
  *
+ * **セキュリティ注意事項**:
+ * - Unix: ソケットファイルは0600パーミッション（所有者のみアクセス可能）で保護
+ * - Windows: 名前付きパイプはデフォルトACLを使用（同一システムの他ユーザーが
+ *   アクセス可能な場合がある）。ハッシュベースのパイプ名で曖昧性を提供するが、
+ *   マルチユーザー環境では信頼できる環境でのみ使用することを推奨。
+ * - Windows環境では KIRI_PIPE_PREFIX 環境変数でパイプ名プレフィックスを
+ *   カスタマイズ可能（追加のセキュリティ層として利用可能）
+ *
  * @param databasePath - データベースファイルの絶対パス
  * @returns プラットフォーム固有のソケットパス
  *
@@ -24,17 +32,24 @@ import * as path from "path";
  * getSocketPath("/path/to/database.duckdb")
  * // => "/path/to/database.duckdb.sock"
  *
- * // Windows
+ * // Windows (デフォルト)
  * getSocketPath("C:\\Users\\user\\database.duckdb")
  * // => "\\\\.\\pipe\\kiri-a1b2c3d4..."
+ *
+ * // Windows (カスタムプレフィックス)
+ * process.env.KIRI_PIPE_PREFIX = "myapp"
+ * getSocketPath("C:\\Users\\user\\database.duckdb")
+ * // => "\\\\.\\pipe\\myapp-a1b2c3d4..."
  */
 export function getSocketPath(databasePath: string): string {
   if (os.platform() === "win32") {
     // Windows: 名前付きパイプを使用
     // データベースパスのハッシュを使ってユニークなパイプ名を生成
     const hash = crypto.createHash("sha256").update(databasePath).digest("hex");
+    // 環境変数でプレフィックスをカスタマイズ可能（追加のセキュリティ層）
+    const prefix = process.env.KIRI_PIPE_PREFIX || "kiri";
     // 最初の16文字を使用（衝突リスクは極めて低い）
-    const pipeName = `kiri-${hash.substring(0, 16)}`;
+    const pipeName = `${prefix}-${hash.substring(0, 16)}`;
     return `\\\\.\\pipe\\${pipeName}`;
   } else {
     // Unix系: ファイルシステムパスを使用
