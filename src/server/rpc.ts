@@ -18,6 +18,9 @@ import {
 import { MetricsRegistry } from "./observability/metrics.js";
 import { withSpan } from "./observability/tracing.js";
 
+// Track if compact mode warning has been shown (v0.8.0 breaking change)
+let compactWarningShown = false;
+
 export interface JsonRpcRequest {
   jsonrpc?: string;
   id?: unknown;
@@ -452,6 +455,16 @@ function parseContextBundleParams(input: unknown): ContextBundleParams {
     params.compact = record.compact;
   } else {
     params.compact = true; // Default to compact mode (v0.8.0+: breaking change)
+
+    // Show one-time warning about breaking change
+    if (!compactWarningShown) {
+      console.warn(
+        "⚠️  BREAKING CHANGE (v0.8.0): compact mode is now default. " +
+          "Set compact: false to restore previous behavior. " +
+          "See CHANGELOG.md for details."
+      );
+      compactWarningShown = true;
+    }
   }
 
   return params;

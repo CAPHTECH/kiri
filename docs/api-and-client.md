@@ -1,3 +1,217 @@
+# MCP API and Client Configuration
+
+## Overview
+
+The server implements MCP standard endpoints `initialize` / `tools/list`, enabling AI agents to auto-detect capabilities upon startup.
+
+## Available Tools
+
+- `files_search(query, lang?, ext?, path_prefix?, limit=50)` - Search files by keywords
+- `symbols.find(name, kind?, path_hint?, limit=50)` - Find code symbols
+- `deps_closure(paths[], direction="out"|"in", depth=2)` - Analyze dependencies
+- `recent.changed(since="30d", path_prefix?)` - Find recently changed files
+- `who.owns(path)` - Get ownership information from blame summary
+- `snippets_get(path, start_line, end_line)` - Retrieve code snippets
+- `semantic_rerank(candidates[], text, k=20)` - Semantic reranking (VSS only)
+- `context_bundle(goal, artifacts)` ← **Most Important**
+  - `goal`: Natural language description (e.g., "Fix failing test: test_verify_token in Auth")
+  - `artifacts`: {`editing_path`?, `failing_tests`?, `last_diff`?}
+  - Output: Fragment list (path, [start,end], why[], score, preview) and `tokens_estimate`
+
+## `context_bundle` Request/Response Example
+
+```json
+// request
+{
+  "method": "context_bundle",
+  "params": {
+    "goal": "fix failing test: JwtVerifier rejects expired tokens",
+    "artifacts": {
+      "editing_path": "src/auth/jwt.ts",
+      "failing_tests": ["AuthJwtSpec#rejectsExpired"],
+      "last_diff": "..."
+    }
+  }
+}
+
+// response
+{
+  "context": [
+    {
+      "path": "src/auth/jwt.ts",
+      "range": [12, 78],
+      "why": ["symbol:verifyToken", "dep:src/auth/keys.ts", "recent:7d"],
+      "score": 0.86,
+      "preview": "function verifyToken(token:string){...}"
+    },
+    {
+      "path": "src/auth/keys.ts",
+      "range": [1, 120],
+      "why": ["dep<-jwt.ts"],
+      "score": 0.74
+    }
+  ],
+  "tokens_estimate": 1450
+}
+```
+
+## Token Optimization: `compact` Mode
+
+Using the `compact` parameter in `context_bundle` can reduce token consumption by **approximately 95%**.
+
+### Recommended: Two-Tier Workflow
+
+```javascript
+// Step 1: Get candidate files (compact mode)
+const result = await context_bundle({
+  goal: "User authentication handler logic, runtime execution flow, Mastra integration",
+  limit: 10,
+  compact: true, // Get metadata only: path, range, why, score
+});
+
+// Step 2: Fetch details for selected files only
+for (const item of result.context.slice(0, 3)) {
+  const content = await snippets_get({
+    path: item.path,
+    start_line: item.range[0],
+    end_line: item.range[1],
+  });
+  // Perform detailed analysis with content
+}
+```
+
+### Token Consumption Comparison
+
+| Mode                               | Tokens  | Information Included                 |
+| ---------------------------------- | ------- | ------------------------------------ |
+| `compact: true` (default, v0.8.0+) | ~2,500  | path, range, why, score              |
+| `compact: false`                   | ~55,000 | path, range, why, score, **preview** |
+
+**Reduction: 95%**
+
+### Usage Guidelines
+
+**Use `compact: true` when:**
+
+- Exploring codebase / discovering files
+- Getting candidate file lists
+- Token efficiency is the priority
+
+**Use `compact: false` when:**
+
+- Immediate code preview is needed
+- Retrieving only a few files (1-3)
+
+### Real Example: Lambda Function Investigation
+
+```json
+// Request (compact mode)
+{
+  "method": "context_bundle",
+  "params": {
+    "goal": "ask-agent Lambda handler logic, runtime execution flow",
+    "limit": 10,
+    "compact": true
+  }
+}
+
+// Response (metadata only, ~2,500 tokens)
+{
+  "context": [
+    {
+      "path": "lambda/ask-agent/handler.ts",
+      "range": [15, 89],
+      "why": ["phrase:ask-agent", "path-phrase:handler", "boost:impl-file"],
+      "score": 0.92
+      // No preview field → token savings
+    },
+    {
+      "path": "lambda/ask-agent/runtime.ts",
+      "range": [42, 156],
+      "why": ["phrase:ask-agent", "dep:handler.ts"],
+      "score": 0.85
+    }
+  ],
+  "tokens_estimate": 2480
+}
+```
+
+## Codex CLI Configuration Example
+
+KIRI launches via the CLI binary `kiri` using the MCP standard `stdio` transport by default. Simply pass `--repo` and `--db`, and capabilities will be auto-detected via `initialize` / `tools/list`.
+
+**Important change in v0.1.0+**: If the database does not exist, the repository is automatically indexed on first startup. Manual index creation is no longer required.
+
+```json
+{
+  "mcpServers": {
+    "kiri": {
+      "command": "kiri",
+      "args": ["--repo", "/abs/path/repo", "--db", "/abs/path/index.duckdb"]
+    }
+  }
+}
+```
+
+**Options**:
+
+- `--reindex`: Force reindexing even if database exists
+- `--port 8765`: Launch in HTTP mode (instead of stdio)
+- `--watch`: Enable file change monitoring with automatic reindexing
+- `--debounce <ms>`: Watch mode debounce time (default: 500ms)
+
+> Note: For legacy HTTP mode, specify `--port` like `kiri --port 8765 ...` (metrics available at `/metrics`).
+
+### Watch Mode
+
+Watch mode (`--watch`) monitors repository file changes and automatically reindexes when changes are detected.
+
+**Features**:
+
+- **Debouncing**: Aggregates rapid consecutive changes to minimize reindex frequency (default: 500ms)
+- **Exclusion list integration**: Respects both `denylist.yml` and `.gitignore` patterns
+- **Lock management**: Uses lock files to prevent concurrent indexing
+- **Graceful shutdown**: Supports clean termination via `SIGINT`/`SIGTERM`
+- **Statistics**: Tracks reindex count, processing time, and queue depth
+
+**Configuration Example (Codex)**:
+
+```json
+{
+  "mcpServers": {
+    "kiri": {
+      "command": "kiri",
+      "args": ["--repo", "/abs/path/repo", "--db", "/abs/path/index.duckdb", "--watch"]
+    }
+  }
+}
+```
+
+**Custom Debounce Time** (for slow hardware or network filesystems):
+
+```json
+{
+  "mcpServers": {
+    "kiri": {
+      "command": "kiri",
+      "args": [
+        "--repo",
+        "/abs/path/repo",
+        "--db",
+        "/abs/path/index.duckdb",
+        "--watch",
+        "--debounce",
+        "1000"
+      ]
+    }
+  }
+}
+```
+
+**Note**: Watch mode runs in parallel with the MCP server. Reindexing from file changes occurs in the background and does not interrupt ongoing queries.
+
+---
+
 # MCP API とクライアント設定
 
 ## 提供ツール一覧

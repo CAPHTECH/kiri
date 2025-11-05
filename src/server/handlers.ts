@@ -7,6 +7,135 @@ import { encode as encodeGPT, tokenizeText } from "../shared/tokenizer.js";
 import { ServerContext } from "./context.js";
 import { coerceProfileName, loadScoringProfile, type ScoringWeights } from "./scoring.js";
 
+// Configuration file patterns (v0.8.0+: consolidated to avoid duplication)
+// Comprehensive list covering multiple languages and tools
+const CONFIG_FILES = [
+  // JavaScript/TypeScript/Node.js
+  "package.json",
+  "package-lock.json",
+  "npm-shrinkwrap.json",
+  "tsconfig.json",
+  "jsconfig.json",
+  "pnpm-lock.yaml",
+  "yarn.lock",
+  "bun.lockb",
+
+  // Python
+  "requirements.txt",
+  "pyproject.toml",
+  "setup.py",
+  "setup.cfg",
+  "Pipfile",
+  "Pipfile.lock",
+  "poetry.lock",
+  "pytest.ini",
+  "tox.ini",
+  ".python-version",
+
+  // Ruby
+  "Gemfile",
+  "Gemfile.lock",
+  ".ruby-version",
+  "Rakefile",
+
+  // Go
+  "go.mod",
+  "go.sum",
+  "Makefile",
+
+  // PHP
+  "composer.json",
+  "composer.lock",
+  "phpunit.xml",
+
+  // Java/Kotlin/Gradle/Maven
+  "pom.xml",
+  "build.gradle",
+  "build.gradle.kts",
+  "settings.gradle",
+  "settings.gradle.kts",
+  "gradle.properties",
+
+  // Rust
+  "Cargo.toml",
+  "Cargo.lock",
+
+  // Swift
+  "Package.swift",
+  "Package.resolved",
+
+  // .NET
+  "packages.lock.json",
+  "global.json",
+
+  // C/C++
+  "CMakeLists.txt",
+  "Makefile.am",
+  "configure.ac",
+
+  // Docker
+  "Dockerfile",
+  "docker-compose.yml",
+  "docker-compose.yaml",
+  ".dockerignore",
+
+  // CI/CD
+  ".travis.yml",
+  ".gitlab-ci.yml",
+  "Jenkinsfile",
+  "azure-pipelines.yml",
+
+  // Git
+  ".gitignore",
+  ".gitattributes",
+  ".gitmodules",
+
+  // Editor config
+  ".editorconfig",
+] as const;
+
+const CONFIG_EXTENSIONS = [".lock", ".env", ".conf"] as const;
+
+const CONFIG_PATTERNS = [
+  // Generic config patterns (any language)
+  ".config.js",
+  ".config.ts",
+  ".config.mjs",
+  ".config.cjs",
+  ".config.json",
+  ".config.yaml",
+  ".config.yml",
+  ".config.toml",
+
+  // Linter/Formatter configs
+  ".eslintrc",
+  ".prettierrc",
+  ".stylelintrc",
+  ".pylintrc",
+  ".flake8",
+  ".rubocop.yml",
+
+  // CI config files
+  ".circleci/config.yml",
+  ".github/workflows",
+] as const;
+
+/**
+ * Check if a file path represents a configuration file
+ * Supports multiple languages: JS/TS, Python, Ruby, Go, PHP, Java, Rust, C/C++, Docker, CI/CD
+ * @param path - Full file path
+ * @param fileName - File name only (extracted from path)
+ * @returns true if the file is a configuration file
+ */
+function isConfigFile(path: string, fileName: string): boolean {
+  return (
+    (CONFIG_FILES as readonly string[]).includes(fileName) ||
+    CONFIG_EXTENSIONS.some((ce) => path.endsWith(ce)) ||
+    CONFIG_PATTERNS.some((pattern) => path.includes(pattern)) ||
+    fileName.startsWith(".env")
+  );
+}
+
 export interface FilesSearchParams {
   query: string;
   lang?: string;
@@ -672,31 +801,7 @@ function applyFileTypeBoost(
   const fileName = path.split("/").pop() ?? "";
 
   // ✅ Step 1: Config files get strongest penalty (95% reduction)
-  const configFiles = [
-    "package.json",
-    "package-lock.json",
-    "tsconfig.json",
-    "jsconfig.json",
-    "pnpm-lock.yaml",
-    "yarn.lock",
-    "bun.lockb",
-  ];
-  const configExtensions = [".lock", ".env"];
-  const configPatterns = [
-    ".config.js",
-    ".config.ts",
-    ".config.mjs",
-    ".config.cjs",
-    ".eslintrc",
-    ".prettierrc",
-  ];
-
-  if (
-    configFiles.includes(fileName) ||
-    configExtensions.some((ce) => path.endsWith(ce)) ||
-    configPatterns.some((pattern) => path.endsWith(pattern)) ||
-    fileName.startsWith(".env")
-  ) {
+  if (isConfigFile(path, fileName)) {
     multiplier *= weights.configPenaltyMultiplier; // 0.05 = 95% reduction
     return baseScore * multiplier;
   }
@@ -906,31 +1011,7 @@ function applyFileTypeMultipliers(
     const fileName = path.split("/").pop() ?? "";
 
     // ✅ Step 1: Config files get strongest penalty (95% reduction)
-    const configFiles = [
-      "package.json",
-      "package-lock.json",
-      "tsconfig.json",
-      "jsconfig.json",
-      "pnpm-lock.yaml",
-      "yarn.lock",
-      "bun.lockb",
-    ];
-    const configExtensions = [".lock", ".env"];
-    const configPatterns = [
-      ".config.js",
-      ".config.ts",
-      ".config.mjs",
-      ".config.cjs",
-      ".eslintrc",
-      ".prettierrc",
-    ];
-
-    if (
-      configFiles.includes(fileName) ||
-      configExtensions.some((ce) => path.endsWith(ce)) ||
-      configPatterns.some((pattern) => path.endsWith(pattern)) ||
-      fileName.startsWith(".env")
-    ) {
+    if (isConfigFile(path, fileName)) {
       candidate.scoreMultiplier *= weights.configPenaltyMultiplier; // 0.05 = 95% reduction
       candidate.reasons.add("penalty:config-file");
       return; // Don't apply impl boosts to config files

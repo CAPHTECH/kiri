@@ -22,19 +22,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - Config files: `×0.05` penalty (95% reduction via `configPenaltyMultiplier`)
     - Doc files: `×0.5` penalty (50% reduction via `docPenaltyMultiplier`)
   - **Impact**: Config files now rarely appear in top 15 results, improving relevance for code-focused queries
-  - **Files affected**: package.json, tsconfig.json, lock files, .env files, \*.config.js, .eslintrc, .prettierrc
+  - **Languages covered**: JavaScript/TypeScript, Python, Ruby, Go, PHP, Java/Kotlin, Rust, Swift, .NET, C/C++, Docker, CI/CD
+  - **Files affected**:
+    - **JS/TS**: package.json, tsconfig.json, .eslintrc, .prettierrc, \*.config.js/ts
+    - **Python**: requirements.txt, pyproject.toml, setup.py, Pipfile, pytest.ini
+    - **Ruby**: Gemfile, Rakefile, .ruby-version
+    - **Go**: go.mod, go.sum, Makefile
+    - **PHP**: composer.json, phpunit.xml
+    - **Java/Kotlin**: pom.xml, build.gradle, settings.gradle
+    - **Rust**: Cargo.toml, Cargo.lock
+    - **Swift**: Package.swift, Package.resolved
+    - **.NET**: packages.lock.json, global.json
+    - **C/C++**: CMakeLists.txt, configure.ac
+    - **Docker**: Dockerfile, docker-compose.yml
+    - **CI/CD**: .travis.yml, .gitlab-ci.yml, Jenkinsfile, azure-pipelines.yml
+    - **Git**: .gitignore, .gitattributes
+    - **Generic**: \*.config.json/yaml/toml, \*.conf, \*.lock, .env\*
+  - **Lock files**: Comprehensive coverage including non-.lock extensions
+    - **Standard**: \*.lock (covers pdm.lock, mix.lock, pubspec.lock, etc.)
+    - **JS/Node**: package-lock.json, pnpm-lock.yaml, yarn.lock, npm-shrinkwrap.json, bun.lockb
+    - **Python**: Pipfile.lock, poetry.lock
+    - **Ruby**: Gemfile.lock
+    - **PHP**: composer.lock
+    - **Rust**: Cargo.lock
+    - **Swift**: Package.resolved (non-.lock extension)
+    - **.NET**: packages.lock.json (non-.lock extension)
+    - **Go**: go.sum (lockfile equivalent)
 
 ### Added
 
 - **`configPenaltyMultiplier` in scoring profiles** (`config/scoring-profiles.yml`)
   - Controls config file penalty (default: 0.05 = 95% reduction)
   - Separate from `docPenaltyMultiplier` to distinguish config files from documentation
-  - Applied to: package.json, tsconfig.json, package-lock.json, pnpm-lock.yaml, \*.config.js, .eslintrc, etc.
+  - **Multi-language support**: Covers 10+ programming languages and toolchains
+  - Applied via shared `isConfigFile()` helper function to eliminate code duplication
 
 - **Comprehensive `compact` mode documentation** in `docs/api-and-client.md`
+  - English and Japanese bilingual documentation
   - Two-tier workflow examples showing optimal token usage patterns
   - Token comparison table (55K vs 2.5K tokens)
   - Usage guidelines for when to use compact mode vs full preview mode
+  - Real-world Lambda function investigation example
+
+- **Runtime warning for breaking change** (`src/server/rpc.ts`)
+  - Displays once on first use: "⚠️ BREAKING CHANGE (v0.8.0): compact mode is now default"
+  - Guides users to set `compact: false` to restore previous behavior
+  - Prevents silent behavior changes that could impact existing workflows
+
+- **Edge case tests** for config file detection (`tests/server/boosting-helpers.spec.ts`)
+  - Verifies implementation files in `src/config/` are not penalized
+  - Validates multi-language config file detection (Python, Ruby, Go, Rust, Docker, etc.)
+  - Ensures paths with config-like segments don't cause false positives
 
 ### Fixed
 
@@ -42,6 +80,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Previous issue: Generic config files appeared in top 15 despite being rarely relevant
   - Root cause: Insufficient penalty (70% reduction) allowed config files with keyword matches to rank high
   - Solution: Separate `configPenaltyMultiplier` (95% reduction) applied before doc penalty
+
+- **Code duplication in config file detection**
+  - Previous issue: Config patterns defined twice in `applyFileTypeBoost()` and `applyFileTypeMultipliers()`
+  - Solution: Extracted to shared constants (`CONFIG_FILES`, `CONFIG_EXTENSIONS`, `CONFIG_PATTERNS`) and `isConfigFile()` helper function
+  - Impact: Improved maintainability and consistency across codebase
 
 ## [0.7.0] - 2025-11-05
 

@@ -602,5 +602,281 @@ describe("Boosting Helper Functions (v0.7.0+)", () => {
         expect(mdRank).toBeLessThan(jsonRank);
       }
     });
+
+    it("does not penalize implementation files (no false positives)", async () => {
+      const repo = await createTempRepo({
+        "src/auth/handler.ts": `export function authenticate() {\n  console.log("authenticate handler");\n  return "auth";\n}\n`,
+        "src/components/Button.tsx": `export const Button = () => {\n  console.log("button component");\n  return <button>Click</button>;\n}\n`,
+        "src/lib/formatter.ts": `export function formatData() {\n  console.log("format data");\n  return "formatted";\n}\n`,
+        "package.json": `{"name": "test"}\n`,
+      });
+      cleanupTargets.push({ dispose: repo.cleanup });
+
+      const dbDir = await mkdtemp(join(tmpdir(), "kiri-impl-no-penalty-"));
+      const dbPath = join(dbDir, "index.duckdb");
+      cleanupTargets.push({
+        dispose: async () => await rm(dbDir, { recursive: true, force: true }),
+      });
+
+      await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+      const db = await DuckDBClient.connect({ databasePath: dbPath });
+      cleanupTargets.push({ dispose: async () => await db.close() });
+
+      const repoId = await resolveRepoId(db, repo.path);
+      const context: ServerContext = { db, repoId };
+
+      const bundle = await contextBundle(context, {
+        goal: "authenticate button formatData handler component",
+        limit: 10,
+      });
+
+      const authFile = bundle.context.find((item) => item.path === "src/auth/handler.ts");
+      const buttonFile = bundle.context.find((item) => item.path === "src/components/Button.tsx");
+      const formatterFile = bundle.context.find((item) => item.path === "src/lib/formatter.ts");
+      const configFile = bundle.context.find((item) => item.path === "package.json");
+
+      // All implementation files should be found
+      expect(authFile).toBeDefined();
+      expect(buttonFile).toBeDefined();
+      expect(formatterFile).toBeDefined();
+
+      if (authFile && buttonFile && formatterFile && configFile) {
+        const authRank = bundle.context.indexOf(authFile);
+        const buttonRank = bundle.context.indexOf(buttonFile);
+        const formatterRank = bundle.context.indexOf(formatterFile);
+        const configRank = bundle.context.indexOf(configFile);
+
+        // All implementation files should rank higher than config files
+        expect(authRank).toBeLessThan(configRank);
+        expect(buttonRank).toBeLessThan(configRank);
+        expect(formatterRank).toBeLessThan(configRank);
+
+        // Implementation files should not have penalty reasons
+        expect(authFile.why.some((reason) => reason.startsWith("penalty:"))).toBe(false);
+        expect(buttonFile.why.some((reason) => reason.startsWith("penalty:"))).toBe(false);
+        expect(formatterFile.why.some((reason) => reason.startsWith("penalty:"))).toBe(false);
+
+        // Config file should have penalty reason
+        expect(configFile.why.some((reason) => reason === "penalty:config-file")).toBe(true);
+      }
+    });
+
+    it("does not treat paths with config-like segments as config files", async () => {
+      const repo = await createTempRepo({
+        "src/config/database.ts": `export const dbConfig = { host: "localhost" };\n`,
+        "src/config/settings.ts": `export const settings = { debug: true };\n`,
+        "config/app.config.js": `module.exports = { name: "app" };\n`,
+        "tsconfig.json": `{"compilerOptions": {}}\n`,
+      });
+      cleanupTargets.push({ dispose: repo.cleanup });
+
+      const dbDir = await mkdtemp(join(tmpdir(), "kiri-path-segment-"));
+      const dbPath = join(dbDir, "index.duckdb");
+      cleanupTargets.push({
+        dispose: async () => await rm(dbDir, { recursive: true, force: true }),
+      });
+
+      await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+      const db = await DuckDBClient.connect({ databasePath: dbPath });
+      cleanupTargets.push({ dispose: async () => await db.close() });
+
+      const repoId = await resolveRepoId(db, repo.path);
+      const context: ServerContext = { db, repoId };
+
+      const bundle = await contextBundle(context, {
+        goal: "database settings config",
+        limit: 10,
+      });
+
+      const databaseFile = bundle.context.find((item) => item.path === "src/config/database.ts");
+      const settingsFile = bundle.context.find((item) => item.path === "src/config/settings.ts");
+      const appConfigFile = bundle.context.find((item) => item.path === "config/app.config.js");
+      const tsconfigFile = bundle.context.find((item) => item.path === "tsconfig.json");
+
+      if (databaseFile && settingsFile && appConfigFile && tsconfigFile) {
+        const databaseRank = bundle.context.indexOf(databaseFile);
+        const settingsRank = bundle.context.indexOf(settingsFile);
+        const appConfigRank = bundle.context.indexOf(appConfigFile);
+        const tsconfigRank = bundle.context.indexOf(tsconfigFile);
+
+        // Implementation files in /config/ directory should rank higher than actual config files
+        expect(databaseRank).toBeLessThan(appConfigRank);
+        expect(databaseRank).toBeLessThan(tsconfigRank);
+        expect(settingsRank).toBeLessThan(appConfigRank);
+        expect(settingsRank).toBeLessThan(tsconfigRank);
+
+        // Implementation files should not have config penalty
+        expect(databaseFile.why.some((reason) => reason === "penalty:config-file")).toBe(false);
+        expect(settingsFile.why.some((reason) => reason === "penalty:config-file")).toBe(false);
+
+        // Actual config files should have penalty
+        expect(appConfigFile.why.some((reason) => reason === "penalty:config-file")).toBe(true);
+        expect(tsconfigFile.why.some((reason) => reason === "penalty:config-file")).toBe(true);
+      }
+    });
+
+    it("applies penalty to config files from multiple languages (Python, Ruby, Go, Rust, etc.)", async () => {
+      const repo = await createTempRepo({
+        "src/main.py": `def main():\n    print("main function")\n`,
+        "requirements.txt": `flask==2.0.0\n`,
+        "pyproject.toml": `[tool.poetry]\nname = "test"\n`,
+        Gemfile: `source "https://rubygems.org"\ngem "rails"\n`,
+        "go.mod": `module example.com/test\n`,
+        "Cargo.toml": `[package]\nname = "test"\n`,
+        "docker-compose.yml": `version: "3"\n`,
+        Dockerfile: `FROM node:18\n`,
+      });
+      cleanupTargets.push({ dispose: repo.cleanup });
+
+      const dbDir = await mkdtemp(join(tmpdir(), "kiri-multilang-config-"));
+      const dbPath = join(dbDir, "index.duckdb");
+      cleanupTargets.push({
+        dispose: async () => await rm(dbDir, { recursive: true, force: true }),
+      });
+
+      await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+      const db = await DuckDBClient.connect({ databasePath: dbPath });
+      cleanupTargets.push({ dispose: async () => await db.close() });
+
+      const repoId = await resolveRepoId(db, repo.path);
+      const context: ServerContext = { db, repoId };
+
+      const bundle = await contextBundle(context, {
+        goal: "main function requirements gemfile cargo docker",
+        limit: 10,
+      });
+
+      const implFile = bundle.context.find((item) => item.path === "src/main.py");
+      const pythonReqFile = bundle.context.find((item) => item.path === "requirements.txt");
+      const pythonTomlFile = bundle.context.find((item) => item.path === "pyproject.toml");
+      const gemFile = bundle.context.find((item) => item.path === "Gemfile");
+      const goModFile = bundle.context.find((item) => item.path === "go.mod");
+      const cargoFile = bundle.context.find((item) => item.path === "Cargo.toml");
+      const dockerComposeFile = bundle.context.find((item) => item.path === "docker-compose.yml");
+      const dockerFile = bundle.context.find((item) => item.path === "Dockerfile");
+
+      // Implementation file should be found
+      expect(implFile).toBeDefined();
+
+      if (implFile) {
+        const implRank = bundle.context.indexOf(implFile);
+
+        // All config files found should rank lower than implementation file
+        if (pythonReqFile) {
+          expect(implRank).toBeLessThan(bundle.context.indexOf(pythonReqFile));
+          expect(pythonReqFile.why.some((reason) => reason === "penalty:config-file")).toBe(true);
+        }
+        if (pythonTomlFile) {
+          expect(implRank).toBeLessThan(bundle.context.indexOf(pythonTomlFile));
+          expect(pythonTomlFile.why.some((reason) => reason === "penalty:config-file")).toBe(true);
+        }
+        if (gemFile) {
+          expect(implRank).toBeLessThan(bundle.context.indexOf(gemFile));
+          expect(gemFile.why.some((reason) => reason === "penalty:config-file")).toBe(true);
+        }
+        if (goModFile) {
+          expect(implRank).toBeLessThan(bundle.context.indexOf(goModFile));
+          expect(goModFile.why.some((reason) => reason === "penalty:config-file")).toBe(true);
+        }
+        if (cargoFile) {
+          expect(implRank).toBeLessThan(bundle.context.indexOf(cargoFile));
+          expect(cargoFile.why.some((reason) => reason === "penalty:config-file")).toBe(true);
+        }
+        if (dockerComposeFile) {
+          expect(implRank).toBeLessThan(bundle.context.indexOf(dockerComposeFile));
+          expect(dockerComposeFile.why.some((reason) => reason === "penalty:config-file")).toBe(
+            true
+          );
+        }
+        if (dockerFile) {
+          expect(implRank).toBeLessThan(bundle.context.indexOf(dockerFile));
+          expect(dockerFile.why.some((reason) => reason === "penalty:config-file")).toBe(true);
+        }
+
+        // Implementation file should not have config penalty
+        expect(implFile.why.some((reason) => reason === "penalty:config-file")).toBe(false);
+      }
+    });
+
+    it("applies penalty to non-.lock extension lock files (npm-shrinkwrap.json, Package.resolved, packages.lock.json)", async () => {
+      const repo = await createTempRepo({
+        "src/app.swift": `import Foundation\n\nfunc main() {\n    print("Hello")\n}\n`,
+        "src/Program.cs": `using System;\n\nclass Program {\n    static void Main() {\n        Console.WriteLine("Hello");\n    }\n}\n`,
+        "src/index.js": `console.log("Hello");\n`,
+        "npm-shrinkwrap.json": `{"name": "test", "lockfileVersion": 2}\n`,
+        "Package.resolved": `{"pins": []}\n`,
+        "packages.lock.json": `{"version": 1}\n`,
+      });
+      cleanupTargets.push({ dispose: repo.cleanup });
+
+      const dbDir = await mkdtemp(join(tmpdir(), "kiri-lock-files-"));
+      const dbPath = join(dbDir, "index.duckdb");
+      cleanupTargets.push({
+        dispose: async () => await rm(dbDir, { recursive: true, force: true }),
+      });
+
+      await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+      const db = await DuckDBClient.connect({ databasePath: dbPath });
+      cleanupTargets.push({ dispose: async () => await db.close() });
+
+      const repoId = await resolveRepoId(db, repo.path);
+      const context: ServerContext = { db, repoId };
+
+      const bundle = await contextBundle(context, {
+        goal: "main hello swift program console",
+        limit: 10,
+      });
+
+      const swiftFile = bundle.context.find((item) => item.path === "src/app.swift");
+      const csFile = bundle.context.find((item) => item.path === "src/Program.cs");
+      const jsFile = bundle.context.find((item) => item.path === "src/index.js");
+      const shrinkwrapFile = bundle.context.find((item) => item.path === "npm-shrinkwrap.json");
+      const packageResolvedFile = bundle.context.find((item) => item.path === "Package.resolved");
+      const packagesLockFile = bundle.context.find((item) => item.path === "packages.lock.json");
+
+      // Implementation files should be found
+      expect(swiftFile).toBeDefined();
+      expect(csFile).toBeDefined();
+      expect(jsFile).toBeDefined();
+
+      if (swiftFile && csFile && jsFile) {
+        const swiftRank = bundle.context.indexOf(swiftFile);
+        const csRank = bundle.context.indexOf(csFile);
+        const jsRank = bundle.context.indexOf(jsFile);
+
+        // All lock files found should rank lower than implementation files
+        if (shrinkwrapFile) {
+          expect(swiftRank).toBeLessThan(bundle.context.indexOf(shrinkwrapFile));
+          expect(csRank).toBeLessThan(bundle.context.indexOf(shrinkwrapFile));
+          expect(jsRank).toBeLessThan(bundle.context.indexOf(shrinkwrapFile));
+          expect(shrinkwrapFile.why.some((reason) => reason === "penalty:config-file")).toBe(true);
+        }
+        if (packageResolvedFile) {
+          expect(swiftRank).toBeLessThan(bundle.context.indexOf(packageResolvedFile));
+          expect(csRank).toBeLessThan(bundle.context.indexOf(packageResolvedFile));
+          expect(jsRank).toBeLessThan(bundle.context.indexOf(packageResolvedFile));
+          expect(packageResolvedFile.why.some((reason) => reason === "penalty:config-file")).toBe(
+            true
+          );
+        }
+        if (packagesLockFile) {
+          expect(swiftRank).toBeLessThan(bundle.context.indexOf(packagesLockFile));
+          expect(csRank).toBeLessThan(bundle.context.indexOf(packagesLockFile));
+          expect(jsRank).toBeLessThan(bundle.context.indexOf(packagesLockFile));
+          expect(packagesLockFile.why.some((reason) => reason === "penalty:config-file")).toBe(
+            true
+          );
+        }
+
+        // Implementation files should not have config penalty
+        expect(swiftFile.why.some((reason) => reason === "penalty:config-file")).toBe(false);
+        expect(csFile.why.some((reason) => reason === "penalty:config-file")).toBe(false);
+        expect(jsFile.why.some((reason) => reason === "penalty:config-file")).toBe(false);
+      }
+    });
   });
 });
