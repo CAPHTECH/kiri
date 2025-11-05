@@ -1,21 +1,24 @@
 /**
- * Unix Socket Transport Layer for KIRI Daemon
+ * IPC Transport Layer for KIRI Daemon
  *
- * Provides IPC communication between daemon and clients via Unix domain sockets.
+ * Provides IPC communication between daemon and clients:
+ * - Unix/Linux/macOS: Unix domain sockets
+ * - Windows: Named pipes
  * Handles multiple concurrent client connections with newline-delimited JSON-RPC protocol.
  */
 
 import * as fs from "fs/promises";
 import * as net from "net";
+import * as os from "os";
 import * as readline from "readline";
 
 import type { JsonRpcRequest, RpcHandleResult } from "../server/rpc.js";
 
 /**
- * Unix socket server configuration
+ * Socket server configuration
  */
 export interface SocketServerOptions {
-  /** Unix socket file path (e.g., /path/to/database.duckdb.sock) */
+  /** Socket path (Unix socket file path or Windows named pipe) */
   socketPath: string;
   /** Handler function for JSON-RPC requests */
   onRequest: (request: JsonRpcRequest) => Promise<RpcHandleResult | null>;
@@ -33,14 +36,17 @@ export async function createSocketServer(
   options: SocketServerOptions
 ): Promise<() => Promise<void>> {
   const { socketPath, onRequest, onError } = options;
+  const isWindows = os.platform() === "win32";
 
-  // 既存のソケットファイルが残っている場合は削除
-  try {
-    await fs.unlink(socketPath);
-  } catch (err) {
-    // ファイルが存在しない場合は無視
-    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
-      throw err;
+  // Unix系の場合: 既存のソケットファイルが残っている場合は削除
+  if (!isWindows) {
+    try {
+      await fs.unlink(socketPath);
+    } catch (err) {
+      // ファイルが存在しない場合は無視
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw err;
+      }
     }
   }
 
@@ -48,7 +54,7 @@ export async function createSocketServer(
     handleClientConnection(socket, onRequest, onError);
   });
 
-  // Unixソケットをリッスン
+  // ソケット/名前付きパイプをリッスン
   await new Promise<void>((resolve, reject) => {
     server.listen(socketPath, () => {
       resolve();
@@ -56,8 +62,11 @@ export async function createSocketServer(
     server.on("error", reject);
   });
 
-  // ソケットファイルのパーミッションを0600に設定（所有者のみアクセス可能）
-  await fs.chmod(socketPath, 0o600);
+  // Unix系の場合: ソケットファイルのパーミッションを0600に設定（所有者のみアクセス可能）
+  // Windows: 名前付きパイプにはファイルパーミッションが存在しないためスキップ
+  if (!isWindows) {
+    await fs.chmod(socketPath, 0o600);
+  }
 
   console.error(`[Daemon] Listening on socket: ${socketPath}`);
 
@@ -65,11 +74,15 @@ export async function createSocketServer(
   return async () => {
     return new Promise<void>((resolve) => {
       server.close(async () => {
-        try {
-          await fs.unlink(socketPath);
-          // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        } catch (_err) {
-          // 削除エラーは無視（既に削除されている可能性）
+        // Unix系の場合のみソケットファイルを削除
+        // Windows: 名前付きパイプは自動的にクリーンアップされる
+        if (!isWindows) {
+          try {
+            await fs.unlink(socketPath);
+            // eslint-disable-next-line @typescript-eslint/no-unused-vars
+          } catch (_err) {
+            // 削除エラーは無視（既に削除されている可能性）
+          }
         }
         resolve();
       });

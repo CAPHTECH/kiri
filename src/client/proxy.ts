@@ -12,6 +12,7 @@ import * as readline from "readline";
 import { parseArgs } from "util";
 
 import packageJson from "../../package.json" with { type: "json" };
+import { getSocketPath } from "../shared/utils/socket.js";
 
 import { startDaemon, isDaemonRunning, stopDaemon } from "./start-daemon.js";
 
@@ -50,7 +51,7 @@ function parseProxyArgs(): ProxyOptions {
   const databasePath = path.resolve(values.db || path.join(repoRoot, "var", "index.duckdb"));
   const socketPath = values["socket-path"]
     ? path.resolve(values["socket-path"])
-    : `${databasePath}.sock`;
+    : getSocketPath(databasePath);
 
   return {
     repoRoot,
