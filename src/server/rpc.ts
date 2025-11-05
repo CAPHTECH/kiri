@@ -151,14 +151,18 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
       "- goal='Canvas page routing, API endpoints, navigation patterns'\n" +
       "- goal='Fix pagination off-by-one error in product listing'\n" +
       "- goal='Database connection pooling, retry logic'\n" +
-      "- goal='page-agent Lambda handler implementation'  (hyphenated terms recognized as phrases)\n" +
+      "- goal='page-agent Lambda handler request processing error handling'  (hyphenated terms recognized as phrases)\n" +
       "- goal='context_bundle scoring logic'  (underscore terms recognized as phrases)\n\n" +
       "❌ BAD EXAMPLES (too vague, avoid these):\n" +
       "- goal='Understand how canvas pages are accessed' (starts with abstract verb)\n" +
       "- goal='understand' (single word, no context)\n" +
       "- goal='explore the authentication system' (vague verb + long sentence)\n" +
       "- goal='fix bug' (which bug? be specific)\n" +
-      "- goal='authentication' (noun only, what about it?)\n\n" +
+      "- goal='authentication' (noun only, what about it?)\n" +
+      "- goal='authentication implementation' (too generic - specify: handler? validator? storage?)\n" +
+      "- goal='search implementation' (add concrete aspects: parser, ranking, indexer)\n\n" +
+      "GUIDELINE: Avoid generic terms like 'implementation', 'code', or 'logic' alone. " +
+      "Instead, specify concrete aspects: 'handler', 'validator', 'parser', 'storage', 'error handling', 'data flow'.\n\n" +
       "TOKEN OPTIMIZATION: Use 'compact: true' to reduce token consumption by ~95%. Returns only metadata (path, range, why, score) without preview field. " +
       "Combine with snippets.get for two-tier approach: first get candidate list (compact), then fetch selected content.\n\n" +
       "Example workflow:\n" +

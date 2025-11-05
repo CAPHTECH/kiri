@@ -359,7 +359,7 @@ Refine search results by semantic relevance to your specific query. Useful when 
 You: "How does user authentication work in this project?"
 
 Claude (using KIRI):
-1. Uses context_bundle with goal "user authentication implementation"
+1. Uses context_bundle with goal "user authentication flow JWT validation session management"
 2. Analyzes returned snippets
 3. Explains the authentication flow with code references
 ```

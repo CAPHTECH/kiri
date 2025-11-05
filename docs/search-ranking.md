@@ -73,7 +73,7 @@ contextBundle({ goal: "file_embedding vector generation" });
 
 ```typescript
 // 例: lambda/page-agent/handler からセグメント抽出
-contextBundle({ goal: "lambda/page-agent/handler implementation" });
+contextBundle({ goal: "lambda/page-agent/handler request processing error handling" });
 // → パスセグメント: ["lambda", "page-agent", "handler"]
 // → これらのセグメントがファイルパスに含まれる場合にブースト
 ```
