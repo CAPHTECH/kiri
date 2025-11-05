@@ -22,7 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - Config files: `×0.05` penalty (95% reduction via `configPenaltyMultiplier`)
     - Doc files: `×0.5` penalty (50% reduction via `docPenaltyMultiplier`)
   - **Impact**: Config files now rarely appear in top 15 results, improving relevance for code-focused queries
-  - **Languages covered**: JavaScript/TypeScript, Python, Ruby, Go, PHP, Java/Kotlin, Rust, Swift, .NET, C/C++, Docker, CI/CD
+  - **Languages covered**: JavaScript/TypeScript, Python, Ruby, Go, PHP, Java/Kotlin, Rust, Swift, .NET, C/C++, Docker, CI/CD, Webservers
   - **Files affected**:
     - **JS/TS**: package.json, tsconfig.json, .eslintrc, .prettierrc, \*.config.js/ts
     - **Python**: requirements.txt, pyproject.toml, setup.py, Pipfile, pytest.ini
@@ -37,7 +37,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - **Docker**: Dockerfile, docker-compose.yml
     - **CI/CD**: .travis.yml, .gitlab-ci.yml, Jenkinsfile, azure-pipelines.yml
     - **Git**: .gitignore, .gitattributes
+    - **Webservers**: Caddyfile, nginx.conf, .htaccess, httpd.conf, apache2.conf, lighttpd.conf
     - **Generic**: \*.config.json/yaml/toml, \*.conf, \*.lock, .env\*
+  - **Config directories**: Files inside these directories automatically penalized
+    - **Framework**: bootstrap/, config/
+    - **Database**: migrations/, db/migrate/, alembic/versions/, seeds/, fixtures/, test-data/
+    - **i18n**: locales/, i18n/, translations/, lang/
+    - **Infrastructure**: .terraform/, terraform/, k8s/, kubernetes/, ansible/, cloudformation/, pulumi/
   - **Lock files**: Comprehensive coverage including non-.lock extensions
     - **Standard**: \*.lock (covers pdm.lock, mix.lock, pubspec.lock, etc.)
     - **JS/Node**: package-lock.json, pnpm-lock.yaml, yarn.lock, npm-shrinkwrap.json, bun.lockb
@@ -54,7 +60,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`configPenaltyMultiplier` in scoring profiles** (`config/scoring-profiles.yml`)
   - Controls config file penalty (default: 0.05 = 95% reduction)
   - Separate from `docPenaltyMultiplier` to distinguish config files from documentation
-  - **Multi-language support**: Covers 10+ programming languages and toolchains
+  - **Multi-language support**: Covers 12+ programming languages and toolchains
+  - **Directory-based detection**: Files in config directories automatically penalized
   - Applied via shared `isConfigFile()` helper function to eliminate code duplication
 
 - **Comprehensive `compact` mode documentation** in `docs/api-and-client.md`
@@ -73,6 +80,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Verifies implementation files in `src/config/` are not penalized
   - Validates multi-language config file detection (Python, Ruby, Go, Rust, Docker, etc.)
   - Ensures paths with config-like segments don't cause false positives
+  - Tests non-.lock extension lock files (npm-shrinkwrap.json, Package.resolved, packages.lock.json)
+  - Tests directory-based detection (bootstrap/, config/, migrations/, locales/)
 
 ### Fixed
 

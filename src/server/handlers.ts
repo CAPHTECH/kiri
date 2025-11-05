@@ -92,6 +92,37 @@ const CONFIG_FILES = [
 
   // Editor config
   ".editorconfig",
+
+  // Webserver config
+  "Caddyfile",
+  "nginx.conf",
+  ".htaccess",
+  "httpd.conf",
+  "apache2.conf",
+  "lighttpd.conf",
+] as const;
+
+// Configuration directories (files inside these directories are treated as config)
+const CONFIG_DIRECTORIES = [
+  "bootstrap/", // Laravel/Symfony framework bootstrap
+  "config/", // Generic config directory (all frameworks)
+  "migrations/", // Database migrations
+  "db/migrate/", // Ruby on Rails migrations
+  "alembic/versions/", // Python Alembic migrations
+  "seeds/", // Database seeds
+  "fixtures/", // Test fixtures
+  "test-data/", // Test data
+  "locales/", // i18n translations
+  "i18n/", // i18n translations
+  "translations/", // i18n translations
+  "lang/", // i18n translations
+  ".terraform/", // Terraform state
+  "terraform/", // Terraform configs
+  "k8s/", // Kubernetes manifests
+  "kubernetes/", // Kubernetes manifests
+  "ansible/", // Ansible playbooks
+  "cloudformation/", // CloudFormation templates
+  "pulumi/", // Pulumi infrastructure
 ] as const;
 
 const CONFIG_EXTENSIONS = [".lock", ".env", ".conf"] as const;
@@ -123,16 +154,23 @@ const CONFIG_PATTERNS = [
 /**
  * Check if a file path represents a configuration file
  * Supports multiple languages: JS/TS, Python, Ruby, Go, PHP, Java, Rust, C/C++, Docker, CI/CD
+ * Also checks if file is in a config directory (bootstrap/, config/, migrations/, etc.)
  * @param path - Full file path
  * @param fileName - File name only (extracted from path)
  * @returns true if the file is a configuration file
  */
 function isConfigFile(path: string, fileName: string): boolean {
+  // Check if file is in a config directory
+  const isInConfigDirectory = (CONFIG_DIRECTORIES as readonly string[]).some((dir) =>
+    path.includes(dir)
+  );
+
   return (
     (CONFIG_FILES as readonly string[]).includes(fileName) ||
     CONFIG_EXTENSIONS.some((ce) => path.endsWith(ce)) ||
     CONFIG_PATTERNS.some((pattern) => path.includes(pattern)) ||
-    fileName.startsWith(".env")
+    fileName.startsWith(".env") ||
+    isInConfigDirectory
   );
 }
 

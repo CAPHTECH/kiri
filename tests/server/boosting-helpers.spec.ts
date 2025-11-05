@@ -878,5 +878,85 @@ describe("Boosting Helper Functions (v0.7.0+)", () => {
         expect(jsFile.why.some((reason) => reason === "penalty:config-file")).toBe(false);
       }
     });
+
+    it("applies penalty to files in config directories (bootstrap/, config/, migrations/, locales/)", async () => {
+      const repo = await createTempRepo({
+        "src/controllers/UserController.php": `<?php\nclass UserController {\n    public function index() {}\n}\n`,
+        "bootstrap/app.php": `<?php\nreturn Application::configure();\n`,
+        "config/database.php": `<?php\nreturn ['default' => 'mysql'];\n`,
+        "migrations/2024_create_users.php": `<?php\nSchema::create('users');\n`,
+        "locales/en.json": `{"hello": "Hello"}\n`,
+        Caddyfile: `example.com {\n    reverse_proxy localhost:3000\n}\n`,
+        "nginx.conf": `server {\n    listen 80;\n}\n`,
+      });
+      cleanupTargets.push({ dispose: repo.cleanup });
+
+      const dbDir = await mkdtemp(join(tmpdir(), "kiri-config-dirs-"));
+      const dbPath = join(dbDir, "index.duckdb");
+      cleanupTargets.push({
+        dispose: async () => await rm(dbDir, { recursive: true, force: true }),
+      });
+
+      await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+      const db = await DuckDBClient.connect({ databasePath: dbPath });
+      cleanupTargets.push({ dispose: async () => await db.close() });
+
+      const repoId = await resolveRepoId(db, repo.path);
+      const context: ServerContext = { db, repoId };
+
+      const bundle = await contextBundle(context, {
+        goal: "user controller bootstrap config database migration locales caddy nginx",
+        limit: 15,
+      });
+
+      const controllerFile = bundle.context.find(
+        (item) => item.path === "src/controllers/UserController.php"
+      );
+      const bootstrapFile = bundle.context.find((item) => item.path === "bootstrap/app.php");
+      const configFile = bundle.context.find((item) => item.path === "config/database.php");
+      const migrationFile = bundle.context.find(
+        (item) => item.path === "migrations/2024_create_users.php"
+      );
+      const localeFile = bundle.context.find((item) => item.path === "locales/en.json");
+      const caddyFile = bundle.context.find((item) => item.path === "Caddyfile");
+      const nginxFile = bundle.context.find((item) => item.path === "nginx.conf");
+
+      // Implementation file should be found
+      expect(controllerFile).toBeDefined();
+
+      if (controllerFile) {
+        const controllerRank = bundle.context.indexOf(controllerFile);
+
+        // All config directory files should rank lower than implementation
+        if (bootstrapFile) {
+          expect(controllerRank).toBeLessThan(bundle.context.indexOf(bootstrapFile));
+          expect(bootstrapFile.why.some((reason) => reason === "penalty:config-file")).toBe(true);
+        }
+        if (configFile) {
+          expect(controllerRank).toBeLessThan(bundle.context.indexOf(configFile));
+          expect(configFile.why.some((reason) => reason === "penalty:config-file")).toBe(true);
+        }
+        if (migrationFile) {
+          expect(controllerRank).toBeLessThan(bundle.context.indexOf(migrationFile));
+          expect(migrationFile.why.some((reason) => reason === "penalty:config-file")).toBe(true);
+        }
+        if (localeFile) {
+          expect(controllerRank).toBeLessThan(bundle.context.indexOf(localeFile));
+          expect(localeFile.why.some((reason) => reason === "penalty:config-file")).toBe(true);
+        }
+        if (caddyFile) {
+          expect(controllerRank).toBeLessThan(bundle.context.indexOf(caddyFile));
+          expect(caddyFile.why.some((reason) => reason === "penalty:config-file")).toBe(true);
+        }
+        if (nginxFile) {
+          expect(controllerRank).toBeLessThan(bundle.context.indexOf(nginxFile));
+          expect(nginxFile.why.some((reason) => reason === "penalty:config-file")).toBe(true);
+        }
+
+        // Implementation file should not have config penalty
+        expect(controllerFile.why.some((reason) => reason === "penalty:config-file")).toBe(false);
+      }
+    });
   });
 });
