@@ -2,7 +2,7 @@
 
 > Intelligent code context extraction for LLMs via Model Context Protocol
 
-[![Version](https://img.shields.io/badge/version-0.7.0-blue.svg)](package.json)
+[![Version](https://img.shields.io/badge/version-0.8.0-blue.svg)](package.json)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.6-blue.svg)](https://www.typescriptlang.org/)
 [![MCP](https://img.shields.io/badge/MCP-Compatible-green.svg)](https://modelcontextprotocol.io/)
@@ -157,10 +157,17 @@ KIRI provides 5 MCP tools for intelligent code exploration:
 
 The most powerful tool for getting started with unfamiliar code. Provide a task description, and KIRI returns the most relevant code snippets using phrase-aware tokenization and path-based scoring.
 
+**v0.8.0 improvements:**
+
+- **⚡ Compact mode default (BREAKING)**: `compact: true` is now default, reducing token usage by ~95% (55K → 2.5K tokens). Set `compact: false` to restore full preview mode.
+- **🔧 Separated config penalties**: Configuration files (`.json`, `.yaml`, `.env`) now have independent 95% penalty (×0.05), separate from documentation penalty (×0.5)
+- **🌐 Multi-language config support**: Recognizes config files across all languages (`package.json`, `tsconfig.json`, `composer.json`, `Gemfile`, etc.)
+- **🛡️ Production hardening**: Memory leak prevention in WarningManager, configurable warning limits, improved path matching
+
 **v0.7.0 improvements:**
 
-- **Multiplicative penalties**: Documentation files now penalized by ×0.3 (70% reduction) instead of additive -2.0
-- **Implementation prioritization**: Implementation files rank 5-10× higher than documentation (1.82 vs 0.30)
+- **Multiplicative penalties**: Documentation files now penalized by ×0.5 (50% reduction) instead of additive -2.0
+- **Implementation prioritization**: Implementation files rank 3-5× higher than documentation
 - **Unified boosting logic**: Consistent file ranking across `files_search` and `context_bundle`
 - **Configurable profiles**: `boost_profile` parameter supports "default" (implementation-first), "docs" (documentation-first), or "none" (natural BM25)
 
@@ -185,12 +192,12 @@ The most powerful tool for getting started with unfamiliar code. Provide a task 
 
 **Parameters:**
 
-| Parameter       | Type    | Required | Description                                           |
-| --------------- | ------- | -------- | ----------------------------------------------------- |
-| `goal`          | string  | Yes      | Task description or question about the code           |
-| `limit`         | number  | No       | Max snippets to return (default: 12, max: 20)         |
-| `compact`       | boolean | No       | Return only metadata without preview (default: false) |
-| `boost_profile` | string  | No       | File type boosting: "default", "docs", "none"         |
+| Parameter       | Type    | Required | Description                                                                        |
+| --------------- | ------- | -------- | ---------------------------------------------------------------------------------- |
+| `goal`          | string  | Yes      | Task description or question about the code                                        |
+| `limit`         | number  | No       | Max snippets to return (default: 12, max: 20)                                      |
+| `compact`       | boolean | No       | Return only metadata without preview (default: **true** in v0.8.0+, false in v0.7) |
+| `boost_profile` | string  | No       | File type boosting: "default", "docs", "none"                                      |
 
 ### 2. files_search
 
@@ -651,11 +658,11 @@ See [docs/architecture.md](docs/architecture.md) for detailed technical informat
 
 ### Performance
 
-| Metric                   | Target | Current |
-| ------------------------ | ------ | ------- |
-| **Time to First Result** | ≤ 1.0s | ✅ 0.8s |
-| **Precision @ 10**       | ≥ 0.7  | ✅ 0.75 |
-| **Token Reduction**      | ≥ 40%  | ✅ 45%  |
+| Metric                        | Target | Current       |
+| ----------------------------- | ------ | ------------- |
+| **Time to First Result**      | ≤ 1.0s | ✅ 0.8s       |
+| **Precision @ 10**            | ≥ 0.7  | ✅ 0.75       |
+| **Token Reduction (compact)** | ≥ 90%  | ✅ 95% (v0.8) |
 
 ### Community
 
@@ -734,6 +741,8 @@ Built with:
 
 ---
 
-**Status**: v0.7.0 (Beta) - Production-ready for MCP clients
+**Status**: v0.8.0 (Beta) - Production-ready for MCP clients
+
+**Breaking Changes in v0.8.0**: `compact` mode is now default. Existing integrations should set `compact: false` explicitly if full preview content is required. See [CHANGELOG.md](CHANGELOG.md) for migration guide.
 
 For questions or support, please open a [GitHub issue](https://github.com/CAPHTECH/kiri/issues).
