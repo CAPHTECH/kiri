@@ -24,23 +24,45 @@ import { withSpan } from "./observability/tracing.js";
  * 各警告を一度だけ表示するための状態管理を提供します。
  * グローバル変数を使わずにServerContextにカプセル化することで、
  * テスタビリティと並行性を改善します。
+ *
+ * メモリリーク防止のため、保持する警告キーの数に上限を設定しています。
  */
 export class WarningManager {
   private readonly shownWarnings = new Set<string>();
+  public readonly responseWarnings: string[] = [];
+  private static readonly MAX_UNIQUE_WARNINGS = 1000;
 
   /**
    * 指定されたキーの警告をまだ表示していない場合にのみ表示します
    *
    * @param key - 警告を識別するユニークなキー
    * @param message - 表示する警告メッセージ
+   * @param forResponse - true の場合、警告をAPIレスポンスに含める
    * @returns 警告が表示された場合はtrue、既に表示済みの場合はfalse
    */
-  warnOnce(key: string, message: string): boolean {
+  warnOnce(key: string, message: string, forResponse: boolean = false): boolean {
     if (this.shownWarnings.has(key)) {
       return false;
     }
+
+    // メモリリーク防止: 上限に達したら新しい警告を追加しない
+    if (this.shownWarnings.size >= WarningManager.MAX_UNIQUE_WARNINGS) {
+      if (!this.shownWarnings.has("__WARNING_LIMIT_REACHED__")) {
+        console.warn(
+          "WarningManager: Unique warning limit reached. No new warnings will be shown."
+        );
+        this.shownWarnings.add("__WARNING_LIMIT_REACHED__");
+      }
+      return false;
+    }
+
     console.warn(message);
     this.shownWarnings.add(key);
+
+    if (forResponse) {
+      this.responseWarnings.push(message);
+    }
+
     return true;
   }
 
@@ -49,6 +71,7 @@ export class WarningManager {
    */
   reset(): void {
     this.shownWarnings.clear();
+    this.responseWarnings.length = 0;
   }
 }
 
@@ -484,17 +507,17 @@ function parseContextBundleParams(input: unknown, context: ServerContext): Conte
   // Parse compact parameter (default: true for token efficiency)
   if (typeof record.compact === "boolean") {
     params.compact = record.compact;
-    params._compactDefaulted = false; // User explicitly set compact
   } else {
     params.compact = true; // Default to compact mode (v0.8.0+: breaking change)
-    params._compactDefaulted = true; // Track that we defaulted to compact
 
     // Show one-time warning about breaking change using WarningManager
+    // forResponse: true adds this warning to the API response
     context.warningManager.warnOnce(
       "compact-default-v0.8.0",
-      "⚠️  BREAKING CHANGE (v0.8.0): compact mode is now default. " +
+      "BREAKING CHANGE (v0.8.0): compact mode is now default. " +
         "Set compact: false to restore previous behavior. " +
-        "See CHANGELOG.md for details."
+        "See CHANGELOG.md for details.",
+      true // Add to API response
     );
   }
 

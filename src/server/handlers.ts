@@ -166,15 +166,12 @@ function isConfigFile(path: string, fileName: string): boolean {
   const normalizedPath = path.replace(/\\/g, "/");
 
   // Check if file is in a config directory using exact path segment matching
-  // This prevents false positives like "myconfig/" matching "config/"
-  const isInConfigDirectory = (CONFIG_DIRECTORIES as readonly string[]).some((dir) => {
-    // Match if path starts with "dir/" or contains "/dir/"
-    return (
-      normalizedPath === dir ||
-      normalizedPath.startsWith(dir + "/") ||
-      normalizedPath.includes("/" + dir + "/")
-    );
-  });
+  // Split path into segments and check for exact matches to prevent false positives
+  // e.g., "bootstrap" won't match "my-bootstrap-theme" in path segments
+  const pathSegments = new Set(normalizedPath.split("/"));
+  const isInConfigDirectory = (CONFIG_DIRECTORIES as readonly string[]).some((dir) =>
+    pathSegments.has(dir)
+  );
 
   return (
     (CONFIG_FILES as readonly string[]).includes(fileName) ||
@@ -232,7 +229,6 @@ export interface ContextBundleParams {
   profile?: string;
   boost_profile?: "default" | "docs" | "none";
   compact?: boolean; // If true, omit preview field to reduce token usage
-  _compactDefaulted?: boolean; // Internal: true if compact was defaulted to true (v0.8.0 breaking change)
 }
 
 export interface ContextBundleItem {
@@ -1680,14 +1676,8 @@ export async function contextBundle(
   }
 
   if (materializedCandidates.length === 0) {
-    // Add warning if compact was defaulted (v0.8.0 breaking change notification)
-    const warnings: string[] = [];
-    if (params._compactDefaulted) {
-      warnings.push(
-        "BREAKING CHANGE (v0.8.0): compact mode is now default. " +
-          "Set compact: false to restore previous behavior. See CHANGELOG.md for details."
-      );
-    }
+    // Get warnings from WarningManager (includes breaking change notification if applicable)
+    const warnings = [...context.warningManager.responseWarnings];
     return {
       context: [],
       tokens_estimate: 0,
@@ -1790,14 +1780,8 @@ export async function contextBundle(
     return acc + lineCount * 4;
   }, 0);
 
-  // Add warning if compact was defaulted (v0.8.0 breaking change notification)
-  const warnings: string[] = [];
-  if (params._compactDefaulted) {
-    warnings.push(
-      "BREAKING CHANGE (v0.8.0): compact mode is now default. " +
-        "Set compact: false to restore previous behavior. See CHANGELOG.md for details."
-    );
-  }
+  // Get warnings from WarningManager (includes breaking change notification if applicable)
+  const warnings = [...context.warningManager.responseWarnings];
 
   return {
     context: results,
