@@ -669,15 +669,46 @@ function applyFileTypeBoost(
 
   // Default profile: Use configurable multiplicative penalties
   let multiplier = 1.0;
+  const fileName = path.split("/").pop() ?? "";
 
-  // Documentation files: apply docPenaltyMultiplier
-  const docExtensions = [".md", ".yaml", ".yml", ".mdc", ".json"];
-  if (docExtensions.some((docExt) => path.endsWith(docExt))) {
-    multiplier *= weights.docPenaltyMultiplier; // 0.3 = 70% reduction (Phase 1)
+  // ✅ Step 1: Config files get strongest penalty (95% reduction)
+  const configFiles = [
+    "package.json",
+    "package-lock.json",
+    "tsconfig.json",
+    "jsconfig.json",
+    "pnpm-lock.yaml",
+    "yarn.lock",
+    "bun.lockb",
+  ];
+  const configExtensions = [".lock", ".env"];
+  const configPatterns = [
+    ".config.js",
+    ".config.ts",
+    ".config.mjs",
+    ".config.cjs",
+    ".eslintrc",
+    ".prettierrc",
+  ];
+
+  if (
+    configFiles.includes(fileName) ||
+    configExtensions.some((ce) => path.endsWith(ce)) ||
+    configPatterns.some((pattern) => path.endsWith(pattern)) ||
+    fileName.startsWith(".env")
+  ) {
+    multiplier *= weights.configPenaltyMultiplier; // 0.05 = 95% reduction
     return baseScore * multiplier;
   }
 
-  // Implementation file boosts: apply implBoostMultiplier with path-based scaling
+  // ✅ Step 2: Documentation files get moderate penalty (50% reduction)
+  const docExtensions = [".md", ".yaml", ".yml", ".mdc"];
+  if (docExtensions.some((docExt) => path.endsWith(docExt))) {
+    multiplier *= weights.docPenaltyMultiplier; // 0.5 = 50% reduction
+    return baseScore * multiplier;
+  }
+
+  // ✅ Step 3: Implementation file boosts
   if (path.startsWith("src/app/")) {
     multiplier *= weights.implBoostMultiplier * 1.4; // Extra boost for app files
   } else if (path.startsWith("src/components/")) {
@@ -870,17 +901,50 @@ function applyFileTypeMultipliers(
     return;
   }
 
-  // DEFAULT PROFILE: Use MULTIPLICATIVE penalties for docs, MULTIPLICATIVE boosts for impl files
+  // DEFAULT PROFILE: Use MULTIPLICATIVE penalties for config/docs, MULTIPLICATIVE boosts for impl files
   if (profile === "default") {
-    const docExtensions = [".md", ".yaml", ".yml", ".mdc", ".json"];
+    const fileName = path.split("/").pop() ?? "";
+
+    // ✅ Step 1: Config files get strongest penalty (95% reduction)
+    const configFiles = [
+      "package.json",
+      "package-lock.json",
+      "tsconfig.json",
+      "jsconfig.json",
+      "pnpm-lock.yaml",
+      "yarn.lock",
+      "bun.lockb",
+    ];
+    const configExtensions = [".lock", ".env"];
+    const configPatterns = [
+      ".config.js",
+      ".config.ts",
+      ".config.mjs",
+      ".config.cjs",
+      ".eslintrc",
+      ".prettierrc",
+    ];
+
+    if (
+      configFiles.includes(fileName) ||
+      configExtensions.some((ce) => path.endsWith(ce)) ||
+      configPatterns.some((pattern) => path.endsWith(pattern)) ||
+      fileName.startsWith(".env")
+    ) {
+      candidate.scoreMultiplier *= weights.configPenaltyMultiplier; // 0.05 = 95% reduction
+      candidate.reasons.add("penalty:config-file");
+      return; // Don't apply impl boosts to config files
+    }
+
+    // ✅ Step 2: Documentation files get moderate penalty (50% reduction)
+    const docExtensions = [".md", ".yaml", ".yml", ".mdc"];
     if (docExtensions.some((docExt) => path.endsWith(docExt))) {
-      // ✅ MULTIPLICATIVE penalty (v0.7.0): 70% reduction (Phase 1 conservative)
-      candidate.scoreMultiplier *= weights.docPenaltyMultiplier;
+      candidate.scoreMultiplier *= weights.docPenaltyMultiplier; // 0.5 = 50% reduction
       candidate.reasons.add("penalty:doc-file");
       return; // Don't apply impl boosts to docs
     }
 
-    // ✅ MULTIPLICATIVE boost for implementation files
+    // ✅ Step 3: Implementation files get multiplicative boost
     if (path.startsWith("src/app/")) {
       candidate.scoreMultiplier *= weights.implBoostMultiplier * 1.4; // Extra boost for app files
       candidate.reasons.add("boost:app-file");

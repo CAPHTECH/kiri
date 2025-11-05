@@ -53,6 +53,87 @@
 }
 ```
 
+## トークン最適化：`compact` モード
+
+`context_bundle` の `compact` パラメータを使用することで、トークン消費を**約95%削減**できます。
+
+### 推奨：二段階ワークフロー
+
+```javascript
+// ステップ1: 候補ファイルを取得（compactモード）
+const result = await context_bundle({
+  goal: "ユーザー認証ハンドラーのロジック、ランタイム実行フロー、Mastra統合",
+  limit: 10,
+  compact: true, // メタデータのみ取得：path, range, why, score
+});
+
+// ステップ2: 必要なファイルのみ詳細取得
+for (const item of result.context.slice(0, 3)) {
+  const content = await snippets_get({
+    path: item.path,
+    start_line: item.range[0],
+    end_line: item.range[1],
+  });
+  // contentを使って詳細分析
+}
+```
+
+### トークン消費の比較
+
+| モード                                 | トークン数 | 含まれる情報                         |
+| -------------------------------------- | ---------- | ------------------------------------ |
+| `compact: true`（デフォルト、v0.8.0+） | ~2,500     | path, range, why, score              |
+| `compact: false`                       | ~55,000    | path, range, why, score, **preview** |
+
+**削減率：95%**
+
+### 使い分けガイド
+
+**`compact: true` を使うべき場合：**
+
+- コードベースの探索・ファイル発見
+- 関連ファイルの候補リスト取得
+- トークン効率を最優先する場合
+
+**`compact: false` を使うべき場合：**
+
+- すぐにコードプレビューが必要な場合
+- 少数のファイル（1-3件）のみを取得する場合
+
+### 実例：Lambda関数の調査
+
+```json
+// リクエスト（compact mode）
+{
+  "method": "context_bundle",
+  "params": {
+    "goal": "ask-agent Lambda handler logic, runtime execution flow",
+    "limit": 10,
+    "compact": true
+  }
+}
+
+// レスポンス（メタデータのみ、~2,500トークン）
+{
+  "context": [
+    {
+      "path": "lambda/ask-agent/handler.ts",
+      "range": [15, 89],
+      "why": ["phrase:ask-agent", "path-phrase:handler", "boost:impl-file"],
+      "score": 0.92
+      // preview フィールドなし → トークン節約
+    },
+    {
+      "path": "lambda/ask-agent/runtime.ts",
+      "range": [42, 156],
+      "why": ["phrase:ask-agent", "dep:handler.ts"],
+      "score": 0.85
+    }
+  ],
+  "tokens_estimate": 2480
+}
+```
+
 ## Codex CLI 設定例
 
 KIRI は CLI バイナリ `kiri` を通じて MCP 標準の `stdio` トランスポートで起動するのが既定です。`--repo` と `--db` のみ渡せば、`initialize` / `tools/list` で自動検出されます。

@@ -505,5 +505,102 @@ describe("Boosting Helper Functions (v0.7.0+)", () => {
         expect(readmeRank).toBeLessThan(implRank);
       }
     });
+
+    it("applies configPenaltyMultiplier (0.05 = 95% penalty) to config files", async () => {
+      const repo = await createTempRepo({
+        "src/feature.ts": `export function feature() {\n  return "implementation";\n}\n`,
+        "package.json": `{"name": "test", "version": "1.0.0"}\n`,
+        "tsconfig.json": `{"compilerOptions": {"strict": true}}\n`,
+        "README.md": `# Feature\n\nDocumentation\n`,
+      });
+      cleanupTargets.push({ dispose: repo.cleanup });
+
+      const dbDir = await mkdtemp(join(tmpdir(), "kiri-config-multiplier-"));
+      const dbPath = join(dbDir, "index.duckdb");
+      cleanupTargets.push({
+        dispose: async () => await rm(dbDir, { recursive: true, force: true }),
+      });
+
+      await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+      const db = await DuckDBClient.connect({ databasePath: dbPath });
+      cleanupTargets.push({ dispose: async () => await db.close() });
+
+      const repoId = await resolveRepoId(db, repo.path);
+      const context: ServerContext = { db, repoId };
+
+      const bundle = await contextBundle(context, {
+        goal: "feature implementation",
+        limit: 10,
+      });
+
+      // Verify ranking: implementation > docs > config files
+      const implFile = bundle.context.find((item) => item.path === "src/feature.ts");
+      const readmeFile = bundle.context.find((item) => item.path === "README.md");
+      const packageFile = bundle.context.find((item) => item.path === "package.json");
+      const tsconfigFile = bundle.context.find((item) => item.path === "tsconfig.json");
+
+      if (implFile && readmeFile && packageFile && tsconfigFile) {
+        const implRank = bundle.context.indexOf(implFile);
+        const readmeRank = bundle.context.indexOf(readmeFile);
+        const packageRank = bundle.context.indexOf(packageFile);
+        const tsconfigRank = bundle.context.indexOf(tsconfigFile);
+
+        // Implementation should rank highest
+        expect(implRank).toBeLessThan(readmeRank);
+        expect(implRank).toBeLessThan(packageRank);
+        expect(implRank).toBeLessThan(tsconfigRank);
+
+        // README (doc penalty 50%) should rank higher than config files (config penalty 95%)
+        expect(readmeRank).toBeLessThan(packageRank);
+        expect(readmeRank).toBeLessThan(tsconfigRank);
+      }
+    });
+
+    it("separates doc files (.md) from config files (.json) with different penalties", async () => {
+      const repo = await createTempRepo({
+        "src/handler.ts": `export function handle() {\n  return "handler";\n}\n`,
+        "docs/guide.md": `# Guide\n\nHow to use this\n`,
+        "config.yaml": `key: value\n`,
+        "package.json": `{"name": "test"}\n`,
+      });
+      cleanupTargets.push({ dispose: repo.cleanup });
+
+      const dbDir = await mkdtemp(join(tmpdir(), "kiri-doc-config-separation-"));
+      const dbPath = join(dbDir, "index.duckdb");
+      cleanupTargets.push({
+        dispose: async () => await rm(dbDir, { recursive: true, force: true }),
+      });
+
+      await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+      const db = await DuckDBClient.connect({ databasePath: dbPath });
+      cleanupTargets.push({ dispose: async () => await db.close() });
+
+      const repoId = await resolveRepoId(db, repo.path);
+      const context: ServerContext = { db, repoId };
+
+      const bundle = await contextBundle(context, {
+        goal: "handler guide config",
+        limit: 10,
+      });
+
+      const implFile = bundle.context.find((item) => item.path === "src/handler.ts");
+      const mdFile = bundle.context.find((item) => item.path === "docs/guide.md");
+      const yamlFile = bundle.context.find((item) => item.path === "config.yaml");
+      const jsonFile = bundle.context.find((item) => item.path === "package.json");
+
+      if (implFile && mdFile && yamlFile && jsonFile) {
+        const implRank = bundle.context.indexOf(implFile);
+        const mdRank = bundle.context.indexOf(mdFile);
+        const yamlRank = bundle.context.indexOf(yamlFile);
+        const jsonRank = bundle.context.indexOf(jsonFile);
+
+        // Implementation > docs > config files
+        expect(implRank).toBeLessThan(mdRank);
+        expect(mdRank).toBeLessThan(yamlRank);
+        expect(mdRank).toBeLessThan(jsonRank);
+      }
+    });
   });
 });

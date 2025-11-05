@@ -93,6 +93,11 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
       "- goal='authentication' (noun only, what about it?)\n\n" +
       "TOKEN OPTIMIZATION: Use 'compact: true' to reduce token consumption by ~95%. Returns only metadata (path, range, why, score) without preview field. " +
       "Combine with snippets.get for two-tier approach: first get candidate list (compact), then fetch selected content.\n\n" +
+      "Example workflow:\n" +
+      "  1. context_bundle({goal: 'auth handler', compact: true, limit: 10}) → ~2,500 tokens\n" +
+      "  2. Review paths and scores from results\n" +
+      "  3. snippets.get({path: result.context[0].path}) → Get only needed files\n" +
+      "Total: ~5K tokens instead of 55K tokens (90% savings)\n\n" +
       "Returns ranked code snippets with explanations (e.g., 'phrase:page-agent', 'path-keyword:auth', 'dep:login.ts', 'boost:app-file') and automatically optimizes token usage.",
     inputSchema: {
       type: "object",
@@ -118,7 +123,7 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
           description:
             "If true, omits the 'preview' field to drastically reduce token consumption (~95% reduction). " +
             "Returns only metadata: path, range, why, score. Use with snippets.get for two-tier approach. " +
-            "Default: false (includes preview for backward compatibility).",
+            "Default: true (v0.8.0+). Set to false if you need immediate code previews.",
         },
         profile: {
           type: "string",
@@ -442,9 +447,11 @@ function parseContextBundleParams(input: unknown): ContextBundleParams {
     params.boost_profile = boostProfile;
   }
 
-  // Parse compact parameter
+  // Parse compact parameter (default: true for token efficiency)
   if (typeof record.compact === "boolean") {
     params.compact = record.compact;
+  } else {
+    params.compact = true; // Default to compact mode (v0.8.0+: breaking change)
   }
 
   return params;

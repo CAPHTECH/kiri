@@ -5,6 +5,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2025-11-05
+
+### Changed
+
+- **BREAKING: `compact: true` is now the default for `context_bundle`**
+  - **Previous behavior**: `compact: false` (default) returned preview field, consuming ~55,000 tokens
+  - **New behavior**: `compact: true` (default) omits preview field, consuming ~2,500 tokens (95% reduction)
+  - **Impact**: Token consumption reduced by 95% by default, improving cost efficiency and response time
+  - **Migration**: If you need code previews immediately, explicitly set `compact: false` in requests
+  - **Recommended workflow**: Use `compact: true` (default) for exploration → `snippets.get` for detailed code
+
+- **Config files now receive separate, stronger penalty (95% reduction) from doc files (50% reduction)**
+  - **Previous behavior**: Config files (package.json, tsconfig.json) and docs (.md, .yaml) received same 70% penalty
+  - **New behavior**:
+    - Config files: `×0.05` penalty (95% reduction via `configPenaltyMultiplier`)
+    - Doc files: `×0.5` penalty (50% reduction via `docPenaltyMultiplier`)
+  - **Impact**: Config files now rarely appear in top 15 results, improving relevance for code-focused queries
+  - **Files affected**: package.json, tsconfig.json, lock files, .env files, \*.config.js, .eslintrc, .prettierrc
+
+### Added
+
+- **`configPenaltyMultiplier` in scoring profiles** (`config/scoring-profiles.yml`)
+  - Controls config file penalty (default: 0.05 = 95% reduction)
+  - Separate from `docPenaltyMultiplier` to distinguish config files from documentation
+  - Applied to: package.json, tsconfig.json, package-lock.json, pnpm-lock.yaml, \*.config.js, .eslintrc, etc.
+
+- **Comprehensive `compact` mode documentation** in `docs/api-and-client.md`
+  - Two-tier workflow examples showing optimal token usage patterns
+  - Token comparison table (55K vs 2.5K tokens)
+  - Usage guidelines for when to use compact mode vs full preview mode
+
+### Fixed
+
+- **Config files (package.json, tsconfig.json) no longer dominate search results**
+  - Previous issue: Generic config files appeared in top 15 despite being rarely relevant
+  - Root cause: Insufficient penalty (70% reduction) allowed config files with keyword matches to rank high
+  - Solution: Separate `configPenaltyMultiplier` (95% reduction) applied before doc penalty
+
 ## [0.7.0] - 2025-11-05
 
 ### Changed
