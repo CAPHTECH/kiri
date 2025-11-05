@@ -116,7 +116,7 @@ describe("Boosting Helper Functions (v0.7.0+)", () => {
       expect(authFiles.length).toBeGreaterThan(0);
 
       // Auth directory files should rank higher than helper file
-      if (authFiles.length > 0 && helperFile) {
+      if (authFiles.length > 0 && helperFile && authFiles[0]) {
         const authRank = bundle.context.indexOf(authFiles[0]);
         const helperRank = bundle.context.indexOf(helperFile);
         expect(authRank).toBeLessThan(helperRank);

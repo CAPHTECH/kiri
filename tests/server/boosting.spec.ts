@@ -171,9 +171,9 @@ describe("Unified Boosting Logic (v0.7.0+)", () => {
     // Note: Exact ordering depends on BM25 scores + multipliers
     // We verify that app files get the highest boost (1.4x)
     // by checking their scores are higher than others
-    const appScore = results[appRank].score;
-    const componentScore = results[componentRank].score;
-    const libScore = results[libRank].score;
+    const appScore = results[appRank]?.score ?? 0;
+    const componentScore = results[componentRank]?.score ?? 0;
+    const libScore = results[libRank]?.score ?? 0;
 
     // App should have highest score due to 1.4x multiplier
     expect(appScore).toBeGreaterThan(componentScore);
