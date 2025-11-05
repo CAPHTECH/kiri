@@ -9,3 +9,7 @@ coverage/
 .kiri/
 package/
 *.tgz
+
+# Development test scripts
+test-*.mjs
+debug-*.mjs
