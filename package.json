@@ -55,7 +55,7 @@
     "build:copy-assets": "tsx scripts/build/copy-assets.ts",
     "dev": "tsx src/server/main.ts --port 8765",
     "lint": "eslint \"{src,tests,scripts}/**/*.{ts,tsx}\" && prettier --check \"**/*.{ts,tsx,json,md,yml}\"",
-    "test": "vitest run --coverage",
+    "test": "vitest run --coverage --pool=forks --poolOptions.forks.singleFork",
     "check": "pnpm run lint && pnpm run test",
     "prepublishOnly": "pnpm run build"
   },
