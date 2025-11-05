@@ -146,6 +146,7 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
       "- **Dependency analysis**: Considers import relationships between files\n" +
       "- **Semantic similarity**: Ranks by structural similarity to your query\n\n" +
       "IMPORTANT: The 'goal' parameter MUST be a clear and specific description of your objective. Use concrete keywords, not abstract verbs.\n\n" +
+      "PRO TIP: When you already know the file you're touching, pass it through artifacts.editing_path to anchor the search and surface that file together with its dependency neighborhood.\n\n" +
       "✅ GOOD EXAMPLES (use specific keywords):\n" +
       "- goal='User authentication flow, JWT token validation'\n" +
       "- goal='Canvas page routing, API endpoints, navigation patterns'\n" +
@@ -214,7 +215,7 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
             editing_path: {
               type: "string",
               description:
-                "Path to the file currently being edited. Strongly recommended to provide for better context.",
+                "Path to the file currently being edited. Strongly recommended to provide for better context; boosts that file and related dependencies in the bundle output.",
             },
             failing_tests: {
               type: "array",

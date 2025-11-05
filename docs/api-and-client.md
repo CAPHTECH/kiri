@@ -16,6 +16,7 @@ The server implements MCP standard endpoints `initialize` / `tools/list`, enabli
 - `context_bundle(goal, artifacts)` ← **Most Important**
   - `goal`: Natural language description (e.g., "Fix failing test: test_verify_token in Auth")
   - `artifacts`: {`editing_path`?, `failing_tests`?, `last_diff`?}
+    - Providing `editing_path` with the file you're touching strongly boosts that file and nearby dependencies, returning a cohesive set of related files.
   - Output: Fragment list (path, [start,end], why[], score, preview) and `tokens_estimate`
 
 ## `context_bundle` Request/Response Example
@@ -228,6 +229,7 @@ Watch mode (`--watch`) monitors repository file changes and automatically reinde
 - `context_bundle(goal, artifacts)` ← **最重要**
   - `goal`: 自然文（例: "Auth の失敗テスト test_verify_token を修す"）
   - `artifacts`: {`editing_path`?, `failing_tests`?, `last_diff`?}
+    - `editing_path` に作業中ファイルを渡すと、そのファイルと依存・近傍ファイルが優先的に返り、関連コンテキストをまとめて取得できます。
   - 出力: 断片リスト（path, [start,end], why[], score, preview）と `tokens_estimate`
 
 ## `context_bundle` リクエスト/レスポンス例
