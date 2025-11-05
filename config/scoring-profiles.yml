@@ -8,6 +8,8 @@ default:
   dependency: 0.6 # Dependency relationship weight (increased to prioritize connected implementation files)
   proximity: 0.25 # Same directory weight
   structural: 0.6 # Structural similarity weight (reduced to prevent false positives from similar structure)
+  docPenaltyMultiplier: 0.3 # Multiplicative penalty for docs (0.3 = 70% reduction, Phase 1 conservative value)
+  implBoostMultiplier: 1.3 # Multiplicative boost for implementation files (1.3 = 30% boost)
 
 bugfix:
   textMatch: 1.0
@@ -16,6 +18,8 @@ bugfix:
   dependency: 0.7 # Higher: bugs often in dependencies
   proximity: 0.35
   structural: 0.7 # Reduced: prevent canvas-agent matching when searching page-agent
+  docPenaltyMultiplier: 0.3
+  implBoostMultiplier: 1.3
 
 testfail:
   textMatch: 1.0
@@ -24,6 +28,8 @@ testfail:
   dependency: 0.85 # Very high: failed tests reveal dependencies
   proximity: 0.3
   structural: 0.7 # Reduced: focus on actual test dependencies
+  docPenaltyMultiplier: 0.3
+  implBoostMultiplier: 1.3
 
 typeerror:
   textMatch: 1.0
@@ -32,6 +38,8 @@ typeerror:
   dependency: 0.6
   proximity: 0.4 # Higher: type errors cluster in modules
   structural: 0.6 # Already balanced for type analysis
+  docPenaltyMultiplier: 0.3
+  implBoostMultiplier: 1.3
 
 feature:
   textMatch: 1.0
@@ -40,3 +48,5 @@ feature:
   dependency: 0.45 # Lower: new features less dependent
   proximity: 0.5 # Higher: features cluster spatially
   structural: 0.6 # Reduced: focus on actual feature files
+  docPenaltyMultiplier: 0.3
+  implBoostMultiplier: 1.3

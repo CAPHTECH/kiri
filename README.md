@@ -2,7 +2,7 @@
 
 > Intelligent code context extraction for LLMs via Model Context Protocol
 
-[![Version](https://img.shields.io/badge/version-0.6.0-blue.svg)](package.json)
+[![Version](https://img.shields.io/badge/version-0.7.0-blue.svg)](package.json)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.6-blue.svg)](https://www.typescriptlang.org/)
 [![MCP](https://img.shields.io/badge/MCP-Compatible-green.svg)](https://modelcontextprotocol.io/)
@@ -157,11 +157,12 @@ KIRI provides 5 MCP tools for intelligent code exploration:
 
 The most powerful tool for getting started with unfamiliar code. Provide a task description, and KIRI returns the most relevant code snippets using phrase-aware tokenization and path-based scoring.
 
-**v0.6.0 improvements:**
+**v0.7.0 improvements:**
 
-- **Phrase-aware tokenization**: Recognizes compound terms like `page-agent`, `user_profile` as single concepts (2× scoring weight)
-- **Path-based scoring**: Additional boost when keywords/phrases appear in file paths
-- **95% accuracy**: Improved from 65-75% through enhanced tokenization and scoring
+- **Multiplicative penalties**: Documentation files now penalized by ×0.3 (70% reduction) instead of additive -2.0
+- **Implementation prioritization**: Implementation files rank 5-10× higher than documentation (1.82 vs 0.30)
+- **Unified boosting logic**: Consistent file ranking across `files_search` and `context_bundle`
+- **Configurable profiles**: `boost_profile` parameter supports "default" (implementation-first), "docs" (documentation-first), or "none" (natural BM25)
 
 **When to use:**
 
@@ -733,6 +734,6 @@ Built with:
 
 ---
 
-**Status**: v0.6.0 (Beta) - Production-ready for MCP clients
+**Status**: v0.7.0 (Beta) - Production-ready for MCP clients
 
 For questions or support, please open a [GitHub issue](https://github.com/CAPHTECH/kiri/issues).

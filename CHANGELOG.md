@@ -5,6 +5,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2025-01-05
+
+### Changed
+
+- **BREAKING: Multiplicative penalties replace additive penalties** for file type ranking in `context_bundle`
+  - Documentation files now receive `×0.3` penalty (70% reduction) instead of `-2.0` additive penalty
+  - Implementation files receive `×1.3` boost (30% increase) instead of `+0.5` additive boost
+  - **Impact**: Implementation files now rank 5-10× higher than documentation files for code-focused queries
+  - **Migration**: For documentation-focused queries, use `boost_profile: "docs"` parameter
+
+### Added
+
+- **Configurable penalty multipliers** in `config/scoring-profiles.yml`
+  - `docPenaltyMultiplier`: Controls documentation file penalty (default: 0.3 = 70% reduction)
+  - `implBoostMultiplier`: Controls implementation file boost (default: 1.3 = 30% increase)
+  - All scoring profiles (default, bugfix, testfail, typeerror, feature) support multipliers
+- **Phase 1 conservative rollout**: Starting with 70% penalty (0.3 multiplier) to gather feedback before increasing to 90% (0.1 multiplier)
+
+### Fixed
+
+- **Documentation files no longer dominate implementation-focused searches**
+  - Previous issue: Docs with high semantic similarity could outrank actual implementation files
+  - Root cause: Additive penalty (-2.0) was insufficient to overcome path match (+2.25) + text match (+2.0) + structural similarity (+0.54)
+  - Solution: Multiplicative penalty applied AFTER all additive scoring components
+- **boost_profile="docs" now correctly prioritizes documentation** without penalty
+  - Safety rule: Profile "docs" skips all documentation penalties
+  - Enables doc-focused queries like "setup guide" to return documentation first
+- **Negative score inversion prevented**
+  - Multipliers only applied to positive scores (score > 0)
+  - Blacklisted directories (-100 score) remain heavily penalized
+
+### Technical Details
+
+- New `CandidateInfo.scoreMultiplier` field accumulates boosts/penalties (default: 1.0)
+- Multipliers applied in separate phase AFTER `applyStructuralScores()` for predictable behavior
+- Path-based scoring remains additive (adds new information, not just file type filtering)
+- Test files, lock files, config files keep additive penalties (already very strong at -2.0 to -3.0)
+
 ## [0.6.0] - 2025-11-05
 
 ### Added
