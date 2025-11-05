@@ -384,7 +384,7 @@ describe("Unified Boosting Logic (v0.7.0+)", () => {
       "src/feature.ts": `export function feature() {\n  return "implementation";\n}\n`,
       "docs/guide.md": `# Feature Guide\n\nHow to use the feature.\n`,
       "node_modules/package/index.js": `module.exports = { feature: true };\n`,
-      ".git/config": `[core]\n  repositoryformatversion = 0\n`,
+      ".git/hooks/pre-commit": `#!/bin/sh\necho "test hook"\n`,
       "README.md": `# Project\n\nOverview.\n`,
     });
     cleanupTargets.push({ dispose: repo.cleanup });
