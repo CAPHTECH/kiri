@@ -89,8 +89,11 @@ export function getDatabasePathFromSocket(socketPath: string): string | null {
 export function getSocketPathDebugInfo(databasePath: string): string {
   const socketPath = getSocketPath(databasePath);
   const platform = os.platform();
-  const dbDir = path.dirname(databasePath);
-  const dbBase = path.basename(databasePath);
+
+  // プラットフォーム固有のpathモジュールを使用して正しくパースする
+  const pathModule = platform === "win32" ? path.win32 : path.posix;
+  const dbDir = pathModule.dirname(databasePath);
+  const dbBase = pathModule.basename(databasePath);
 
   if (platform === "win32") {
     return [

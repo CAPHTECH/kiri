@@ -13,6 +13,7 @@ import * as os from "os";
 import * as readline from "readline";
 
 import type { JsonRpcRequest, RpcHandleResult } from "../server/rpc.js";
+import { acquireLock, releaseLock } from "../shared/utils/lockfile.js";
 
 /**
  * Socket server configuration
@@ -38,7 +39,21 @@ export async function createSocketServer(
   const { socketPath, onRequest, onError } = options;
   const isWindows = os.platform() === "win32";
 
+  // プラットフォーム非依存の排他ロックでデーモン重複起動を防止
+  // ロックファイルベースの検出により、IPC接続テストより信頼性が高い
+  const lockfilePath = `${socketPath}.lock`;
+  try {
+    acquireLock(lockfilePath);
+  } catch (error) {
+    const err = error as Error;
+    throw new Error(
+      `Failed to acquire daemon lock: ${err.message}. ` +
+        `Another daemon may be running. Lock file: ${lockfilePath}`
+    );
+  }
+
   // Unix系の場合: 既存のソケットファイルが残っている場合は削除
+  // ロック取得済みのため、古いソケットファイルの削除は安全
   if (!isWindows) {
     try {
       await fs.unlink(socketPath);
@@ -48,38 +63,9 @@ export async function createSocketServer(
         throw err;
       }
     }
-  } else {
-    // Windows: 古い名前付きパイプへの接続を試みて、既存デーモンの検出
-    // 接続失敗 = パイプが存在しない（安全に作成可能）
-    // 接続成功 = 既に他のデーモンが実行中（エラー）
-    const testSocket = net.connect(socketPath);
-    await new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        testSocket.destroy();
-        // タイムアウト = パイプが存在するが応答なし（古いパイプの可能性）
-        console.error(`[Daemon] Warning: Stale pipe may exist at ${socketPath}, proceeding...`);
-        resolve();
-      }, 1000);
-
-      testSocket.on("connect", () => {
-        clearTimeout(timeout);
-        testSocket.destroy();
-        reject(
-          new Error(`Daemon already running on pipe: ${socketPath}. Stop existing daemon first.`)
-        );
-      });
-
-      testSocket.on("error", (err: NodeJS.ErrnoException) => {
-        clearTimeout(timeout);
-        // ENOENT/ECONNREFUSED = パイプが存在しない（正常）
-        // その他 = 異常状態（ログに記録して続行）
-        if (err.code !== "ENOENT" && err.code !== "ECONNREFUSED") {
-          console.error(`[Daemon] Warning: Pipe error during check: ${err.message}`);
-        }
-        resolve();
-      });
-    });
   }
+  // Windows: 名前付きパイプは自動的にクリーンアップされるため、特別な処理不要
+  // ロックファイルにより二重起動は既に防止済み
 
   const server = net.createServer((socket) => {
     handleClientConnection(socket, onRequest, onError);
@@ -122,6 +108,9 @@ export async function createSocketServer(
   return async () => {
     return new Promise<void>((resolve) => {
       server.close(async () => {
+        // 排他ロックを解放
+        releaseLock(lockfilePath);
+
         // Unix系の場合のみソケットファイルを削除
         // Windows: 名前付きパイプは自動的にクリーンアップされる
         if (!isWindows) {
