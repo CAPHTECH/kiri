@@ -29,30 +29,42 @@ function parseSecurityVerifyArgs(argv: string[]): SecurityVerifyOptions {
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
+    if (arg === undefined) {
+      break;
+    }
     switch (arg) {
       case "--write-lock":
         options.writeLock = true;
         break;
       case "--db":
-        if (!argv[i + 1]) {
-          throw new Error("--db requires a path argument");
+        {
+          const dbPath = argv[i + 1];
+          if (!dbPath) {
+            throw new Error("--db requires a path argument");
+          }
+          options.databasePath = dbPath;
+          i += 1;
         }
-        options.databasePath = argv[i + 1];
-        i += 1;
         break;
       case "--security-lock":
-        if (!argv[i + 1]) {
-          throw new Error("--security-lock requires a path argument");
+        {
+          const lockPath = argv[i + 1];
+          if (!lockPath) {
+            throw new Error("--security-lock requires a path argument");
+          }
+          options.securityLockPath = lockPath;
+          i += 1;
         }
-        options.securityLockPath = argv[i + 1];
-        i += 1;
         break;
       case "--security-config":
-        if (!argv[i + 1]) {
-          throw new Error("--security-config requires a path argument");
+        {
+          const configPath = argv[i + 1];
+          if (!configPath) {
+            throw new Error("--security-config requires a path argument");
+          }
+          options.securityConfigPath = configPath;
+          i += 1;
         }
-        options.securityConfigPath = argv[i + 1];
-        i += 1;
         break;
       default:
         if (arg.startsWith("--")) {
@@ -100,11 +112,14 @@ function handleSecurityVerify(argv: string[]): number {
     return 0;
   }
   try {
-    bootstrapServer({
+    const bootstrapOptions: Parameters<typeof bootstrapServer>[0] = {
       allowWriteLock: options.writeLock,
-      securityConfigPath: resolvedConfigPath,
       securityLockPath: resolvedLockPath,
-    });
+    };
+    if (resolvedConfigPath) {
+      bootstrapOptions.securityConfigPath = resolvedConfigPath;
+    }
+    bootstrapServer(bootstrapOptions);
     console.info("Security baseline verified.");
     console.info(formatStatus(resolvedConfigPath, resolvedLockPath));
     return 0;

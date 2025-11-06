@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.3] - 2025-11-06
+
+### Changed
+
+- Aligned the default `security.lock` location with the DuckDB database path and extended the `kiri security verify` CLI to accept `--db` / `--security-lock` overrides for reproducible deployments.
+- Clarified MCP tool descriptors by documenting output schemas, read-only annotations, and degrade-mode behaviour for `files_search`.
+
+### Fixed
+
+- Ensured `files_search` returns the documented array shape even when DuckDB is unavailable and the server is running in degrade mode, preventing schema mismatches in MCP clients.
+- Added integration coverage that verifies degrade-mode compatibility for MCP `tools/call` responses.
+
 ## [0.9.2] - 2025-11-06
 
 ### Changed
