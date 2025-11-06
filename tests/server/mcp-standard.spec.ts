@@ -201,6 +201,69 @@ describe("MCP標準エンドポイント", () => {
     expect(searchResults.length).toBeGreaterThan(0);
   });
 
+  it("degrade モードでも files.search が配列形式で結果を返す", async () => {
+    const repo = await createTempRepo({
+      "src/degrade.ts": "export const degradeHelper = () => 'fallback';\n",
+      "README.md": "Fallback search content here.\n",
+    });
+    cleanupTargets.push({ dispose: repo.cleanup });
+
+    const dbDir = await mkdtemp(join(tmpdir(), "kiri-mcp-degrade-"));
+    cleanupTargets.push({ dispose: async () => await rm(dbDir, { recursive: true, force: true }) });
+
+    const dbPath = join(dbDir, "index.duckdb");
+    const lockPath = join(dbDir, "security.lock");
+    const { hash } = loadSecurityConfig();
+    updateSecurityLock(hash, lockPath);
+
+    await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+    const runtime = await createServerRuntime({
+      repoRoot: repo.path,
+      databasePath: dbPath,
+      securityLockPath: lockPath,
+      allowDegrade: true,
+    });
+    cleanupTargets.push({ dispose: async () => await runtime.close() });
+
+    // 強制的に degrade モードへ移行
+    runtime.degrade.enable("duckdb:files_search");
+
+    const handler = createRpcHandler(runtime);
+    const request: JsonRpcRequest = {
+      jsonrpc: "2.0",
+      id: 7,
+      method: "tools/call",
+      params: {
+        name: "files_search",
+        arguments: {
+          query: "fallback",
+        },
+      },
+    };
+
+    const response = await handler(request);
+    expect(response.statusCode).toBe(200);
+    const payload = response.response as JsonRpcSuccess;
+    const result = payload.result as Record<string, unknown>;
+    const content = result.content as Array<{ type: string; text: string }>;
+    expect(Array.isArray(content)).toBe(true);
+    const firstContent = content[0];
+    if (!firstContent) throw new Error("Content array is empty");
+
+    const searchResults = JSON.parse(firstContent.text);
+    expect(Array.isArray(searchResults)).toBe(true);
+    expect(searchResults.length).toBeGreaterThan(0);
+
+    const firstResult = searchResults[0] as Record<string, unknown>;
+    expect(firstResult).toHaveProperty("path");
+    expect(firstResult).toHaveProperty("preview");
+    expect(firstResult).toHaveProperty("matchLine");
+    expect(firstResult).toHaveProperty("lang");
+    expect(firstResult).toHaveProperty("ext");
+    expect(firstResult).toHaveProperty("score");
+  });
+
   it("tools/call が不明なツール名でエラーを返す", async () => {
     const repo = await createTempRepo({
       "src/app.ts": "export const app = () => 1;\n",

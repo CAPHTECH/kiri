@@ -256,7 +256,7 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
     name: "files_search",
     description:
       "Token-aware substring search for precise identifiers, error messages, or import fragments. Prefer this tool when you already know the exact string you need to locate; use `context_bundle` for exploratory work.\n\n" +
-      "Returns an array of `{path, preview, matchLine, lang, ext, score}` objects; the tool never mutates the repo. Empty queries raise an MCP error prompting you to provide a concrete keyword.\n\n" +
+      "Returns an array of `{path, preview, matchLine, lang, ext, score}` objects; the tool never mutates the repo. Empty queries raise an MCP error prompting you to provide a concrete keyword. If DuckDB is unavailable but the server runs with `--allow-degrade`, the same array shape is returned using filesystem-based fallbacks (with `lang`/`ext` set to null).\n\n" +
       'Example: files_search({query: "AuthenticationError", path_prefix: "src/auth/"}) narrows to auth handlers. Invalid: files_search({query: ""}) reports that the query must be non-empty.',
     inputSchema: {
       type: "object",
@@ -677,17 +677,14 @@ async function executeToolByName(
     case "files_search": {
       const params = parseFilesSearchParams(toolParams);
       if (degrade.current.active && allowDegrade) {
-        return {
-          hits: degrade.search(params.query, params.limit ?? 20).map((hit) => ({
-            path: hit.path,
-            preview: hit.preview,
-            matchLine: hit.matchLine,
-            lang: null,
-            ext: null,
-            score: 0,
-          })),
-          degrade: true,
-        };
+        return degrade.search(params.query, params.limit ?? 20).map((hit) => ({
+          path: hit.path,
+          preview: hit.preview,
+          matchLine: hit.matchLine,
+          lang: null,
+          ext: null,
+          score: 0,
+        }));
       } else {
         const handler = async () =>
           await withSpan("files_search", async () => await filesSearch(context, params));
