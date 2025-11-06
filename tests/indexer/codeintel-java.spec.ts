@@ -96,6 +96,41 @@ public interface MyInterface {
       });
     });
 
+    it("extracts Javadoc from methods with annotations", () => {
+      const javaCode = `
+public class MyClass {
+  /**
+   * Processes the input value
+   * @param value the input value
+   * @return processed value
+   */
+  @Override
+  @Deprecated
+  public String processValue(String value) {
+    return value.toUpperCase();
+  }
+}
+`.trim();
+
+      const result = analyzeSource("test.java", "Java", javaCode, new Set());
+
+      expect(result.symbols).toHaveLength(2);
+      expect(result.symbols[0]).toMatchObject({
+        name: "MyClass",
+        kind: "class",
+      });
+      // アノテーション付きメソッドでもJavadocが正しく抽出される
+      const method = result.symbols[1];
+      expect(method).toMatchObject({
+        name: "processValue",
+        kind: "method",
+      });
+      expect(method?.doc).toBeTruthy();
+      expect(method?.doc).toContain("Processes the input value");
+      expect(method?.doc).toContain("@param value the input value");
+      expect(method?.doc).toContain("@return processed value");
+    });
+
     it("extracts enum declaration", () => {
       const javaCode = `
 public enum Direction {
