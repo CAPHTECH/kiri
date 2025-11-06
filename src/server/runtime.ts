@@ -1,4 +1,4 @@
-import { resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 import { tryCreateFTSIndex } from "../indexer/schema.js";
 import { DuckDBClient } from "../shared/duckdb.js";
@@ -29,20 +29,21 @@ export interface ServerRuntime {
 }
 
 export async function createServerRuntime(options: CommonServerOptions): Promise<ServerRuntime> {
+  const databasePath = resolve(options.databasePath);
+  const repoRoot = resolve(options.repoRoot);
+  const defaultLockPath = join(dirname(databasePath), "security.lock");
+
   const bootstrapOptions: BootstrapOptions = {};
   if (options.securityConfigPath) {
     bootstrapOptions.securityConfigPath = options.securityConfigPath;
   }
-  if (options.securityLockPath) {
-    bootstrapOptions.securityLockPath = options.securityLockPath;
-  }
+  bootstrapOptions.securityLockPath = options.securityLockPath
+    ? resolve(options.securityLockPath)
+    : defaultLockPath;
   if (options.allowWriteLock !== undefined) {
     bootstrapOptions.allowWriteLock = options.allowWriteLock;
   }
   const bootstrap = bootstrapServer(bootstrapOptions);
-
-  const databasePath = resolve(options.databasePath);
-  const repoRoot = resolve(options.repoRoot);
 
   let db: DuckDBClient | null = null;
   try {

@@ -28,11 +28,12 @@ secrets/**, **/*.pem, **/*.key, **/.env*, **/config/*.prod.*, **/node_modules/**
 - 運用時の権限境界は `config/security.yml` に定義する。`allowed_paths`、`allow_network_egress`、`allow_subprocess` を明示し、
   `sensitive_tokens` にはマスキング対象のトークン接頭辞を列挙する。
 - **スキーマ検証**: 設定ファイルは起動時に Zod スキーマで検証され、必須フィールドの欠落や型エラーがあればサーバー起動をブロックする。
-- 設定ファイルの改ざんを検知するため、`var/security.lock` に SHA-256 ハッシュを保存する。差分がある場合はサーバー起動前に
-  ブロックされる。
-- CLI から `pnpm exec tsx src/client/cli.ts security verify --write-lock` を実行すると現在の設定を検証し、ロックファイルが存在しな
-  ければ生成する。
-- CI では `pnpm exec tsx src/client/cli.ts security verify` を最初のステップとして実行し、差分がないことを保証する。
+- 設定ファイルの改ざんを検知するため、DuckDB ファイル (`index.duckdb`) と同じディレクトリに `security.lock` を保存し、SHA-256
+  ハッシュを照合する。差分がある場合はサーバー起動前にブロックされる。
+- CLI から `pnpm exec tsx src/client/cli.ts security verify --db <path/to/index.duckdb> --write-lock` を実行すると現在の設定を検証し、
+  ロックファイルが存在しなければ生成する。パスを省略した場合は `--db var/index.duckdb` が既定値となる。
+- CI では `pnpm exec tsx src/client/cli.ts security verify --db <path/to/index.duckdb>` を最初のステップとして実行し、差分がないことを
+  保証する。
 
 ## MCP 応答のマスキング
 
