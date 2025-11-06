@@ -127,8 +127,6 @@ interface ToolDescriptor {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
-  outputSchema?: Record<string, unknown>;
-  annotations?: Record<string, unknown>;
 }
 
 const SERVER_INFO = {
@@ -202,17 +200,6 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
         },
       },
     },
-    outputSchema: {
-      type: "object",
-      properties: {
-        context: { type: "array" },
-        tokens_estimate: { type: "number" },
-        warnings: { type: "array" },
-      },
-    },
-    annotations: {
-      readOnlyHint: true,
-    },
   },
   {
     name: "semantic_rerank",
@@ -241,15 +228,6 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
         k: { type: "number", minimum: 1, description: "Number of top results to return." },
         profile: { type: "string" },
       },
-    },
-    outputSchema: {
-      type: "object",
-      properties: {
-        candidates: { type: "array" },
-      },
-    },
-    annotations: {
-      readOnlyHint: true,
     },
   },
   {
@@ -298,23 +276,6 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
         },
       },
     },
-    outputSchema: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          path: { type: "string" },
-          preview: { type: "string" },
-          matchLine: { type: "number" },
-          lang: { type: ["string", "null"] },
-          ext: { type: ["string", "null"] },
-          score: { type: "number" },
-        },
-      },
-    },
-    annotations: {
-      readOnlyHint: true,
-    },
   },
   {
     name: "snippets_get",
@@ -334,21 +295,6 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
         start_line: { type: "number", minimum: 0 },
         end_line: { type: "number", minimum: 0 },
       },
-    },
-    outputSchema: {
-      type: "object",
-      properties: {
-        path: { type: "string" },
-        startLine: { type: "number" },
-        endLine: { type: "number" },
-        content: { type: "string" },
-        totalLines: { type: "number" },
-        symbolName: { type: ["string", "null"] },
-        symbolKind: { type: ["string", "null"] },
-      },
-    },
-    annotations: {
-      readOnlyHint: true,
     },
   },
   {
@@ -370,18 +316,6 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
         direction: { type: "string", enum: ["outbound", "inbound"] },
         include_packages: { type: "boolean" },
       },
-    },
-    outputSchema: {
-      type: "object",
-      properties: {
-        root: { type: "string" },
-        direction: { type: "string" },
-        nodes: { type: "array" },
-        edges: { type: "array" },
-      },
-    },
-    annotations: {
-      readOnlyHint: true,
     },
   },
 ];

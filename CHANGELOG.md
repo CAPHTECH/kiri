@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.4] - 2025-11-06
+
+### Fixed
+
+- **Removed non-standard `outputSchema` and `annotations` from MCP tool descriptors**
+  - **Issue**: v0.9.3 introduced `outputSchema` and `annotations` fields which are not part of the MCP 2024-11-05 specification
+  - **Impact**: MCP clients performing strict schema validation rejected tools with these unknown fields
+  - **Solution**: Removed `outputSchema` and `annotations` from `ToolDescriptor` interface and all tool definitions
+  - **Result**: Full compliance with MCP 2024-11-05 protocol specification, restoring compatibility with MCP clients
+  - **Note**: Output format information remains documented in tool `description` fields
+
 ## [0.9.3] - 2025-11-06
 
 ### Changed
