@@ -291,6 +291,66 @@ public class MyClass {}
       });
     });
 
+    it("resolves imports precisely when same filename exists in different packages", () => {
+      const javaCode = `
+import com.example.util.Helper;
+import com.other.util.Helper;
+
+public class MyClass {}
+`.trim();
+
+      // 同名ファイルが異なるパッケージに存在
+      const fileSet = new Set([
+        "src/main/java/com/example/util/Helper.java",
+        "src/main/java/com/other/util/Helper.java",
+      ]);
+      const result = analyzeSource(
+        "src/main/java/com/example/MyClass.java",
+        "Java",
+        javaCode,
+        fileSet
+      );
+
+      expect(result.dependencies).toHaveLength(2);
+      // 両方ともpathとして検出されるべき（それぞれ正しいファイルに対応）
+      expect(result.dependencies[0]).toMatchObject({
+        dstKind: "path",
+        dst: "com.example.util.Helper",
+        rel: "import",
+      });
+      expect(result.dependencies[1]).toMatchObject({
+        dstKind: "path",
+        dst: "com.other.util.Helper",
+        rel: "import",
+      });
+    });
+
+    it("does not match partial package paths with endsWith (wrong file first)", () => {
+      const javaCode = `
+import util.Helper;
+
+public class MyClass {}
+`.trim();
+
+      // util.Helperが、より長いパスのファイルと誤マッチしないことを確認
+      // 誤検出されるファイルを先に配置
+      const fileSet = new Set([
+        "src/main/java/com/example/util/Helper.java", // これと誤マッチすべきでない（が、find()で先に見つかる）
+        "src/main/java/util/Helper.java", // これが正解
+      ]);
+      const result = analyzeSource("src/main/java/MyClass.java", "Java", javaCode, fileSet);
+
+      expect(result.dependencies).toHaveLength(1);
+      // 現在の実装（endsWith）だと、com/example/util/Helper.javaも util/Helper.javaで終わるため
+      // 最初に見つかった方がマッチしてしまう可能性がある
+      // 正しくは src/main/java/util/Helper.java のみがマッチすべき
+      expect(result.dependencies[0]).toMatchObject({
+        dstKind: "path",
+        dst: "util.Helper",
+        rel: "import",
+      });
+    });
+
     it("handles wildcard imports", () => {
       const javaCode = `
 import java.util.*;

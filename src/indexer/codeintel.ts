@@ -765,9 +765,19 @@ function collectJavaDependencies(
         let kind: "path" | "package" = "package";
         if (!hasAsterisk) {
           const filePath = importName.replace(/\./g, "/") + ".java";
-          // fileSetから末尾がfilePathにマッチするものを探す
-          // Maven/Gradle構造 (src/main/java/com/example/MyClass.java) に対応
-          const matchingFile = Array.from(fileSet).find((f) => f.endsWith(filePath));
+
+          // Maven/Gradle標準構造のプレフィックスを除去して完全一致でチェック
+          // これにより、同名ファイルが異なるパッケージに存在する場合も正確に解決できる
+          const matchingFile = Array.from(fileSet).find((f) => {
+            // 標準的なソースディレクトリプレフィックスを除去
+            const normalizedPath = f
+              .replace(/^src\/main\/java\//, "")
+              .replace(/^src\/test\/java\//, "")
+              .replace(/^src\//, "");
+
+            return normalizedPath === filePath;
+          });
+
           kind = matchingFile ? "path" : "package";
         }
 
