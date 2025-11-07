@@ -1,6 +1,8 @@
 import packageJson from "../../package.json" with { type: "json" };
 import { maskValue } from "../shared/security/masker.js";
 
+const RESPONSE_MASK_SKIP_KEYS = ["path"];
+
 import { ServerContext } from "./context.js";
 import { DegradeController } from "./fallbacks/degradeController.js";
 import {
@@ -812,7 +814,7 @@ export function createRpcHandler(
             : null;
         }
       }
-      const masked = maskValue(result, { tokens });
+      const masked = maskValue(result, { tokens, skipKeys: RESPONSE_MASK_SKIP_KEYS });
       if (masked.applied > 0) {
         metrics.recordMask(masked.applied);
       }
