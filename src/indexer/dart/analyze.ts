@@ -10,6 +10,7 @@ import { isDartSdkAvailable } from "./sdk.js";
 import { extractDependencies } from "./dependencies.js";
 import { normalizeWorkspaceKey } from "./pathKey.js";
 import { createCapacityLimiter, type CapacityLimiter } from "./poolGate.js";
+import { parseMaxClients, parseClientWaitMs, parseIdleTtlMs } from "./config.js";
 
 // ワークスペース毎のクライアント管理（参照カウント + アイドルTTL方式）
 interface ClientEntry {
@@ -24,17 +25,18 @@ const clients = new Map<string, ClientEntry>();
 
 // Fix #2: アイドルTTL (デフォルト: 60秒、環境変数で調整可能)
 // Fix #6: ?? 演算子を使用して IDLE_TTL_MS=0 でTTLを無効化可能にする
-const IDLE_TTL_MS = Number(process.env.DART_ANALYSIS_IDLE_MS ?? "60000");
+// Fix #20 (Codex Critical Review Round 3): Extracted to config.ts for testability
+const IDLE_TTL_MS = parseIdleTtlMs();
 
 // Fix #4: 最大クライアント数制限（デフォルト: 8、環境変数で調整可能）
 // 大規模モノレポでメモリ枯渇を防ぐため、LRU evictionを実施
-const MAX_CLIENTS = parseInt(process.env.DART_ANALYSIS_MAX_CLIENTS ?? "8", 10);
+// Fix #18 (Codex Critical Review Round 3): Validate MAX_CLIENTS to prevent NaN
+// Extracted to config.ts for testability
+const MAX_CLIENTS = parseMaxClients();
 
 // Fix #1: Client wait timeout (default: 10000ms = 10 seconds)
-const DART_ANALYSIS_CLIENT_WAIT_MS = parseInt(
-  process.env.DART_ANALYSIS_CLIENT_WAIT_MS ?? "10000",
-  10
-);
+// Extracted to config.ts for testability
+const DART_ANALYSIS_CLIENT_WAIT_MS = parseClientWaitMs();
 
 // Fix #1 & #2: Pool capacity limiter to enforce MAX_CLIENTS
 const poolLimiter: CapacityLimiter = createCapacityLimiter(MAX_CLIENTS);
@@ -139,6 +141,13 @@ async function acquireClient(workspaceRoot: string): Promise<DartAnalysisClient>
   }
 
   // Fix #3: 初期化を待つ（失敗時はエントリを削除してリトライ可能にする）
+  // Fix #17 (Codex Critical Review Round 3): Track concurrent waiters for refs accounting
+  const waitingOnInit = entry.initPromise !== null && !didAcquirePermit;
+  if (waitingOnInit) {
+    // Concurrent request waiting on initialization - increment refs
+    entry.refs += 1;
+  }
+
   if (entry.initPromise) {
     try {
       await entry.initPromise;
@@ -148,6 +157,11 @@ async function acquireClient(workspaceRoot: string): Promise<DartAnalysisClient>
       clients.delete(workspaceKey);
       // Fix #3: skipShutdown で即時強制終了（二重タイムアウト回避）
       await entry.client.dispose({ skipShutdown: true }).catch(() => {});
+
+      // Fix #17: Roll back refs increment for waiting requests
+      if (waitingOnInit) {
+        // Entry was deleted, no need to decrement
+      }
 
       // Fix #9 (Codex Critical Review): Only release if WE acquired the permit
       // Concurrent requests waiting on initPromise didn't acquire permits
@@ -195,7 +209,14 @@ function releaseClient(workspaceRoot: string): void {
   }
 
   // Fix #2: refs が 0 になったらアイドルタイマーを起動（即座に dispose しない）
+  // Fix #20 (Codex Critical Review Round 3): IDLE_TTL_MS=0 means "disable TTL" (unlimited hold)
   if (entry.refs === 0) {
+    if (IDLE_TTL_MS === 0) {
+      // TTL disabled: keep client alive indefinitely (LRU will handle eviction if pool full)
+      return;
+    }
+
+    const delay = Math.max(1, IDLE_TTL_MS);
     entry.idleTimer = setTimeout(() => {
       // タイムアウト時に再度 refs をチェック（タイマー中に再取得された可能性）
       if (entry.refs === 0) {
@@ -211,7 +232,7 @@ function releaseClient(workspaceRoot: string): void {
             poolLimiter.release();
           });
       }
-    }, IDLE_TTL_MS);
+    }, delay);
 
     // Fix #1: Node.jsがタイマー待ちでハングしないように unref() を呼ぶ
     // これによりCLIプロセスがアイドルタイマーを待たずに終了できる

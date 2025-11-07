@@ -7,13 +7,13 @@ import { createInterface, type Interface } from "node:readline";
 import PQueue from "p-queue";
 import { detectDartSdk, MissingToolError } from "./sdk.js";
 import { normalizeFileKey } from "./pathKey.js";
+import { parseFileQueueTtlMs } from "./config.js";
 
 // Fix #4: File queue TTL (default: 30000ms = 30 seconds)
 // Fix #15 (Codex Critical Review): Enforce minimum 1000ms to prevent memory leak when set to 0
-const FILE_QUEUE_TTL_MS = Math.max(
-  1000,
-  parseInt(process.env.DART_FILE_QUEUE_TTL_MS ?? "30000", 10)
-);
+// Fix #19 (Codex Critical Review Round 3): Validate TTL to prevent NaN
+// Extracted to config.ts for testability
+const FILE_QUEUE_TTL_MS = parseFileQueueTtlMs();
 
 import type {
   RpcRequest,
@@ -486,6 +486,8 @@ export class DartAnalysisClient {
         );
         if (params.isFatal) {
           this.rejectAllPending(new DAPProtocolError(`Fatal server error: ${params.message}`));
+          // Fix #21 (Codex Critical Review Round 3): Auto-recovery after fatal server.error
+          this.cleanupState(); // Reset initialized flag to allow reinitialization
         }
         break;
       }

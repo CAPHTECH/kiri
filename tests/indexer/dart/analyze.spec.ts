@@ -184,4 +184,69 @@ describe("analyzeDartSource", () => {
       // where real DartAnalysisClient instances are used
     });
   });
+
+  describe("concurrent initialization (Fix #17)", () => {
+    it("correctly tracks refs for concurrent requests waiting on initialization", async () => {
+      // Fix #17 (Codex Critical Review Round 3):
+      // Concurrent requests waiting on the same client initialization should increment refs
+      // to prevent premature disposal and permit double-release
+
+      // Setup: Make initialize() take some time to simulate concurrent scenario
+      let initResolve: () => void;
+      const initPromise = new Promise<void>((resolve) => {
+        initResolve = resolve;
+      });
+
+      mockClient.initialize = vi.fn().mockImplementation(() => initPromise);
+
+      // Launch 3 concurrent requests for the same workspace
+      const request1 = analyzeDartSource("/test/file1.dart", "class A {}", "/test");
+      const request2 = analyzeDartSource("/test/file2.dart", "class B {}", "/test");
+      const request3 = analyzeDartSource("/test/file3.dart", "class C {}", "/test");
+
+      // Allow a tick for all requests to reach the initPromise wait
+      await new Promise((resolve) => setImmediate(resolve));
+
+      // Complete initialization
+      initResolve!();
+
+      // All requests should complete successfully
+      await expect(Promise.all([request1, request2, request3])).resolves.toBeDefined();
+
+      // Verify client was initialized only once
+      expect(mockClient.initialize).toHaveBeenCalledTimes(1);
+
+      // Verify all 3 files were analyzed
+      expect(mockClient.analyzeFile).toHaveBeenCalledTimes(3);
+
+      // The client should still be alive (refs = 0 after all releases, idle timer pending)
+      // No dispose should have been called yet
+      expect(mockClient.dispose).toHaveBeenCalledTimes(0);
+    });
+
+    it("correctly handles initialization failure for concurrent waiters", async () => {
+      // Fix #17: If initialization fails, all waiting requests should fail
+      // and refs should not underflow
+
+      mockClient.initialize = vi.fn().mockRejectedValue(new Error("Init failed"));
+
+      const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      // Launch concurrent requests
+      const request1 = analyzeDartSource("/test/file1.dart", "class A {}", "/test");
+      const request2 = analyzeDartSource("/test/file2.dart", "class B {}", "/test");
+
+      // Both should fail with init error
+      await expect(request1).rejects.toThrow("Init failed");
+      await expect(request2).rejects.toThrow("Init failed");
+
+      // Client should have been initialized once (and failed)
+      expect(mockClient.initialize).toHaveBeenCalledTimes(1);
+
+      // No analysis should have been performed
+      expect(mockClient.analyzeFile).toHaveBeenCalledTimes(0);
+
+      consoleSpy.mockRestore();
+    });
+  });
 });
