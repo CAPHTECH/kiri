@@ -11,7 +11,11 @@ describe("exportAuditLog", () => {
     const dir = await mkdtemp(join(tmpdir(), "audit-test-"));
     const output = join(dir, "audit.json");
     const entries = [
-      { path: "secrets/sk-12345", range: [1, 2] as [number, number], rationale: "ghp_token leak" },
+      {
+        path: "secrets/sk-1234567890ABCDE",
+        range: [1, 2] as [number, number],
+        rationale: "Detected ghp_1234567890ABCDE during scan",
+      },
     ];
 
     const file = exportAuditLog(entries, output);
