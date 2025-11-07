@@ -286,6 +286,17 @@ const FALLBACK_SNIPPET_WINDOW = 40; // Reduced from 120 to optimize token usage
 const MAX_RERANK_LIMIT = 50;
 const MAX_WHY_TAGS = 10;
 
+// 項目3: whyタグの優先度マップ（低い数値ほど高優先度）
+const WHY_TAG_PRIORITY: Record<string, number> = {
+  artifact: 1,
+  structural: 2,
+  keyword: 3,
+  dep: 4,
+  near: 5,
+  recent: 6,
+  symbol: 7,
+};
+
 const STOP_WORDS = new Set([
   "the",
   "and",
@@ -765,8 +776,8 @@ function prependLineNumbers(snippet: string, startLine: number): string {
   if (lines.length === 0) {
     return snippet;
   }
-  const maxLineNumber = startLine + lines.length - 1;
-  const width = Math.max(3, String(maxLineNumber).length);
+  // 項目5: 固定幅フォーマット（99999行まで対応）
+  const width = 5;
   return lines
     .map((line, index) => `${String(startLine + index).padStart(width, " ")}→${line}`)
     .join("\n");
@@ -1418,6 +1429,18 @@ export async function contextBundle(
   const limit = normalizeBundleLimit(params.limit);
   const artifacts = params.artifacts ?? {};
   const includeTokensEstimate = params.includeTokensEstimate === true;
+  const isCompact = params.compact === true;
+
+  // 項目2: トークンバジェット保護警告
+  // 大量データ+非コンパクトモード+トークン推定なしの場合に警告
+  if (!includeTokensEstimate && !isCompact && limit > 10) {
+    context.warningManager.warnOnce(
+      "context_bundle:large_non_compact",
+      "Large non-compact response without token estimation may exceed LLM limits. " +
+        "Consider setting compact: true or includeTokensEstimate: true.",
+      true // forResponse
+    );
+  }
 
   // スコアリング重みをロード（将来的には設定ファイルや引数から）
   const profileName = coerceProfileName(params.profile ?? null);
@@ -1797,7 +1820,17 @@ export async function contextBundle(
     const normalizedScore = maxScore > 0 ? candidate.score / maxScore : 0;
 
     const roundedScore = Number.isFinite(normalizedScore) ? Number(normalizedScore.toFixed(3)) : 0;
-    const why = Array.from(reasons).sort().slice(0, MAX_WHY_TAGS);
+
+    // 項目3: 優先度ベースのwhyタグソート
+    const sortedReasons = Array.from(reasons).sort((a, b) => {
+      const aPrefix = a.split(":")[0] ?? "";
+      const bPrefix = b.split(":")[0] ?? "";
+      const aPrio = WHY_TAG_PRIORITY[aPrefix] ?? 99;
+      const bPrio = WHY_TAG_PRIORITY[bPrefix] ?? 99;
+      if (aPrio !== bPrio) return aPrio - bPrio;
+      return a.localeCompare(b); // 同優先度内ではアルファベット順
+    });
+    const why = sortedReasons.slice(0, MAX_WHY_TAGS);
 
     const item: ContextBundleItem = {
       path: candidate.path,
