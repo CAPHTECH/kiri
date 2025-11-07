@@ -77,6 +77,22 @@ export class WarningManager {
   }
 
   /**
+   * リクエストごとに警告を表示します（サーバーライフタイムでの重複チェックなし）
+   *
+   * warnOnce()と異なり、この方法は毎回警告をレスポンスに追加します。
+   * ユーザーが危険なリクエストを繰り返し送信する場合に、
+   * 毎回通知する必要がある警告に使用します。
+   *
+   * @param key - 警告を識別するキー（ログ記録用）
+   * @param message - 表示する警告メッセージ
+   */
+  warnForRequest(key: string, message: string): void {
+    const formattedMessage = `[${key}] ${message}`;
+    console.warn(formattedMessage);
+    this.responseWarnings.push(formattedMessage);
+  }
+
+  /**
    * テスト用：表示済み警告の履歴をクリアします
    */
   reset(): void {

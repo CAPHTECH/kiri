@@ -287,14 +287,22 @@ const MAX_RERANK_LIMIT = 50;
 const MAX_WHY_TAGS = 10;
 
 // 項目3: whyタグの優先度マップ（低い数値ほど高優先度）
+// All actual tag prefixes used in the codebase
 const WHY_TAG_PRIORITY: Record<string, number> = {
-  artifact: 1,
-  structural: 2,
-  keyword: 3,
-  dep: 4,
-  near: 5,
-  recent: 6,
-  symbol: 7,
+  artifact: 1, // User-provided hints (editing_path, failing_tests)
+  phrase: 2, // Multi-word literal matches (strongest signal)
+  text: 3, // Single keyword matches
+  "path-phrase": 4, // Path contains multi-word phrase
+  structural: 5, // Semantic similarity
+  "path-segment": 6, // Path component matches
+  "path-keyword": 7, // Path keyword match
+  dep: 8, // Dependency relationship
+  near: 9, // Proximity to editing file
+  boost: 10, // File type boost
+  recent: 11, // Recently changed
+  symbol: 12, // Symbol match
+  penalty: 13, // Penalty explanations (keep for transparency)
+  keyword: 14, // Generic keyword (deprecated, kept for compatibility)
 };
 
 const STOP_WORDS = new Set([
@@ -416,6 +424,23 @@ function buildPreview(content: string, query: string): { preview: string; line: 
   const preview = content.slice(snippetStart, snippetEnd);
 
   return { preview, line: matchLine };
+}
+
+/**
+ * Lightweight function to find the line number of the first match without generating a preview.
+ * Used in compact mode to minimize CPU/memory overhead.
+ */
+function findFirstMatchLine(content: string, query: string): number {
+  const lowerContent = content.toLowerCase();
+  const lowerQuery = query.toLowerCase();
+  const index = lowerContent.indexOf(lowerQuery);
+  if (index === -1) {
+    return 1;
+  }
+
+  const prefix = content.slice(0, index);
+  const prefixLines = prefix.split(/\r?\n/);
+  return prefix.length === 0 ? 1 : prefixLines.length;
 }
 
 interface CandidateInfo {
@@ -776,8 +801,9 @@ function prependLineNumbers(snippet: string, startLine: number): string {
   if (lines.length === 0) {
     return snippet;
   }
-  // 項目5: 固定幅フォーマット（99999行まで対応）
-  const width = 5;
+  // Calculate required width from the last line number (dynamic sizing)
+  const endLine = startLine + lines.length - 1;
+  const width = String(endLine).length;
   return lines
     .map((line, index) => `${String(startLine + index).padStart(width, " ")}→${line}`)
     .join("\n");
@@ -1275,19 +1301,31 @@ export async function filesSearch(
 
   return rows
     .map((row) => {
-      const { preview, line } = buildPreview(row.content ?? "", query);
+      let preview: string | undefined;
+      let matchLine: number;
+
+      if (includePreview) {
+        // Full preview generation for non-compact mode
+        const previewData = buildPreview(row.content ?? "", query);
+        preview = previewData.preview;
+        matchLine = previewData.line;
+      } else {
+        // Lightweight: extract only line number without preview
+        matchLine = findFirstMatchLine(row.content ?? "", query);
+      }
+
       const baseScore = row.score ?? 1.0; // FTS時はBM25スコア、ILIKE時は1.0
       const boostedScore = applyFileTypeBoost(row.path, baseScore, boostProfile, weights);
 
       const result: FilesSearchResult = {
         path: row.path,
-        matchLine: line,
+        matchLine,
         lang: row.lang,
         ext: row.ext,
         score: boostedScore,
       };
 
-      if (includePreview) {
+      if (preview !== undefined) {
         result.preview = preview;
       }
 
@@ -1433,12 +1471,12 @@ export async function contextBundle(
 
   // 項目2: トークンバジェット保護警告
   // 大量データ+非コンパクトモード+トークン推定なしの場合に警告
+  // リクエストごとに警告（warnForRequestを使用）
   if (!includeTokensEstimate && !isCompact && limit > 10) {
-    context.warningManager.warnOnce(
+    context.warningManager.warnForRequest(
       "context_bundle:large_non_compact",
       "Large non-compact response without token estimation may exceed LLM limits. " +
-        "Consider setting compact: true or includeTokensEstimate: true.",
-      true // forResponse
+        "Consider setting compact: true or includeTokensEstimate: true."
     );
   }
 
