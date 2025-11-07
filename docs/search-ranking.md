@@ -359,4 +359,4 @@ SELECT DISTINCT path FROM walk;
 2. **増補**: 依存クロージャ（深さ 1–2）やパス近接で不足断片を追加する。
 3. **再ランキング**: VSS が有効な場合のみ `semantic_rerank` を適用する。
 4. **断片化**: シンボル境界で行範囲を最小化し重複を統合する。
-5. **出力生成**: why（根拠タグ）と tokens_estimate を添えて返却する。
+5. **出力生成**: why（根拠タグ、最大10件）を付与し、`includeTokensEstimate: true` が指定されたときのみ tokens_estimate を添えて返却する。

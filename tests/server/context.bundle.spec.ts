@@ -74,6 +74,7 @@ describe("context_bundle", () => {
         failing_tests: ["TokenVerifier handles expiration"],
       },
       limit: 5,
+      includeTokensEstimate: true,
     });
 
     expect(bundle.context.length).toBeGreaterThan(0);
@@ -92,6 +93,33 @@ describe("context_bundle", () => {
     expect(nearby).toBeDefined();
     expect(nearby?.why.some((reason) => reason.startsWith("near:"))).toBe(true);
   }, 10000);
+
+  it("skips tokens_estimate calculation unless requested", async () => {
+    const repo = await createTempRepo({
+      "src/app.ts": "export function app() { return 1; }\n",
+    });
+    cleanupTargets.push({ dispose: repo.cleanup });
+
+    const dbDir = await mkdtemp(join(tmpdir(), "kiri-db-no-tokens-"));
+    const dbPath = join(dbDir, "index.duckdb");
+    cleanupTargets.push({ dispose: async () => await rm(dbDir, { recursive: true, force: true }) });
+
+    await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+    const db = await DuckDBClient.connect({ databasePath: dbPath });
+    cleanupTargets.push({ dispose: async () => await db.close() });
+
+    const repoId = await resolveRepoId(db, repo.path);
+    const context: ServerContext = { db, repoId, warningManager: new WarningManager() };
+
+    const bundle = await contextBundle(context, {
+      goal: "investigate app",
+      limit: 3,
+    });
+
+    expect(bundle.tokens_estimate).toBeUndefined();
+    expect(bundle.context.length).toBeGreaterThan(0);
+  });
 
   it("rejects empty goals", async () => {
     const repo = await createTempRepo({

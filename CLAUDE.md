@@ -43,6 +43,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Speed**: Indexed search is faster than filesystem traversal
 - **Structure-aware**: Understands code symbols and dependencies
 
+### Token-Saving Workflow (v0.9.6+)
+
+1. Run `files_search` or `context_bundle` with `compact: true` to gather lightweight candidates.
+2. Use `snippets_get` with `compact: true` when you only need metadata, or `includeLineNumbers: true` when copying exact line references (format: `  1375→export function ...`).
+3. Request `includeTokensEstimate: true` on `context_bundle` only when you explicitly need the projected token count; it is skipped by default.
+
 ### Default Tool Priority
 
 1. First: Try KIRI tools (`mcp__kiri__*`)

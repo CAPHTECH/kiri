@@ -66,7 +66,8 @@ describe("snippets_get", () => {
     expect(snippet.path).toBe("src/main.ts");
     expect(snippet.startLine).toBe(5);
     expect(snippet.endLine).toBe(7);
-    expect(snippet.content.split("\n").length).toBe(3);
+    expect(snippet.content).toBeDefined();
+    expect((snippet.content ?? "").split("\n").length).toBe(3);
     expect(snippet.symbolName).toBe("beta");
     expect(snippet.symbolKind).toBe("function");
   });
@@ -96,9 +97,74 @@ describe("snippets_get", () => {
     const snippet = await snippetsGet(context, { path: "src/util.ts", start_line: 2, end_line: 3 });
     expect(snippet.startLine).toBe(2);
     expect(snippet.endLine).toBe(3);
+    expect(snippet.content).toBeDefined();
     expect(snippet.content).toContain("second");
     expect(snippet.content).toContain("third");
     expect(snippet.symbolName).toBeNull();
     expect(snippet.symbolKind).toBeNull();
+  });
+
+  it("omits content when compact=true", async () => {
+    const repo = await createTempRepo({
+      "src/data.ts": "export const value = 42;\n",
+    });
+    cleanupTargets.push({ dispose: repo.cleanup });
+
+    const dbDir = await mkdtemp(join(tmpdir(), "kiri-db-compact-snippet-"));
+    const dbPath = join(dbDir, "index.duckdb");
+    cleanupTargets.push({ dispose: async () => await rm(dbDir, { recursive: true, force: true }) });
+
+    await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+    const db = await DuckDBClient.connect({ databasePath: dbPath });
+    cleanupTargets.push({ dispose: async () => await db.close() });
+
+    const repoId = await resolveRepoId(db, repo.path);
+    const context: ServerContext = { db, repoId, warningManager: new WarningManager() };
+
+    const snippet = await snippetsGet(context, { path: "src/data.ts", compact: true });
+    expect(snippet.content).toBeUndefined();
+    expect(snippet.startLine).toBe(1);
+    expect(snippet.endLine).toBeGreaterThanOrEqual(snippet.startLine);
+  });
+
+  it("prefixes content lines with numbers when includeLineNumbers=true", async () => {
+    const repo = await createTempRepo({
+      "src/logic.ts": [
+        "export function alpha() {",
+        "  return 1;",
+        "}",
+        "",
+        "export function beta() {",
+        "  return 2;",
+        "}",
+      ].join("\n"),
+    });
+    cleanupTargets.push({ dispose: repo.cleanup });
+
+    const dbDir = await mkdtemp(join(tmpdir(), "kiri-db-line-numbers-"));
+    const dbPath = join(dbDir, "index.duckdb");
+    cleanupTargets.push({ dispose: async () => await rm(dbDir, { recursive: true, force: true }) });
+
+    await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+    const db = await DuckDBClient.connect({ databasePath: dbPath });
+    cleanupTargets.push({ dispose: async () => await db.close() });
+
+    const repoId = await resolveRepoId(db, repo.path);
+    const context: ServerContext = { db, repoId, warningManager: new WarningManager() };
+
+    const snippet = await snippetsGet(context, {
+      path: "src/logic.ts",
+      start_line: 1,
+      end_line: 3,
+      includeLineNumbers: true,
+    });
+
+    expect(snippet.content).toBeDefined();
+    const lines = (snippet.content ?? "").split("\n");
+    expect(lines[0]).toMatch(/^\s*1→/);
+    expect(lines[1]).toMatch(/^\s*2→/);
+    expect(lines[2]).toMatch(/^\s*3→/);
   });
 });

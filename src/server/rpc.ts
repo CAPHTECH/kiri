@@ -139,7 +139,7 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
     name: "context_bundle",
     description:
       "Primary code discovery tool. Provide a concrete, keyword-rich `goal` (modules, files, symptoms) to receive ranked `context` entries containing `path`, `range`, optional `preview`, scoring `why`, and `score`. Avoid leading with generic imperatives such as 'find' or 'locate'; list the signals you have instead.\n\n" +
-      "Returns {context, tokens_estimate, warnings?}; the tool only reads from the index. Empty or vague goals raise an MCP error that asks for specific keywords, and imperative-only phrasing usually lowers ranking quality.\n\n" +
+      "Returns {context, tokens_estimate?, warnings?}; computing tokens_estimate is optional and should be requested explicitly when needed. Empty or vague goals raise an MCP error that asks for specific keywords, and imperative-only phrasing usually lowers ranking quality.\n\n" +
       "Example: context_bundle({goal: 'pagination off-by-one bug; file=src/catalog/products.ts; expected=20 items; observed=19'}) surfaces the affected files. Less effective: goal='Find where pagination breaks'.",
     inputSchema: {
       type: "object",
@@ -166,6 +166,11 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
             "If true, omits the 'preview' field to drastically reduce token consumption (~95% reduction). " +
             "Returns only metadata: path, range, why, score. Use with snippets.get for two-tier approach. " +
             "Default: true (v0.8.0+). Set to false if you need immediate code previews.",
+        },
+        includeTokensEstimate: {
+          type: "boolean",
+          description:
+            "If true, computes the tokens_estimate field. This is slower and should be used only when you need projected token counts.",
         },
         profile: {
           type: "string",
@@ -234,7 +239,7 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
     name: "files_search",
     description:
       "Token-aware substring search for precise identifiers, error messages, or import fragments. Prefer this tool when you already know the exact string you need to locate; use `context_bundle` for exploratory work.\n\n" +
-      "Returns an array of `{path, preview, matchLine, lang, ext, score}` objects; the tool never mutates the repo. Empty queries raise an MCP error prompting you to provide a concrete keyword. If DuckDB is unavailable but the server runs with `--allow-degrade`, the same array shape is returned using filesystem-based fallbacks (with `lang`/`ext` set to null).\n\n" +
+      "Returns an array of `{path, matchLine, lang, ext, score}` objects with optional `preview`; the tool never mutates the repo. Set `compact: true` to omit previews entirely for maximum token savings. Empty queries raise an MCP error prompting you to provide a concrete keyword. If DuckDB is unavailable but the server runs with `--allow-degrade`, the same array shape is returned using filesystem-based fallbacks (with `lang`/`ext` set to null).\n\n" +
       'Example: files_search({query: "AuthenticationError", path_prefix: "src/auth/"}) narrows to auth handlers. Invalid: files_search({query: ""}) reports that the query must be non-empty.',
     inputSchema: {
       type: "object",
@@ -274,6 +279,11 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
           description:
             'File type boosting mode: "default" prioritizes implementation files (src/app/, src/components/), "docs" prioritizes documentation (*.md), "none" disables boosting. Default is "default".',
         },
+        compact: {
+          type: "boolean",
+          description:
+            "If true, omits previews to minimize response tokens. Pair with snippets_get for detail-on-demand workflows.",
+        },
       },
     },
   },
@@ -281,7 +291,7 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
     name: "snippets_get",
     description:
       "Focused snippet retrieval by file path. The tool uses recorded symbol boundaries to return the smallest readable span, or falls back to the requested line window.\n\n" +
-      "Returns {path, startLine, endLine, content, totalLines, symbolName, symbolKind}; this is a read-only lookup. Missing `path`, binary files, or absent index entries raise an MCP error with guidance to re-run the indexer.\n\n" +
+      "Returns {path, startLine, endLine, totalLines, symbolName, symbolKind} with optional `content`. Set `compact: true` to omit content, or `include_line_numbers: true` to prefix each line with its number; this is a read-only lookup. Missing `path`, binary files, or absent index entries raise an MCP error with guidance to re-run the indexer.\n\n" +
       "Example: snippets_get({path: 'src/auth/login.ts'}) surfaces the enclosing function. Invalid: snippets_get({path: 'assets/logo.png'}) reports that binary snippets are unsupported.",
     inputSchema: {
       type: "object",
@@ -294,6 +304,16 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
         },
         start_line: { type: "number", minimum: 0 },
         end_line: { type: "number", minimum: 0 },
+        compact: {
+          type: "boolean",
+          description:
+            "If true, returns only metadata (path, range, totals, symbols) without content payload.",
+        },
+        include_line_numbers: {
+          type: "boolean",
+          description:
+            "If true, prefixes each returned line with its line number (ignored when compact is true).",
+        },
       },
     },
   },
@@ -372,6 +392,10 @@ function parseFilesSearchParams(input: unknown): FilesSearchParams {
     params.boost_profile = boostProfile;
   }
 
+  if (typeof record.compact === "boolean") {
+    params.compact = record.compact;
+  }
+
   return params;
 }
 
@@ -397,6 +421,11 @@ function parseSnippetsGetParams(input: unknown): SnippetsGetParams {
   };
   if (startLine !== undefined) params.start_line = startLine;
   if (endLine !== undefined) params.end_line = endLine;
+  if (typeof record.compact === "boolean") params.compact = record.compact;
+  const includeLineNumbersValue = record.includeLineNumbers ?? record.include_line_numbers;
+  if (typeof includeLineNumbersValue === "boolean") {
+    params.includeLineNumbers = includeLineNumbersValue;
+  }
   return params;
 }
 
@@ -509,6 +538,11 @@ function parseContextBundleParams(input: unknown, context: ServerContext): Conte
     );
   }
 
+  const includeTokensEstimate = record.includeTokensEstimate ?? record.include_tokens_estimate;
+  if (typeof includeTokensEstimate === "boolean") {
+    params.includeTokensEstimate = includeTokensEstimate;
+  }
+
   return params;
 }
 
@@ -611,14 +645,17 @@ async function executeToolByName(
     case "files_search": {
       const params = parseFilesSearchParams(toolParams);
       if (degrade.current.active && allowDegrade) {
-        return degrade.search(params.query, params.limit ?? 20).map((hit) => ({
-          path: hit.path,
-          preview: hit.preview,
-          matchLine: hit.matchLine,
-          lang: null,
-          ext: null,
-          score: 0,
-        }));
+        const includePreview = params.compact !== true;
+        return degrade.search(params.query, params.limit ?? 20).map((hit) => {
+          const result = {
+            path: hit.path,
+            matchLine: hit.matchLine,
+            lang: null,
+            ext: null,
+            score: 0,
+          } as const;
+          return includePreview ? { ...result, preview: hit.preview } : result;
+        });
       } else {
         const handler = async () =>
           await withSpan("files_search", async () => await filesSearch(context, params));

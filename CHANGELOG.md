@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.6] - 2025-11-07
+
+### Added
+
+- Introduced `compact` and `includeLineNumbers` options to `snippets_get`; compact mode now returns only metadata while line numbering adds aligned prefixes such as `  1375→export ...` for easier quoting.
+- Added `compact` support to `files_search` plus an integration test so callers can omit previews during exploratory passes.
+
+### Changed
+
+- `context_bundle` now caps the `why` array at the top 10 reasons, rounds `score` values to three decimals, and only computes `tokens_estimate` when `includeTokensEstimate: true` is provided (default skips the costly calculation).
+- Updated MCP tool descriptors, docs, and warning text to reflect the new optional fields and token-saving workflow.
+
 ## [0.9.5] - 2025-11-06
 
 ### Changed

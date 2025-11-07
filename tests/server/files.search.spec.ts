@@ -48,8 +48,33 @@ describe("files_search", () => {
     const paths = results.map((item) => item.path);
     expect(paths).toContain("src/main.ts");
     expect(paths).toContain("docs/readme.md");
-    expect(results.every((item) => item.preview.toLowerCase().includes("meaning"))).toBe(true);
+    expect(results.every((item) => item.preview !== undefined)).toBe(true);
+    expect(results.every((item) => item.preview!.toLowerCase().includes("meaning"))).toBe(true);
   }, 10000);
+
+  it("omits previews when compact mode is requested", async () => {
+    const repo = await createTempRepo({
+      "src/main.ts": "export const foo = 1;\nexport const bar = foo + 1;\n",
+    });
+    cleanupTargets.push({ dispose: repo.cleanup });
+
+    const dbDir = await mkdtemp(join(tmpdir(), "kiri-db-compact-"));
+    const dbPath = join(dbDir, "index.duckdb");
+    cleanupTargets.push({ dispose: async () => await rm(dbDir, { recursive: true, force: true }) });
+
+    await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+    const db = await DuckDBClient.connect({ databasePath: dbPath });
+    cleanupTargets.push({ dispose: async () => await db.close() });
+
+    const repoId = await resolveRepoId(db, repo.path);
+    const context: ServerContext = { db, repoId, warningManager: new WarningManager() };
+
+    const results = await filesSearch(context, { query: "foo", compact: true });
+    expect(results.length).toBeGreaterThan(0);
+    expect(results.every((item) => item.preview === undefined)).toBe(true);
+    expect(results.every((item) => item.matchLine >= 1)).toBe(true);
+  });
 
   it("returns matches for multi-word queries with OR logic", async () => {
     const repo = await createTempRepo({

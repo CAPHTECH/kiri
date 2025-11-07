@@ -190,11 +190,12 @@ export interface FilesSearchParams {
   path_prefix?: string;
   limit?: number;
   boost_profile?: "default" | "docs" | "none";
+  compact?: boolean; // If true, omit preview to reduce token usage
 }
 
 export interface FilesSearchResult {
   path: string;
-  preview: string;
+  preview?: string;
   matchLine: number;
   lang: string | null;
   ext: string | null;
@@ -205,13 +206,15 @@ export interface SnippetsGetParams {
   path: string;
   start_line?: number;
   end_line?: number;
+  compact?: boolean; // If true, omit content payload entirely
+  includeLineNumbers?: boolean; // If true, prefix content lines with line numbers
 }
 
 export interface SnippetResult {
   path: string;
   startLine: number;
   endLine: number;
-  content: string;
+  content?: string;
   totalLines: number;
   symbolName: string | null;
   symbolKind: string | null;
@@ -230,6 +233,7 @@ export interface ContextBundleParams {
   profile?: string;
   boost_profile?: "default" | "docs" | "none";
   compact?: boolean; // If true, omit preview field to reduce token usage
+  includeTokensEstimate?: boolean; // If true, compute tokens_estimate (slower)
 }
 
 export interface ContextBundleItem {
@@ -242,7 +246,7 @@ export interface ContextBundleItem {
 
 export interface ContextBundleResult {
   context: ContextBundleItem[];
-  tokens_estimate: number;
+  tokens_estimate?: number;
   warnings?: string[]; // Client-visible warnings (e.g., breaking changes, deprecations)
 }
 
@@ -280,6 +284,7 @@ const MAX_DEPENDENCY_SEEDS_QUERY_LIMIT = 100; // SQL injection防御用の上限
 const NEARBY_LIMIT = 6;
 const FALLBACK_SNIPPET_WINDOW = 40; // Reduced from 120 to optimize token usage
 const MAX_RERANK_LIMIT = 50;
+const MAX_WHY_TAGS = 10;
 
 const STOP_WORDS = new Set([
   "the",
@@ -753,6 +758,18 @@ function buildSnippetPreview(content: string, startLine: number, endLine: number
     return snippet;
   }
   return `${snippet.slice(0, 239)}…`;
+}
+
+function prependLineNumbers(snippet: string, startLine: number): string {
+  const lines = snippet.split(/\r?\n/);
+  if (lines.length === 0) {
+    return snippet;
+  }
+  const maxLineNumber = startLine + lines.length - 1;
+  const width = Math.max(3, String(maxLineNumber).length);
+  return lines
+    .map((line, index) => `${String(startLine + index).padStart(width, " ")}→${line}`)
+    .join("\n");
 }
 
 /**
@@ -1243,20 +1260,27 @@ export async function filesSearch(
   // Note: filesSearch doesn't have a separate profile parameter, uses default weights
   const weights = loadScoringProfile(null);
 
+  const includePreview = params.compact !== true;
+
   return rows
     .map((row) => {
       const { preview, line } = buildPreview(row.content ?? "", query);
       const baseScore = row.score ?? 1.0; // FTS時はBM25スコア、ILIKE時は1.0
       const boostedScore = applyFileTypeBoost(row.path, baseScore, boostProfile, weights);
 
-      return {
+      const result: FilesSearchResult = {
         path: row.path,
-        preview,
         matchLine: line,
         lang: row.lang,
         ext: row.ext,
         score: boostedScore,
       };
+
+      if (includePreview) {
+        result.preview = preview;
+      }
+
+      return result;
     })
     .sort((a, b) => b.score - a.score); // スコアの高い順に再ソート
 }
@@ -1359,13 +1383,20 @@ export async function snippetsGet(
     endLine = Math.max(startLine, Math.min(totalLines, requestedEnd));
   }
 
-  const snippetContent = lines.slice(startLine - 1, endLine).join("\n");
+  const isCompact = params.compact === true;
+  const addLineNumbers = params.includeLineNumbers === true && !isCompact;
+
+  let content: string | undefined;
+  if (!isCompact) {
+    const snippetContent = lines.slice(startLine - 1, endLine).join("\n");
+    content = addLineNumbers ? prependLineNumbers(snippetContent, startLine) : snippetContent;
+  }
 
   return {
     path: row.path,
     startLine,
     endLine,
-    content: snippetContent,
+    ...(content !== undefined && { content }),
     totalLines,
     symbolName,
     symbolKind,
@@ -1386,6 +1417,7 @@ export async function contextBundle(
 
   const limit = normalizeBundleLimit(params.limit);
   const artifacts = params.artifacts ?? {};
+  const includeTokensEstimate = params.includeTokensEstimate === true;
 
   // スコアリング重みをロード（将来的には設定ファイルや引数から）
   const profileName = coerceProfileName(params.profile ?? null);
@@ -1690,7 +1722,7 @@ export async function contextBundle(
     const warnings = [...context.warningManager.responseWarnings];
     return {
       context: [],
-      tokens_estimate: 0,
+      ...(includeTokensEstimate && { tokens_estimate: 0 }),
       ...(warnings.length > 0 && { warnings }),
     };
   }
@@ -1764,11 +1796,14 @@ export async function contextBundle(
 
     const normalizedScore = maxScore > 0 ? candidate.score / maxScore : 0;
 
+    const roundedScore = Number.isFinite(normalizedScore) ? Number(normalizedScore.toFixed(3)) : 0;
+    const why = Array.from(reasons).sort().slice(0, MAX_WHY_TAGS);
+
     const item: ContextBundleItem = {
       path: candidate.path,
       range: [startLine, endLine],
-      why: Array.from(reasons).sort(),
-      score: Number.isFinite(normalizedScore) ? normalizedScore : 0,
+      why,
+      score: roundedScore,
     };
 
     // Add preview only if not in compact mode
@@ -1780,24 +1815,30 @@ export async function contextBundle(
   }
 
   // コンテンツベースのトークン推定を使用（より正確）
-  const tokensEstimate = results.reduce((acc, item) => {
-    const candidate = sortedCandidates.find((c) => c.path === item.path);
-    if (candidate && candidate.content) {
-      return acc + estimateTokensFromContent(candidate.content, item.range[0], item.range[1]);
-    }
-    // フォールバック: 行ベース推定（コンテンツが利用不可の場合）
-    const lineCount = Math.max(1, item.range[1] - item.range[0] + 1);
-    return acc + lineCount * 4;
-  }, 0);
+  let tokensEstimate: number | undefined;
+  if (includeTokensEstimate) {
+    tokensEstimate = results.reduce((acc, item) => {
+      const candidate = sortedCandidates.find((c) => c.path === item.path);
+      if (candidate && candidate.content) {
+        return acc + estimateTokensFromContent(candidate.content, item.range[0], item.range[1]);
+      }
+      // フォールバック: 行ベース推定（コンテンツが利用不可の場合）
+      const lineCount = Math.max(1, item.range[1] - item.range[0] + 1);
+      return acc + lineCount * 4;
+    }, 0);
+  }
 
   // Get warnings from WarningManager (includes breaking change notification if applicable)
   const warnings = [...context.warningManager.responseWarnings];
 
-  return {
+  const payload: ContextBundleResult = {
     context: results,
-    tokens_estimate: tokensEstimate,
     ...(warnings.length > 0 && { warnings }),
   };
+  if (tokensEstimate !== undefined) {
+    payload.tokens_estimate = tokensEstimate;
+  }
+  return payload;
 }
 
 export async function semanticRerank(

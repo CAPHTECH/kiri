@@ -6,18 +6,18 @@ The server implements MCP standard endpoints `initialize` / `tools/list`, enabli
 
 ## Available Tools
 
-- `files_search(query, lang?, ext?, path_prefix?, limit=50)` - Search files by keywords
+- `files_search(query, lang?, ext?, path_prefix?, limit=50, compact?)` - Search files by keywords; use `compact: true` to omit previews
 - `symbols.find(name, kind?, path_hint?, limit=50)` - Find code symbols
 - `deps_closure(paths[], direction="out"|"in", depth=2)` - Analyze dependencies
 - `recent.changed(since="30d", path_prefix?)` - Find recently changed files
 - `who.owns(path)` - Get ownership information from blame summary
-- `snippets_get(path, start_line, end_line)` - Retrieve code snippets
+- `snippets_get(path, start_line?, end_line?, compact?, include_line_numbers?)` - Retrieve code snippets; `compact` omits content, `include_line_numbers` prefixes each line when content is returned
 - `semantic_rerank(candidates[], text, k=20)` - Semantic reranking (VSS only)
-- `context_bundle(goal, artifacts)` ← **Most Important**
+- `context_bundle(goal, artifacts, includeTokensEstimate?)` ← **Most Important**
   - `goal`: Natural language description (e.g., "Fix failing test: test_verify_token in Auth")
   - `artifacts`: {`editing_path`?, `failing_tests`?, `last_diff`?}
     - Providing `editing_path` with the file you're touching strongly boosts that file and nearby dependencies, returning a cohesive set of related files.
-  - Output: Fragment list (path, [start,end], why[], score, preview) and `tokens_estimate`
+  - Output: Fragment list (path, [start,end], why[], score, optional preview) and `tokens_estimate` **only** when `includeTokensEstimate: true`
 
 ## `context_bundle` Request/Response Example
 
@@ -31,7 +31,8 @@ The server implements MCP standard endpoints `initialize` / `tools/list`, enabli
       "editing_path": "src/auth/jwt.ts",
       "failing_tests": ["AuthJwtSpec#rejectsExpired"],
       "last_diff": "..."
-    }
+    },
+    "includeTokensEstimate": true
   }
 }
 
@@ -55,6 +56,8 @@ The server implements MCP standard endpoints `initialize` / `tools/list`, enabli
   "tokens_estimate": 1450
 }
 ```
+
+> `tokens_estimate` is only present when you pass `includeTokensEstimate: true`. Skipping it avoids the extra DuckDB reads required for token estimation.
 
 ## Token Optimization: `compact` Mode
 
@@ -103,6 +106,12 @@ for (const item of result.context.slice(0, 3)) {
 - Immediate code preview is needed
 - Retrieving only a few files (1-3)
 
+### Lightweight inspection options
+
+- `files_search(..., compact: true)` removes previews from every result for 60–70% fewer tokens during keyword scans. Use `compact: false` only when the preview text is required inline.
+- `snippets_get(..., compact: true)` returns only metadata (`path`, `startLine`, `endLine`, totals, symbol info) so that you can confirm the symbol boundaries without streaming full text.
+- `snippets_get(..., includeLineNumbers: true)` prefixes each returned line with an aligned counter such as `  1375→export async function...`, making it easier to quote exact locations when copying into bug reports or chats.
+
 ### Real Example: Lambda Function Investigation
 
 ```json
@@ -112,7 +121,8 @@ for (const item of result.context.slice(0, 3)) {
   "params": {
     "goal": "ask-agent Lambda handler logic, runtime execution flow",
     "limit": 10,
-    "compact": true
+    "compact": true,
+    "includeTokensEstimate": true
   }
 }
 
@@ -219,18 +229,18 @@ Watch mode (`--watch`) monitors repository file changes and automatically reinde
 
 サーバーは MCP 標準エンドポイント `initialize` / `tools/list` を実装しており、AI エージェントは起動直後に能力を自動検出できます。
 
-- `files_search(query, lang?, ext?, path_prefix?, limit=50)`
+- `files_search(query, lang?, ext?, path_prefix?, limit=50, compact?)`
 - `symbols.find(name, kind?, path_hint?, limit=50)`
 - `deps_closure(paths[], direction="out"|"in", depth=2)`
 - `recent.changed(since="30d", path_prefix?)`
 - `who.owns(path)` → `blame_summary` を要約
-- `snippets_get(path, start_line, end_line)`
+- `snippets_get(path, start_line?, end_line?, compact?, include_line_numbers?)`
 - `semantic_rerank(candidates[], text, k=20)`（VSS 有効時のみ）
-- `context_bundle(goal, artifacts)` ← **最重要**
+- `context_bundle(goal, artifacts, includeTokensEstimate?)` ← **最重要**
   - `goal`: 自然文（例: "Auth の失敗テスト test_verify_token を修す"）
   - `artifacts`: {`editing_path`?, `failing_tests`?, `last_diff`?}
     - `editing_path` に作業中ファイルを渡すと、そのファイルと依存・近傍ファイルが優先的に返り、関連コンテキストをまとめて取得できます。
-  - 出力: 断片リスト（path, [start,end], why[], score, preview）と `tokens_estimate`
+  - 出力: 断片リスト（path, [start,end], why[], score, optional preview）と `tokens_estimate`（`includeTokensEstimate: true` のときのみ）
 
 ## `context_bundle` リクエスト/レスポンス例
 
