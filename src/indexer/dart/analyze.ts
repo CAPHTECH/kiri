@@ -122,7 +122,7 @@ async function acquireClient(workspaceRoot: string): Promise<DartAnalysisClient>
 
       entry = {
         client,
-        refs: 0,
+        refs: 1, // Fix #12 (Codex Critical Review): Reserve immediately to prevent LRU race
         initPromise: client.initialize().then(() => client),
         idleTimer: null, // Fix #2: アイドルタイマー初期化
         lastUsed: Date.now(), // Fix #2: 最終使用時刻初期化
@@ -156,10 +156,11 @@ async function acquireClient(workspaceRoot: string): Promise<DartAnalysisClient>
       }
       throw error;
     }
+  } else {
+    // Fix #12: Entry exists and is initialized - increment refs for this acquisition
+    entry.refs += 1;
   }
 
-  // 参照カウントを増やす
-  entry.refs += 1;
   entry.lastUsed = Date.now(); // Fix #2: 最終使用時刻更新
 
   return entry.client;
@@ -178,10 +179,20 @@ function releaseClient(workspaceRoot: string): void {
   const workspaceKey = normalizeWorkspaceKey(workspaceRoot);
   const entry = clients.get(workspaceKey);
   if (!entry) {
+    console.warn(`[releaseClient] No entry found for ${workspaceRoot}`);
     return;
   }
 
   entry.refs -= 1;
+
+  // Fix #14 (Codex Critical Review): Defensive check for refs underflow
+  if (entry.refs < 0) {
+    console.error(
+      `[releaseClient] refs underflow for ${workspaceRoot}: ${entry.refs}. ` +
+        `This indicates a bug in acquire/release pairing.`
+    );
+    entry.refs = 0;
+  }
 
   // Fix #2: refs が 0 になったらアイドルタイマーを起動（即座に dispose しない）
   if (entry.refs === 0) {
@@ -273,6 +284,9 @@ export async function analyzeDartSource(
   }
 }
 
+// Fix #13 (Codex Critical Review): Re-entrancy guard for cleanup()
+let cleanupInProgress = false;
+
 /**
  * 全クライアントのクリーンアップ
  *
@@ -280,38 +294,52 @@ export async function analyzeDartSource(
  * 全てのワークスペースのクライアントを強制的に dispose する
  */
 export async function cleanup(): Promise<void> {
-  const disposePromises: Promise<void>[] = [];
+  // Fix #13: Prevent concurrent/double cleanup
+  if (cleanupInProgress) {
+    console.warn("[cleanup] Already in progress, skipping duplicate call");
+    return;
+  }
+  cleanupInProgress = true;
 
-  for (const [workspaceRoot, entry] of clients.entries()) {
-    // Fix #2: アイドルタイマーをクリア
-    if (entry.idleTimer) {
-      clearTimeout(entry.idleTimer);
-      entry.idleTimer = null;
+  try {
+    const disposePromises: Promise<void>[] = [];
+    const entriesToCleanup = Array.from(clients.entries()); // Snapshot
+
+    // Fix #13: Delete all entries immediately to prevent concurrent acquireClient() access
+    clients.clear();
+
+    for (const [workspaceRoot, entry] of entriesToCleanup) {
+      // Fix #2: アイドルタイマーをクリア
+      if (entry.idleTimer) {
+        clearTimeout(entry.idleTimer);
+        entry.idleTimer = null;
+      }
+
+      // Fix #8 (Codex Critical Review): cleanup() で各クライアント dispose 後に permit を release
+      // これにより cleanup() 後も poolLimiter が正常に機能し、再利用可能になる
+      const disposeAndRelease = async () => {
+        try {
+          if (entry.initPromise) {
+            const client = await entry.initPromise;
+            await client.dispose({ timeoutMs: 2000 });
+          } else {
+            await entry.client.dispose({ timeoutMs: 2000 });
+          }
+        } catch (error) {
+          console.error(`[cleanup] Failed to dispose client for ${workspaceRoot}:`, error);
+        } finally {
+          // Always release pool permit to prevent permit leak
+          poolLimiter.release();
+        }
+      };
+
+      disposePromises.push(disposeAndRelease());
     }
 
-    // Fix #8 (Codex Critical Review): cleanup() で各クライアント dispose 後に permit を release
-    // これにより cleanup() 後も poolLimiter が正常に機能し、再利用可能になる
-    const disposeAndRelease = async () => {
-      try {
-        if (entry.initPromise) {
-          const client = await entry.initPromise;
-          await client.dispose({ timeoutMs: 2000 });
-        } else {
-          await entry.client.dispose({ timeoutMs: 2000 });
-        }
-      } catch (error) {
-        console.error(`[cleanup] Failed to dispose client for ${workspaceRoot}:`, error);
-      } finally {
-        // Always release pool permit to prevent permit leak
-        poolLimiter.release();
-      }
-    };
-
-    disposePromises.push(disposeAndRelease());
+    await Promise.allSettled(disposePromises);
+  } finally {
+    cleanupInProgress = false;
   }
-
-  await Promise.allSettled(disposePromises);
-  clients.clear();
 }
 
 /**

@@ -9,7 +9,11 @@ import { detectDartSdk, MissingToolError } from "./sdk.js";
 import { normalizeFileKey } from "./pathKey.js";
 
 // Fix #4: File queue TTL (default: 30000ms = 30 seconds)
-const FILE_QUEUE_TTL_MS = parseInt(process.env.DART_FILE_QUEUE_TTL_MS ?? "30000", 10);
+// Fix #15 (Codex Critical Review): Enforce minimum 1000ms to prevent memory leak when set to 0
+const FILE_QUEUE_TTL_MS = Math.max(
+  1000,
+  parseInt(process.env.DART_FILE_QUEUE_TTL_MS ?? "30000", 10)
+);
 
 import type {
   RpcRequest,
@@ -320,9 +324,9 @@ export class DartAnalysisClient {
             return;
           }
           this.process.once("exit", () => resolve());
-          // タイムアウト後は強制終了
+          // Fix #14 (Codex Critical Review): Use forceKill() on timeout (includes Windows taskkill)
           setTimeout(() => {
-            this.process?.kill("SIGTERM");
+            this.forceKill();
             resolve();
           }, timeoutMs);
         });
