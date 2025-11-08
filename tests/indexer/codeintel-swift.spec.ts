@@ -4,7 +4,7 @@ import { analyzeSource } from "../../src/indexer/codeintel.js";
 
 describe("Swift code intelligence", () => {
   describe("symbol extraction", () => {
-    it("extracts class declaration with methods and properties", () => {
+    it("extracts class declaration with methods and properties", async () => {
       const swiftCode = `
 /// A sample class with documentation
 class MyClass {
@@ -20,7 +20,7 @@ class MyClass {
 }
 `.trim();
 
-      const result = analyzeSource("test.swift", "Swift", swiftCode, new Set());
+      const result = await analyzeSource("test.swift", "Swift", swiftCode, new Set());
 
       expect(result.symbols).toHaveLength(4);
 
@@ -63,7 +63,7 @@ class MyClass {
       });
     });
 
-    it("extracts struct declaration", () => {
+    it("extracts struct declaration", async () => {
       const swiftCode = `
 struct Point {
   let x: Int
@@ -71,7 +71,7 @@ struct Point {
 }
 `.trim();
 
-      const result = analyzeSource("test.swift", "Swift", swiftCode, new Set());
+      const result = await analyzeSource("test.swift", "Swift", swiftCode, new Set());
 
       expect(result.symbols).toHaveLength(3);
       expect(result.symbols[0]).toMatchObject({
@@ -90,7 +90,7 @@ struct Point {
       });
     });
 
-    it("extracts protocol declaration with methods", () => {
+    it("extracts protocol declaration with methods", async () => {
       const swiftCode = `
 /// Protocol documentation
 protocol MyProtocol {
@@ -99,7 +99,7 @@ protocol MyProtocol {
 }
 `.trim();
 
-      const result = analyzeSource("test.swift", "Swift", swiftCode, new Set());
+      const result = await analyzeSource("test.swift", "Swift", swiftCode, new Set());
 
       expect(result.symbols).toHaveLength(3);
       expect(result.symbols[0]).toMatchObject({
@@ -117,7 +117,7 @@ protocol MyProtocol {
       });
     });
 
-    it("extracts enum declaration with cases", () => {
+    it("extracts enum declaration with cases", async () => {
       const swiftCode = `
 enum Direction {
   case north
@@ -127,7 +127,7 @@ enum Direction {
 }
 `.trim();
 
-      const result = analyzeSource("test.swift", "Swift", swiftCode, new Set());
+      const result = await analyzeSource("test.swift", "Swift", swiftCode, new Set());
 
       expect(result.symbols).toHaveLength(1);
       expect(result.symbols[0]).toMatchObject({
@@ -138,7 +138,7 @@ enum Direction {
       });
     });
 
-    it("extracts extension declaration", () => {
+    it("extracts extension declaration", async () => {
       const swiftCode = `
 extension String {
   var isNotEmpty: Bool {
@@ -151,7 +151,7 @@ extension String {
 }
 `.trim();
 
-      const result = analyzeSource("test.swift", "Swift", swiftCode, new Set());
+      const result = await analyzeSource("test.swift", "Swift", swiftCode, new Set());
 
       expect(result.symbols).toHaveLength(3);
       expect(result.symbols[0]).toMatchObject({
@@ -168,7 +168,7 @@ extension String {
       });
     });
 
-    it("extracts top-level function", () => {
+    it("extracts top-level function", async () => {
       const swiftCode = `
 /// Function documentation
 func topLevelFunction(param: Int) -> String {
@@ -176,7 +176,7 @@ func topLevelFunction(param: Int) -> String {
 }
 `.trim();
 
-      const result = analyzeSource("test.swift", "Swift", swiftCode, new Set());
+      const result = await analyzeSource("test.swift", "Swift", swiftCode, new Set());
 
       expect(result.symbols).toHaveLength(1);
       expect(result.symbols[0]).toMatchObject({
@@ -189,7 +189,7 @@ func topLevelFunction(param: Int) -> String {
       expect(result.symbols[0]?.signature).toContain("func topLevelFunction");
     });
 
-    it("handles nested classes and structs", () => {
+    it("handles nested classes and structs", async () => {
       const swiftCode = `
 class OuterClass {
   struct InnerStruct {
@@ -200,7 +200,7 @@ class OuterClass {
 }
 `.trim();
 
-      const result = analyzeSource("test.swift", "Swift", swiftCode, new Set());
+      const result = await analyzeSource("test.swift", "Swift", swiftCode, new Set());
 
       expect(result.symbols).toHaveLength(4);
       expect(result.symbols[0]).toMatchObject({
@@ -221,7 +221,7 @@ class OuterClass {
       });
     });
 
-    it("extracts generic types", () => {
+    it("extracts generic types", async () => {
       const swiftCode = `
 struct Container<T> {
   var value: T
@@ -232,7 +232,7 @@ struct Container<T> {
 }
 `.trim();
 
-      const result = analyzeSource("test.swift", "Swift", swiftCode, new Set());
+      const result = await analyzeSource("test.swift", "Swift", swiftCode, new Set());
 
       expect(result.symbols).toHaveLength(3);
       expect(result.symbols[0]).toMatchObject({
@@ -242,7 +242,7 @@ struct Container<T> {
       expect(result.symbols[0]?.signature).toContain("Container");
     });
 
-    it("extracts doc comments from block comments", () => {
+    it("extracts doc comments from block comments", async () => {
       const swiftCode = `
 /**
  * Multi-line documentation
@@ -251,7 +251,7 @@ struct Container<T> {
 func documentedFunction() {}
 `.trim();
 
-      const result = analyzeSource("test.swift", "Swift", swiftCode, new Set());
+      const result = await analyzeSource("test.swift", "Swift", swiftCode, new Set());
 
       expect(result.symbols).toHaveLength(1);
       const symbol = result.symbols[0];
@@ -264,7 +264,7 @@ func documentedFunction() {}
   });
 
   describe("snippet generation", () => {
-    it("creates snippets aligned to symbol boundaries", () => {
+    it("creates snippets aligned to symbol boundaries", async () => {
       const swiftCode = `
 class MyClass {
   func method1() {}
@@ -272,7 +272,7 @@ class MyClass {
 }
 `.trim();
 
-      const result = analyzeSource("test.swift", "Swift", swiftCode, new Set());
+      const result = await analyzeSource("test.swift", "Swift", swiftCode, new Set());
 
       expect(result.snippets).toHaveLength(3);
       expect(result.snippets[0]).toMatchObject({
@@ -294,7 +294,7 @@ class MyClass {
   });
 
   describe("dependency analysis", () => {
-    it("extracts import statements as package dependencies", () => {
+    it("extracts import statements as package dependencies", async () => {
       const swiftCode = `
 import Foundation
 import UIKit
@@ -302,7 +302,7 @@ import UIKit
 class MyClass {}
 `.trim();
 
-      const result = analyzeSource("test.swift", "Swift", swiftCode, new Set());
+      const result = await analyzeSource("test.swift", "Swift", swiftCode, new Set());
 
       expect(result.dependencies).toHaveLength(2);
       expect(result.dependencies[0]).toMatchObject({
@@ -317,7 +317,7 @@ class MyClass {}
       });
     });
 
-    it("detects local file imports as path dependencies", () => {
+    it("detects local file imports as path dependencies", async () => {
       const swiftCode = `
 import MyModule
 
@@ -325,7 +325,7 @@ class MyClass {}
 `.trim();
 
       const fileSet = new Set(["MyModule.swift"]);
-      const result = analyzeSource("test.swift", "Swift", swiftCode, fileSet);
+      const result = await analyzeSource("test.swift", "Swift", swiftCode, fileSet);
 
       expect(result.dependencies).toHaveLength(1);
       expect(result.dependencies[0]).toMatchObject({
@@ -335,14 +335,14 @@ class MyClass {}
       });
     });
 
-    it("handles multiple import statements", () => {
+    it("handles multiple import statements", async () => {
       const swiftCode = `
 import Foundation
 import CoreData
 import Combine
 `.trim();
 
-      const result = analyzeSource("test.swift", "Swift", swiftCode, new Set());
+      const result = await analyzeSource("test.swift", "Swift", swiftCode, new Set());
 
       expect(result.dependencies).toHaveLength(3);
       const moduleNames = result.dependencies.map((d) => d.dst);
@@ -351,14 +351,14 @@ import Combine
   });
 
   describe("signature extraction", () => {
-    it("truncates signatures to 200 characters", () => {
+    it("truncates signatures to 200 characters", async () => {
       const longSignature = `
 func veryLongFunctionNameWithManyParameters(param1: String, param2: Int, param3: Bool, param4: Double, param5: Array<String>, param6: Dictionary<String, Any>, param7: Set<Int>, param8: Optional<String>) -> Result<String, Error> {
   return .success("test")
 }
 `.trim();
 
-      const result = analyzeSource("test.swift", "Swift", longSignature, new Set());
+      const result = await analyzeSource("test.swift", "Swift", longSignature, new Set());
 
       expect(result.symbols).toHaveLength(1);
       const signature = result.symbols[0]?.signature;
@@ -369,7 +369,7 @@ func veryLongFunctionNameWithManyParameters(param1: String, param2: Int, param3:
       }
     });
 
-    it("excludes function body from signature", () => {
+    it("excludes function body from signature", async () => {
       const swiftCode = `
 func myFunction() -> Int {
   let x = 42
@@ -377,7 +377,7 @@ func myFunction() -> Int {
 }
 `.trim();
 
-      const result = analyzeSource("test.swift", "Swift", swiftCode, new Set());
+      const result = await analyzeSource("test.swift", "Swift", swiftCode, new Set());
 
       expect(result.symbols).toHaveLength(1);
       const signature = result.symbols[0]?.signature;
@@ -390,31 +390,31 @@ func myFunction() -> Int {
   });
 
   describe("edge cases", () => {
-    it("returns empty results for empty file", () => {
-      const result = analyzeSource("test.swift", "Swift", "", new Set());
+    it("returns empty results for empty file", async () => {
+      const result = await analyzeSource("test.swift", "Swift", "", new Set());
 
       expect(result.symbols).toHaveLength(0);
       expect(result.snippets).toHaveLength(0);
       expect(result.dependencies).toHaveLength(0);
     });
 
-    it("handles files with only imports", () => {
+    it("handles files with only imports", async () => {
       const swiftCode = "import Foundation";
 
-      const result = analyzeSource("test.swift", "Swift", swiftCode, new Set());
+      const result = await analyzeSource("test.swift", "Swift", swiftCode, new Set());
 
       expect(result.symbols).toHaveLength(0);
       expect(result.dependencies).toHaveLength(1);
     });
 
-    it("handles symbols without documentation", () => {
+    it("handles symbols without documentation", async () => {
       const swiftCode = `
 class UndocumentedClass {
   func undocumentedMethod() {}
 }
 `.trim();
 
-      const result = analyzeSource("test.swift", "Swift", swiftCode, new Set());
+      const result = await analyzeSource("test.swift", "Swift", swiftCode, new Set());
 
       expect(result.symbols).toHaveLength(2);
       expect(result.symbols[0]?.doc).toBeNull();

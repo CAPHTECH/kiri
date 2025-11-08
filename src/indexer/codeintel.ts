@@ -5,9 +5,6 @@ import Parser from "tree-sitter";
 import Swift from "tree-sitter-swift";
 import ts from "typescript";
 
-// Dart Analysis Server integration
-import { analyzeDartSource } from "./dart/analyze.js";
-
 // tree-sitter-php is a CommonJS module, so import it using require.
 // tree-sitter-php: Using version 0.22.8 for compatibility with tree-sitter 0.22.4.
 // Version 0.24.2 had a nodeTypeInfo bug that caused runtime errors.
@@ -17,6 +14,10 @@ const require = createRequire(import.meta.url);
 const PHPModule = require("tree-sitter-php");
 const PHP_ONLY = PHPModule.php_only;
 const PHP_MIXED = PHPModule.php;
+
+// Dart Analysis Server integration
+// eslint-disable-next-line import/order
+import { analyzeDartSource } from "./dart/analyze.js";
 
 export interface SymbolRecord {
   symbolId: number;
