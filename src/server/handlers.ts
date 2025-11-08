@@ -1536,9 +1536,6 @@ export async function contextBundle(
   context: ServerContext,
   params: ContextBundleParams
 ): Promise<ContextBundleResult> {
-  // Clear previous request warnings at start to prevent memory leak and cross-contamination
-  context.warningManager.startRequest();
-
   const { db, repoId } = context;
   const goal = params.goal?.trim() ?? "";
   if (goal.length === 0) {

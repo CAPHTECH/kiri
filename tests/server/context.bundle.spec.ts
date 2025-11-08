@@ -845,6 +845,7 @@ This Lambda function handles canvas-agent operations.
       const context: ServerContext = { db, repoId, warningManager: manager };
 
       // First request triggers warning (large non-compact without token estimate)
+      manager.startRequest();
       const bundle1 = await contextBundle(context, {
         goal: "investigate app",
         limit: 15, // Large limit
@@ -856,6 +857,7 @@ This Lambda function handles canvas-agent operations.
       const firstWarnings = bundle1.warnings!;
 
       // Second request should have clean slate (different params, no warning expected)
+      manager.startRequest();
       const bundle2 = await contextBundle(context, {
         goal: "investigate app again",
         limit: 5, // Small limit

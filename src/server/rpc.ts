@@ -49,7 +49,6 @@ export class WarningManager {
    */
   startRequest(): void {
     this.requestWarnings = [];
-    this.shownWarnings.clear(); // Prevent memory leak from unbounded Set growth
   }
 
   /**
@@ -108,13 +107,14 @@ export class WarningManager {
    * @param message - 表示する警告メッセージ
    */
   warnForRequest(key: string, message: string): void {
-    const formattedMessage = `[${key}] ${message}`;
-    console.warn(formattedMessage);
-
-    // リクエスト内での重複を防ぐ（DoS攻撃対策）
-    if (!this.requestWarnings.some((w) => w.startsWith(`[${key}]`))) {
-      this.requestWarnings.push(formattedMessage);
+    const keyPrefix = `[${key}]`;
+    if (this.requestWarnings.some((warning) => warning.startsWith(keyPrefix))) {
+      return;
     }
+
+    const formattedMessage = `${keyPrefix} ${message}`;
+    this.requestWarnings.push(formattedMessage);
+    console.warn(formattedMessage);
   }
 
   /**
@@ -725,6 +725,11 @@ export function createRpcHandler(
   dependencies: RpcHandlerDependencies
 ): (payload: JsonRpcRequest) => Promise<RpcHandleResult | null> {
   const { context, degrade, metrics, tokens, allowDegrade } = dependencies;
+  const buildRequestContext = (): ServerContext => {
+    const warningManager = new WarningManager();
+    warningManager.startRequest();
+    return { ...context, warningManager };
+  };
   return async (payload: JsonRpcRequest): Promise<RpcHandleResult | null> => {
     const hasResponseId = typeof payload.id === "string" || typeof payload.id === "number";
     try {
@@ -786,12 +791,13 @@ export function createRpcHandler(
           }
 
           const toolArguments = paramsRecord.arguments ?? {};
+          const scopedContext = buildRequestContext();
 
           try {
             const toolResult = await executeToolByName(
               toolName,
               toolArguments,
-              context,
+              scopedContext,
               degrade,
               allowDegrade
             );
@@ -829,50 +835,55 @@ export function createRpcHandler(
         }
         // Legacy direct method invocation (backward compatibility)
         case "context_bundle": {
+          const scopedContext = buildRequestContext();
           result = await executeToolByName(
             "context_bundle",
             payload.params,
-            context,
+            scopedContext,
             degrade,
             allowDegrade
           );
           break;
         }
         case "semantic_rerank": {
+          const scopedContext = buildRequestContext();
           result = await executeToolByName(
             "semantic_rerank",
             payload.params,
-            context,
+            scopedContext,
             degrade,
             allowDegrade
           );
           break;
         }
         case "files_search": {
+          const scopedContext = buildRequestContext();
           result = await executeToolByName(
             "files_search",
             payload.params,
-            context,
+            scopedContext,
             degrade,
             allowDegrade
           );
           break;
         }
         case "snippets_get": {
+          const scopedContext = buildRequestContext();
           result = await executeToolByName(
             "snippets_get",
             payload.params,
-            context,
+            scopedContext,
             degrade,
             allowDegrade
           );
           break;
         }
         case "deps_closure": {
+          const scopedContext = buildRequestContext();
           result = await executeToolByName(
             "deps_closure",
             payload.params,
-            context,
+            scopedContext,
             degrade,
             allowDegrade
           );
