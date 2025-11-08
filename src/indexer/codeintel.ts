@@ -2,6 +2,7 @@ import { createRequire } from "node:module";
 import path from "node:path";
 
 import Parser from "tree-sitter";
+import Java from "tree-sitter-java";
 import Swift from "tree-sitter-swift";
 import ts from "typescript";
 
@@ -47,7 +48,7 @@ interface AnalysisResult {
   dependencies: DependencyRecord[];
 }
 
-const SUPPORTED_LANGUAGES = new Set(["TypeScript", "Swift", "PHP", "Dart"]);
+const SUPPORTED_LANGUAGES = new Set(["TypeScript", "Swift", "PHP", "Java", "Dart"]);
 
 function sanitizeSignature(source: ts.SourceFile, node: ts.Node): string {
   const start = node.getStart(source);
@@ -501,6 +502,305 @@ function collectPHPDependencies(
   return Array.from(dependencies.values());
 }
 
+// ========================================
+// Java analyzer helpers
+// ========================================
+
+type JavaNode = Parser.SyntaxNode;
+
+/**
+ * Javaのシグネチャをサニタイズ（本体を除外し、最初の200文字に制限）
+ */
+function sanitizeJavaSignature(node: JavaNode, content: string): string {
+  const nodeText = content.substring(node.startIndex, node.endIndex);
+  // メソッド本体（{...}）を除外
+  const bodyIndex = nodeText.indexOf("{");
+  const signatureText = bodyIndex >= 0 ? nodeText.substring(0, bodyIndex) : nodeText;
+  // 改行を空白に置き換えて1行に圧縮してから200文字に制限
+  // （先に改行処理することで、複数行シグネチャの情報が失われるのを防ぐ）
+  const normalized = signatureText.replace(/\s+/g, " ").trim();
+  return normalized.substring(0, 200);
+}
+
+/**
+ * Javadocコメント（/＊＊ ＊/）を抽出
+ */
+function getJavaDocComment(node: JavaNode, content: string): string | null {
+  const parent = node.parent;
+  if (!parent) return null;
+
+  // 親ノードのすべての子から、このノードの直前にあるコメントを探す
+  const precedingComments: string[] = [];
+  const siblings = parent.children;
+  const nodeIndex = siblings.indexOf(node);
+
+  // このノードより前の兄弟を逆順で調べる
+  for (let i = nodeIndex - 1; i >= 0; i--) {
+    const sibling = siblings[i];
+    if (!sibling) continue;
+
+    // block_commentをチェック
+    if (sibling.type === "block_comment") {
+      const commentText = content.substring(sibling.startIndex, sibling.endIndex);
+      // /** */ 形式のJavadocコメントのみ抽出
+      if (commentText.startsWith("/**") && commentText.endsWith("*/")) {
+        const cleanedComment = commentText
+          .replace(/^\/\*\*\s?|\s?\*\/$/g, "")
+          .replace(/^\s*\*\s?/gm, "")
+          .trim();
+        precedingComments.unshift(cleanedComment);
+      }
+    } else if (!sibling.text.trim().match(/^\s*$/)) {
+      // コメント以外の実質的なノードに到達したら終了
+      break;
+    }
+  }
+
+  if (precedingComments.length === 0) {
+    return null;
+  }
+
+  return precedingComments.join("\n");
+}
+
+/**
+ * tree-sitterの位置情報から行番号を取得（1-based）
+ */
+function toJavaLineNumber(position: Parser.Point): number {
+  return position.row + 1;
+}
+
+/**
+ * Javaのシンボルレコードを作成
+ */
+function createJavaSymbolRecords(tree: Parser.Tree, content: string): SymbolRecord[] {
+  const results: Array<Omit<SymbolRecord, "symbolId">> = [];
+
+  /**
+   * 子ノードから識別子名を抽出
+   */
+  function extractName(node: JavaNode): string | null {
+    const identifierNode = node.namedChildren.find((child) => child.type === "identifier");
+    return identifierNode
+      ? content.substring(identifierNode.startIndex, identifierNode.endIndex)
+      : null;
+  }
+
+  /**
+   * ツリーを再帰的にトラバースしてシンボルを抽出
+   */
+  function visit(node: JavaNode): void {
+    // class_declaration: クラス宣言
+    if (node.type === "class_declaration") {
+      const name = extractName(node);
+      if (name) {
+        results.push({
+          name,
+          kind: "class",
+          rangeStartLine: toJavaLineNumber(node.startPosition),
+          rangeEndLine: toJavaLineNumber(node.endPosition),
+          signature: sanitizeJavaSignature(node, content),
+          doc: getJavaDocComment(node, content),
+        });
+      }
+    }
+
+    // interface_declaration: インターフェース宣言
+    if (node.type === "interface_declaration") {
+      const name = extractName(node);
+      if (name) {
+        results.push({
+          name,
+          kind: "interface",
+          rangeStartLine: toJavaLineNumber(node.startPosition),
+          rangeEndLine: toJavaLineNumber(node.endPosition),
+          signature: sanitizeJavaSignature(node, content),
+          doc: getJavaDocComment(node, content),
+        });
+      }
+    }
+
+    // enum_declaration: 列挙型宣言
+    if (node.type === "enum_declaration") {
+      const name = extractName(node);
+      if (name) {
+        results.push({
+          name,
+          kind: "enum",
+          rangeStartLine: toJavaLineNumber(node.startPosition),
+          rangeEndLine: toJavaLineNumber(node.endPosition),
+          signature: sanitizeJavaSignature(node, content),
+          doc: getJavaDocComment(node, content),
+        });
+      }
+    }
+
+    // annotation_type_declaration: アノテーション型宣言
+    if (node.type === "annotation_type_declaration") {
+      const name = extractName(node);
+      if (name) {
+        results.push({
+          name,
+          kind: "annotation",
+          rangeStartLine: toJavaLineNumber(node.startPosition),
+          rangeEndLine: toJavaLineNumber(node.endPosition),
+          signature: sanitizeJavaSignature(node, content),
+          doc: getJavaDocComment(node, content),
+        });
+      }
+    }
+
+    // field_declaration: フィールド宣言
+    if (node.type === "field_declaration") {
+      // variable_declaratorから変数名を抽出
+      const declarators = node.namedChildren.filter(
+        (child) => child.type === "variable_declarator"
+      );
+      for (const declarator of declarators) {
+        const name = extractName(declarator);
+        if (name) {
+          results.push({
+            name,
+            kind: "field",
+            rangeStartLine: toJavaLineNumber(node.startPosition),
+            rangeEndLine: toJavaLineNumber(node.endPosition),
+            signature: sanitizeJavaSignature(node, content),
+            doc: getJavaDocComment(node, content),
+          });
+        }
+      }
+    }
+
+    // constructor_declaration: コンストラクタ宣言
+    if (node.type === "constructor_declaration") {
+      const name = extractName(node);
+      if (name) {
+        results.push({
+          name,
+          kind: "constructor",
+          rangeStartLine: toJavaLineNumber(node.startPosition),
+          rangeEndLine: toJavaLineNumber(node.endPosition),
+          signature: sanitizeJavaSignature(node, content),
+          doc: getJavaDocComment(node, content),
+        });
+      }
+    }
+
+    // method_declaration: メソッド宣言
+    if (node.type === "method_declaration") {
+      const name = extractName(node);
+      if (name) {
+        results.push({
+          name,
+          kind: "method",
+          rangeStartLine: toJavaLineNumber(node.startPosition),
+          rangeEndLine: toJavaLineNumber(node.endPosition),
+          signature: sanitizeJavaSignature(node, content),
+          doc: getJavaDocComment(node, content),
+        });
+      }
+    }
+
+    // annotation_type_element_declaration: アノテーション内のメソッド宣言
+    if (node.type === "annotation_type_element_declaration") {
+      const name = extractName(node);
+      if (name) {
+        results.push({
+          name,
+          kind: "method",
+          rangeStartLine: toJavaLineNumber(node.startPosition),
+          rangeEndLine: toJavaLineNumber(node.endPosition),
+          signature: sanitizeJavaSignature(node, content),
+          doc: getJavaDocComment(node, content),
+        });
+      }
+    }
+
+    // 子ノードを再帰的に訪問
+    for (const child of node.namedChildren) {
+      visit(child);
+    }
+  }
+
+  visit(tree.rootNode);
+
+  // symbolIdを割り当て
+  return results
+    .sort((a, b) => a.rangeStartLine - b.rangeStartLine)
+    .map((item, index) => ({ symbolId: index + 1, ...item }));
+}
+
+/**
+ * Javaのimport文を解析して依存関係を収集
+ */
+function collectJavaDependencies(
+  _sourcePath: string,
+  tree: Parser.Tree,
+  content: string,
+  fileSet: Set<string>
+): DependencyRecord[] {
+  const dependencies = new Map<string, DependencyRecord>();
+
+  const record = (kind: "path" | "package", dst: string) => {
+    const key = `${kind}:${dst}`;
+    if (!dependencies.has(key)) {
+      dependencies.set(key, { dstKind: kind, dst, rel: "import" });
+    }
+  };
+
+  function visit(node: JavaNode): void {
+    // import_declaration: import文
+    if (node.type === "import_declaration") {
+      // scoped_identifier または identifier を探す
+      const identifierNode = node.namedChildren.find(
+        (child) => child.type === "scoped_identifier" || child.type === "identifier"
+      );
+      if (identifierNode) {
+        let importName = content.substring(identifierNode.startIndex, identifierNode.endIndex);
+
+        // ワイルドカードインポートのチェック (import java.util.*)
+        // asteriskノードを探す
+        const hasAsterisk = node.namedChildren.some((child) => child.type === "asterisk");
+        if (hasAsterisk) {
+          importName += ".*";
+        }
+
+        // ローカルファイル判定: com.example.MyClass -> com/example/MyClass.java
+        // ワイルドカードの場合はパッケージとして扱う
+        let kind: "path" | "package" = "package";
+        if (!hasAsterisk) {
+          const filePath = importName.replace(/\./g, "/") + ".java";
+
+          // Maven/Gradle標準構造のプレフィックスを除去して完全一致でチェック
+          // これにより、同名ファイルが異なるパッケージに存在する場合も正確に解決できる
+          const matchingFile = Array.from(fileSet).find((f) => {
+            // 標準的なソースディレクトリプレフィックスを除去
+            const normalizedPath = f
+              .replace(/^src\/main\/java\//, "")
+              .replace(/^src\/test\/java\//, "")
+              .replace(/^src\//, "");
+
+            return normalizedPath === filePath;
+          });
+
+          kind = matchingFile ? "path" : "package";
+        }
+
+        record(kind, importName);
+      }
+    }
+
+    // 子ノードを再帰的に訪問
+    for (const child of node.namedChildren) {
+      visit(child);
+    }
+  }
+
+  visit(tree.rootNode);
+
+  return Array.from(dependencies.values());
+}
+
 function createSymbolRecords(source: ts.SourceFile): SymbolRecord[] {
   const results: Array<Omit<SymbolRecord, "symbolId">> = [];
 
@@ -907,6 +1207,38 @@ export async function analyzeSource(
     } catch (error) {
       // パース失敗時は空の結果を返して他のファイルの処理を継続
       console.error(`Failed to parse PHP file ${pathInRepo}:`, error);
+      return { symbols: [], snippets: [], dependencies: [] };
+    }
+  }
+
+  // Java言語の場合、tree-sitterを使用
+  if (normalizedLang === "Java") {
+    try {
+      // 各ファイルごとに新しいパーサーインスタンスを作成（並行処理の安全性のため）
+      const parser = new Parser();
+
+      // Validate language object before setting it
+      if (!Java || typeof Java !== "object") {
+        throw new Error("Tree-sitter language for Java is invalid or undefined");
+      }
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      parser.setLanguage(Java as any);
+      const tree = parser.parse(content);
+      const symbols = createJavaSymbolRecords(tree, content);
+
+      const snippets: SnippetRecord[] = symbols.map((symbol) => ({
+        startLine: symbol.rangeStartLine,
+        endLine: symbol.rangeEndLine,
+        symbolId: symbol.symbolId,
+      }));
+
+      const dependencies = collectJavaDependencies(pathInRepo, tree, content, fileSet);
+
+      return { symbols, snippets, dependencies };
+    } catch (error) {
+      // パース失敗時は空の結果を返して他のファイルの処理を継続
+      console.error(`Failed to parse Java file ${pathInRepo}:`, error);
       return { symbols: [], snippets: [], dependencies: [] };
     }
   }

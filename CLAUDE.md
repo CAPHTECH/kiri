@@ -190,6 +190,7 @@ Examples:
    - **TypeScript** (`.ts`, `.tsx`): Uses TypeScript Compiler API
    - **Swift** (`.swift`): Uses tree-sitter-swift
    - **PHP** (`.php`): Uses tree-sitter-php (automatically detects pure PHP vs HTML-mixed PHP)
+   - **Java** (`.java`): Uses tree-sitter-java
    - Other languages are detected but symbols are not extracted (fallback to full-file snippets)
 
 3. **Repo ID Resolution**: Each indexed repository gets an auto-incrementing ID. The server resolves `repoRoot` → `repoId` at startup and stores it in `ServerContext`.

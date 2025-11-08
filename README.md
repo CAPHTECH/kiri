@@ -631,6 +631,7 @@ KIRI provides AST-based symbol extraction for the following languages:
 | **TypeScript** | `.ts`, `.tsx` | `class`, `interface`, `enum`, `function`, `method`                                       | TypeScript Compiler API             |
 | **Swift**      | `.swift`      | `class`, `struct`, `protocol`, `enum`, `extension`, `func`, `init`, `property`           | tree-sitter-swift                   |
 | **PHP**        | `.php`        | `class`, `interface`, `trait`, `function`, `method`, `property`, `constant`, `namespace` | tree-sitter-php (pure & HTML-mixed) |
+| **Java**       | `.java`       | `class`, `interface`, `enum`, `annotation`, `method`, `constructor`, `field`             | tree-sitter-java                    |
 | **Dart**       | `.dart`       | `class`, `mixin`, `enum`, `extension`, `function`, `method`, `getter`, `setter`          | Dart Analysis Server                |
 
 **Dart Integration Features:**
@@ -641,7 +642,7 @@ KIRI provides AST-based symbol extraction for the following languages:
 - Windows path normalization for case-insensitive filesystems
 - Graceful degradation when Dart SDK is unavailable
 
-Other languages are detected and indexed but use full-file snippets instead of symbol-level extraction. Support for additional languages (Rust, Go, Python, Java, etc.) is planned.
+Other languages are detected and indexed but use full-file snippets instead of symbol-level extraction. Support for additional languages (Rust, Go, Python, etc.) is planned.
 
 ## 🏗️ How It Works
 
