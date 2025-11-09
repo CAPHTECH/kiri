@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import { realpathSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { join, resolve, extname } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -7,7 +6,7 @@ import { pathToFileURL } from "node:url";
 import { DuckDBClient } from "../shared/duckdb.js";
 import { generateEmbedding } from "../shared/embedding.js";
 import { acquireLock, releaseLock, LockfileError, getLockOwner } from "../shared/utils/lockfile.js";
-import { normalizeDbPath, ensureDbParentDir } from "../shared/utils/path.js";
+import { normalizeDbPath, ensureDbParentDir, getRepoPathCandidates } from "../shared/utils/path.js";
 
 import { analyzeSource, buildFallbackSnippet } from "./codeintel.js";
 import { getDefaultBranch, getHeadCommit, gitLsFiles, gitDiffNameOnly } from "./git.js";
@@ -105,10 +104,21 @@ function isBinaryBuffer(buffer: Buffer): boolean {
 async function ensureRepo(
   db: DuckDBClient,
   repoRoot: string,
-  defaultBranch: string | null
+  defaultBranch: string | null,
+  candidateRoots: string[]
 ): Promise<number> {
-  // Atomically insert or update using ON CONFLICT to leverage auto-increment
-  // This eliminates the TOCTOU race condition present in manual ID generation
+  const searchRoots = Array.from(new Set([repoRoot, ...(candidateRoots ?? [])]));
+  const legacyRoots = searchRoots.filter((root) => root !== repoRoot);
+
+  if (legacyRoots.length > 0) {
+    const placeholders = legacyRoots.map(() => "?").join(", ");
+    await db.run(
+      `UPDATE repo SET root = ?
+       WHERE root IN (${placeholders})`,
+      [repoRoot, ...legacyRoots]
+    );
+  }
+
   await db.run(
     `INSERT INTO repo (root, default_branch, indexed_at)
      VALUES (?, ?, CURRENT_TIMESTAMP)
@@ -117,8 +127,11 @@ async function ensureRepo(
     [repoRoot, defaultBranch]
   );
 
-  // Fetch the ID of the existing or newly created repo
-  const rows = await db.all<{ id: number }>("SELECT id FROM repo WHERE root = ?", [repoRoot]);
+  const placeholders = searchRoots.map(() => "?").join(", ");
+  const rows = await db.all<{ id: number }>(
+    `SELECT id FROM repo WHERE root IN (${placeholders}) LIMIT 1`,
+    searchRoots
+  );
 
   if (rows.length === 0) {
     throw new Error(
@@ -629,17 +642,9 @@ async function deleteFileRecords(
 }
 
 export async function runIndexer(options: IndexerOptions): Promise<void> {
-  // Fix #2: Normalize paths to prevent lock/queue bypass via symlinks or OS aliases
-  // repoRoot: Use realpathSync for existing directories
-  // databasePath: Use normalizeDbPath helper (handles non-existent DB files safely)
-  let repoRoot: string;
+  const repoPathCandidates = getRepoPathCandidates(options.repoRoot);
+  const repoRoot = repoPathCandidates[0];
   let databasePath: string;
-
-  try {
-    repoRoot = realpathSync.native(resolve(options.repoRoot));
-  } catch {
-    repoRoot = resolve(options.repoRoot);
-  }
 
   // Fix #2: Ensure parent directory exists BEFORE normalization
   // This guarantees consistent path normalization on first and subsequent runs
@@ -684,7 +689,7 @@ export async function runIndexer(options: IndexerOptions): Promise<void> {
         getDefaultBranch(repoRoot),
       ]);
 
-      const repoId = await ensureRepo(db, repoRoot, defaultBranch);
+      const repoId = await ensureRepo(db, repoRoot, defaultBranch, repoPathCandidates);
 
       // Incremental mode: only reindex files in changedPaths (empty array means no-op)
       if (options.changedPaths) {

@@ -5,7 +5,7 @@ import { performance } from "node:perf_hooks";
 import { watch, type FSWatcher } from "chokidar";
 
 import { acquireLock, releaseLock, getLockOwner, LockfileError } from "../shared/utils/lockfile.js";
-import { normalizeDbPath } from "../shared/utils/path.js";
+import { normalizeDbPath, normalizeRepoPath } from "../shared/utils/path.js";
 
 import { runIndexer } from "./cli.js";
 import { createDenylistFilter } from "./pipeline/filters/denylist.js";
@@ -65,6 +65,7 @@ export class IndexWatcher {
     configPath?: string;
     signal?: AbortSignal;
   };
+  private readonly rawRepoRoot: string;
   private watcher: FSWatcher | null = null;
   private reindexTimer: NodeJS.Timeout | null = null;
   private isReindexing = false;
@@ -76,17 +77,9 @@ export class IndexWatcher {
   private isStopping = false; // Flag to prevent new reindexes during shutdown
 
   constructor(options: IndexWatcherOptions) {
-    // Fix #2: Normalize paths to prevent lock/queue bypass via symlinks or OS aliases
-    // repoRoot: Use realpathSync for existing directories
-    // databasePath: Use normalizeDbPath helper (handles non-existent DB files safely)
-    let repoRoot: string;
+    this.rawRepoRoot = resolve(options.repoRoot);
+    const repoRoot = normalizeRepoPath(this.rawRepoRoot);
     let databasePath: string;
-
-    try {
-      repoRoot = realpathSync.native(resolve(options.repoRoot));
-    } catch {
-      repoRoot = resolve(options.repoRoot);
-    }
 
     // Fix #2: Ensure parent directory exists BEFORE normalization
     // This guarantees consistent path normalization on first and subsequent runs
@@ -377,7 +370,7 @@ export class IndexWatcher {
         process.stderr.write(`🔄 Incrementally reindexing ${changedPaths.length} file(s)...\n`);
 
         await runIndexer({
-          repoRoot: this.options.repoRoot,
+          repoRoot: this.rawRepoRoot,
           databasePath: this.options.databasePath,
           full: false,
           changedPaths,

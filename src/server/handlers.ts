@@ -4,6 +4,7 @@ import { checkFTSSchemaExists } from "../indexer/schema.js";
 import { DuckDBClient } from "../shared/duckdb.js";
 import { generateEmbedding, structuralSimilarity } from "../shared/embedding.js";
 import { encode as encodeGPT, tokenizeText } from "../shared/tokenizer.js";
+import { getRepoPathCandidates, normalizeRepoPath } from "../shared/utils/path.js";
 
 import { ServerContext } from "./context.js";
 import { coerceProfileName, loadScoringProfile, type ScoringWeights } from "./scoring.js";
@@ -2285,8 +2286,22 @@ export async function depsClosure(
 
 export async function resolveRepoId(db: DuckDBClient, repoRoot: string): Promise<number> {
   try {
-    const rows = await db.all<{ id: number }>("SELECT id FROM repo WHERE root = ?", [repoRoot]);
+    const candidates = getRepoPathCandidates(repoRoot);
+    const normalized = candidates[0];
+    const placeholders = candidates.map(() => "?").join(", ");
+    const rows = await db.all<{ id: number; root: string }>(
+      `SELECT id, root FROM repo WHERE root IN (${placeholders}) LIMIT 1`,
+      candidates
+    );
+
     if (rows.length === 0) {
+      const existingRows = await db.all<{ id: number; root: string }>("SELECT id, root FROM repo");
+      for (const candidate of existingRows) {
+        if (normalizeRepoPath(candidate.root) === normalized) {
+          await db.run("UPDATE repo SET root = ? WHERE id = ?", [normalized, candidate.id]);
+          return candidate.id;
+        }
+      }
       throw new Error(
         "Target repository is missing from DuckDB. Run the indexer before starting the server."
       );
@@ -2294,6 +2309,9 @@ export async function resolveRepoId(db: DuckDBClient, repoRoot: string): Promise
     const row = rows[0];
     if (!row) {
       throw new Error("Failed to retrieve repository record. Database returned empty result.");
+    }
+    if (row.root !== normalized) {
+      await db.run("UPDATE repo SET root = ? WHERE id = ?", [normalized, row.id]);
     }
     return row.id;
   } catch (error) {

@@ -69,3 +69,29 @@ export async function ensureDbParentDir(dbPath: string): Promise<void> {
   const parentDir = dirname(resolve(dbPath));
   await mkdir(parentDir, { recursive: true });
 }
+
+/**
+ * リポジトリパスを正規化して返す。realpath に失敗した場合は resolve 結果を使用する。
+ */
+export function normalizeRepoPath(input: string): string {
+  const abs = resolve(input);
+  try {
+    return realpathSync.native(abs);
+  } catch {
+    return abs;
+  }
+}
+
+/**
+ * 旧バージョンのパス表現（resolve ベース）との互換性を保つための候補一覧を返す。
+ * 配列の先頭は正規化済みパス。
+ */
+export function getRepoPathCandidates(input: string): string[] {
+  const normalized = normalizeRepoPath(input);
+  const legacy = resolve(input);
+  const candidates = [normalized];
+  if (legacy !== normalized) {
+    candidates.push(legacy);
+  }
+  return candidates;
+}

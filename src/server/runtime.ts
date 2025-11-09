@@ -1,8 +1,8 @@
-import { dirname, join, resolve, realpathSync } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 import { checkFTSAvailability } from "../indexer/schema.js";
 import { DuckDBClient } from "../shared/duckdb.js";
-import { ensureDbParentDir, normalizeDbPath } from "../shared/utils/path.js";
+import { ensureDbParentDir, normalizeDbPath, getRepoPathCandidates } from "../shared/utils/path.js";
 
 import { bootstrapServer, type BootstrapOptions } from "./bootstrap.js";
 import { ServerContext } from "./context.js";
@@ -30,14 +30,8 @@ export interface ServerRuntime {
 }
 
 export async function createServerRuntime(options: CommonServerOptions): Promise<ServerRuntime> {
-  // Fix #4: Normalize repoRoot same way as indexer to ensure resolveRepoId works
-  // If indexer stored /System/Volumes/Data/Users/..., server must use the same path
-  let repoRoot: string;
-  try {
-    repoRoot = realpathSync.native(resolve(options.repoRoot));
-  } catch {
-    repoRoot = resolve(options.repoRoot);
-  }
+  const repoPathCandidates = getRepoPathCandidates(options.repoRoot);
+  const repoRoot = repoPathCandidates[0];
 
   // Fix #4: Normalize databasePath for consistency with indexer
   // Ensure parent exists before normalization to guarantee correct path
@@ -61,7 +55,7 @@ export async function createServerRuntime(options: CommonServerOptions): Promise
   let db: DuckDBClient | null = null;
   try {
     db = await DuckDBClient.connect({ databasePath, ensureDirectory: true });
-    const repoId = await resolveRepoId(db, repoRoot);
+    const repoId = await resolveRepoId(db, options.repoRoot);
 
     // Phase 2: FTS拡張の利用可否を確認（作成はしない）
     let hasFTS = await checkFTSAvailability(db);
