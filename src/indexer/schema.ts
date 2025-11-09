@@ -215,7 +215,7 @@ export async function checkFTSSchemaExists(db: DuckDBClient): Promise<boolean> {
       `SELECT schema_name FROM duckdb_schemas() WHERE schema_name = 'fts_main_blob'`
     );
     return schemas.length > 0;
-  } catch (error) {
+  } catch {
     // クエリ失敗時は存在しないと判断
     return false;
   }
@@ -243,7 +243,7 @@ async function verifyFTSIntegrity(db: DuckDBClient): Promise<boolean> {
     await db.all(`SELECT docid FROM fts_main_blob.docs WHERE docs MATCH 'test' LIMIT 1`);
 
     return true;
-  } catch (error) {
+  } catch {
     // クエリ失敗 = インデックスが破損または不完全
     return false;
   }
@@ -262,7 +262,7 @@ export async function checkFTSAvailability(db: DuckDBClient): Promise<boolean> {
 
     // FTSスキーマの存在確認
     return await checkFTSSchemaExists(db);
-  } catch (error) {
+  } catch {
     // FTS拡張がロードできない、またはスキーマが存在しない
     return false;
   }
@@ -270,6 +270,11 @@ export async function checkFTSAvailability(db: DuckDBClient): Promise<boolean> {
 
 /**
  * dirty flagに基づいてFTSインデックスを条件付きで再構築（Phase 2+3: インデクサー用）
+ *
+ * NOTE: DuckDB FTS index is GLOBAL (one fts_main_blob schema for entire blob table).
+ * We check if ANY repo is dirty to avoid partial corruption in multi-repo environments.
+ * Future improvement: migrate to dedicated fts_metadata table (see Codex design proposal).
+ *
  * @param db - DuckDBクライアント
  * @param repoId - リポジトリID
  * @param forceFTS - FTS再構築を強制する場合true
@@ -284,28 +289,25 @@ export async function rebuildFTSIfNeeded(
     // メタデータ列の存在確認と初期化
     await ensureRepoMetaColumns(db);
 
-    // dirty flagまたはFTS不在を確認
-    const rows = await db.all<{ fts_dirty: boolean }>(`SELECT fts_dirty FROM repo WHERE id = ?`, [
-      repoId,
-    ]);
-
-    const row = rows[0];
-    const isDirty = row?.fts_dirty ?? true;
+    // CRITICAL: Check if ANY repo is dirty (FTS is global, not per-repo)
+    // This prevents multi-repo corruption where one repo's failure breaks all repos
+    const dirtyCount = await db.all<{ count: number }>(
+      `SELECT COUNT(*) as count FROM repo WHERE fts_dirty = true`
+    );
+    const anyDirty = (dirtyCount[0]?.count ?? 0) > 0;
     const ftsExists = await checkFTSSchemaExists(db);
 
     // FTS再構築が必要かチェック
-    if (forceFTS || isDirty || !ftsExists) {
+    if (forceFTS || anyDirty || !ftsExists) {
       console.info("Rebuilding FTS index...");
       const success = await tryCreateFTSIndex(db, true);
 
       if (success) {
-        // 成功時はdirty=false, last_indexed_at=nowを設定
+        // 成功時は全repoのdirty=falseをクリア（FTSはグローバルなので）
         await db.run(
           `UPDATE repo
            SET fts_dirty = false,
-               fts_last_indexed_at = CURRENT_TIMESTAMP
-           WHERE id = ?`,
-          [repoId]
+               fts_last_indexed_at = CURRENT_TIMESTAMP`
         );
         console.info("✅ FTS index rebuilt successfully");
       } else {

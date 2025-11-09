@@ -54,17 +54,17 @@ export async function createServerRuntime(options: CommonServerOptions): Promise
     let hasFTS = await checkFTSAvailability(db);
 
     // Phase 3: FTSが存在してもdirty flagが立っている場合は無効化（degrade to ILIKE）
+    // CRITICAL: Check if ANY repo is dirty (FTS is global, not per-repo)
     if (hasFTS) {
       try {
-        const rows = await db.all<{ fts_dirty: boolean | null }>(
-          `SELECT fts_dirty FROM repo WHERE id = ?`,
-          [repoId]
+        const dirtyCount = await db.all<{ count: number }>(
+          `SELECT COUNT(*) as count FROM repo WHERE fts_dirty = true`
         );
-        const isDirty = rows[0]?.fts_dirty ?? false;
-        if (isDirty) {
-          hasFTS = false; // Disable FTS if index is stale
+        const anyDirty = (dirtyCount[0]?.count ?? 0) > 0;
+        if (anyDirty) {
+          hasFTS = false; // Disable FTS if ANY repo's index is stale
           console.warn(
-            "FTS index is stale (dirty flag set). Using ILIKE fallback. Run indexer to rebuild FTS."
+            "FTS index is stale (dirty flag set on one or more repos). Using ILIKE fallback. Run indexer to rebuild FTS."
           );
         }
       } catch (error) {

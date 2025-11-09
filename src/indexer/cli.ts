@@ -9,7 +9,7 @@ import { generateEmbedding } from "../shared/embedding.js";
 import { analyzeSource, buildFallbackSnippet } from "./codeintel.js";
 import { getDefaultBranch, getHeadCommit, gitLsFiles } from "./git.js";
 import { detectLanguage } from "./language.js";
-import { ensureBaseSchema, rebuildFTSIfNeeded } from "./schema.js";
+import { ensureBaseSchema, ensureRepoMetaColumns, rebuildFTSIfNeeded } from "./schema.js";
 import { IndexWatcher } from "./watch.js";
 
 interface IndexerOptions {
@@ -605,6 +605,8 @@ export async function runIndexer(options: IndexerOptions): Promise<void> {
   const db = await DuckDBClient.connect({ databasePath, ensureDirectory: true });
   try {
     await ensureBaseSchema(db);
+    // Phase 3: Ensure FTS metadata columns exist for existing DBs (migration)
+    await ensureRepoMetaColumns(db);
 
     const [headCommit, defaultBranch] = await Promise.all([
       getHeadCommit(repoRoot),

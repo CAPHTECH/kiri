@@ -94,8 +94,19 @@ describe("FTS rebuild lifecycle (E2E)", () => {
     await execa("git", ["add", "src/utils.ts"], { cwd: repo.path });
     await execa("git", ["commit", "-m", "Update version"], { cwd: repo.path });
 
-    // Incremental indexing
-    await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: false });
+    // Get changed paths to trigger true incremental mode
+    const { stdout } = await execa("git", ["diff", "--name-only", "HEAD~1", "HEAD"], {
+      cwd: repo.path,
+    });
+    const changedPaths = stdout.trim().split("\n").filter(Boolean);
+
+    // Incremental indexing with explicit changedPaths
+    await runIndexer({
+      repoRoot: repo.path,
+      databasePath: dbPath,
+      full: false,
+      changedPaths,
+    });
 
     const db = await DuckDBClient.connect({ databasePath: dbPath });
     cleanupTargets.push({ dispose: async () => await db.close() });
