@@ -14,8 +14,10 @@ describe("resolveRepoId legacy compatibility", () => {
 
   afterEach(async () => {
     while (cleanup.length > 0) {
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-      await cleanup.pop()!();
+      const dispose = cleanup.pop();
+      if (dispose) {
+        await dispose();
+      }
     }
   });
 
@@ -60,7 +62,7 @@ describe("resolveRepoId legacy compatibility", () => {
   });
 
   it("recovers legacy rows when only the normalized path is provided", async () => {
-    const { repo, aliasPath, dbPath } = await setupLegacyRepo();
+    const { repo, dbPath } = await setupLegacyRepo();
     const db = await DuckDBClient.connect({ databasePath: dbPath });
 
     const repoId = await resolveRepoId(db, repo.path);

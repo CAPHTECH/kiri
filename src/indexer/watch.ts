@@ -74,6 +74,7 @@ export class IndexWatcher {
   private pendingFiles = new Set<string>();
   private readonly stats: WatcherStatistics;
   private readonly lockfilePath: string;
+  private readonly realpathCache = new Map<string, string>();
   private isStopping = false; // Flag to prevent new reindexes during shutdown
 
   constructor(options: IndexWatcherOptions) {
@@ -127,6 +128,27 @@ export class IndexWatcher {
     }
   }
 
+  private getCachedRealPath(absPath: string): string | null {
+    const cached = this.realpathCache.get(absPath);
+    if (cached) {
+      return cached;
+    }
+
+    try {
+      const realPath = realpathSync.native(absPath);
+      this.realpathCache.set(absPath, realPath);
+      if (this.realpathCache.size > 2048) {
+        const key = this.realpathCache.keys().next().value;
+        if (key) {
+          this.realpathCache.delete(key);
+        }
+      }
+      return realPath;
+    } catch {
+      return null;
+    }
+  }
+
   /**
    * Normalizes absolute file path to repository-relative path.
    *
@@ -161,10 +183,10 @@ export class IndexWatcher {
       return null;
     }
 
-    // Fix #3: Additional safety - Resolve symlinks and verify real path is inside repo
+    // Fix #3: Additional safety - Resolve symlinks once and cache the result
     // This prevents bypass via junction points or symlinks pointing outside the repo
-    try {
-      const realAbsPath = realpathSync.native(absPath);
+    const realAbsPath = this.getCachedRealPath(absPath);
+    if (realAbsPath) {
       const realRepoRoot = this.options.repoRoot; // Already normalized in constructor
       const realRel = relative(realRepoRoot, realAbsPath);
 
@@ -172,9 +194,6 @@ export class IndexWatcher {
       if (realRel.startsWith("..") || isAbsolute(realRel)) {
         return null;
       }
-    } catch {
-      // File might not exist yet (being created), allow it
-      // The initial `rel` check above already validated it's within repo bounds
     }
 
     // Allow empty string (repo root itself) for chokidar directory watching
@@ -219,28 +238,55 @@ export class IndexWatcher {
     });
 
     // Return promise that resolves when watcher is fully initialized
-    return new Promise<void>((resolve) => {
+    return new Promise<void>((resolve, reject) => {
+      const watcher = this.watcher!;
+      let settled = false;
+      const settle = (cb: () => void) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        cb();
+      };
+
+      const handleError = (error: unknown) => {
+        process.stderr.write(
+          `❌ File watcher error: ${error instanceof Error ? error.message : String(error)}\n`
+        );
+        if (this.watcher) {
+          void this.watcher.close().catch(() => {
+            /* ignore */
+          });
+          this.watcher = null;
+        }
+        settle(() => {
+          reject(
+            new Error(
+              `Failed to start watch mode: ${error instanceof Error ? error.message : String(error)}`
+            )
+          );
+        });
+      };
+
       // Register event handlers
-      this.watcher!.on("add", (path) => {
-        this.scheduleReindex("add", path);
-      })
+      watcher
+        .on("add", (path) => {
+          this.scheduleReindex("add", path);
+        })
         .on("change", (path) => {
           this.scheduleReindex("change", path);
         })
         .on("unlink", (path) => {
           this.scheduleReindex("unlink", path);
         })
-        .on("error", (error) => {
-          process.stderr.write(
-            `❌ File watcher error: ${error instanceof Error ? error.message : String(error)}\n`
-          );
-        })
-        .on("ready", () => {
+        .on("error", handleError)
+        .once("ready", () => {
+          watcher.off("error", handleError);
           process.stderr.write(
             `👁️  Watch mode started. Monitoring ${this.options.repoRoot} for changes...\n`
           );
           process.stderr.write(`   Debounce: ${this.options.debounceMs}ms\n`);
-          resolve(); // Resolve promise when watcher is ready
+          settle(resolve);
         });
     });
   }

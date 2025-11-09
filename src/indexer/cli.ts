@@ -101,6 +101,38 @@ function isBinaryBuffer(buffer: Buffer): boolean {
  * @param defaultBranch - Default branch name (e.g., "main", "master"), or null if unknown
  * @returns The repository ID (auto-generated on first insert, reused thereafter)
  */
+async function mergeLegacyRepoRows(
+  db: DuckDBClient,
+  canonicalRepoId: number,
+  legacyRepoIds: number[]
+): Promise<void> {
+  if (legacyRepoIds.length === 0) {
+    return;
+  }
+
+  const referencingTables = await db.all<{ table_name: string }>(
+    `SELECT DISTINCT table_name
+     FROM duckdb_columns()
+     WHERE column_name = 'repo_id' AND table_name <> 'repo'`
+  );
+
+  const safeTables = referencingTables
+    .map((row) => row.table_name)
+    .filter((name) => /^[A-Za-z0-9_]+$/.test(name));
+
+  await db.transaction(async () => {
+    for (const legacyRepoId of legacyRepoIds) {
+      for (const tableName of safeTables) {
+        await db.run(`UPDATE ${tableName} SET repo_id = ? WHERE repo_id = ?`, [
+          canonicalRepoId,
+          legacyRepoId,
+        ]);
+      }
+      await db.run("DELETE FROM repo WHERE id = ?", [legacyRepoId]);
+    }
+  });
+}
+
 async function ensureRepo(
   db: DuckDBClient,
   repoRoot: string,
@@ -108,41 +140,48 @@ async function ensureRepo(
   candidateRoots: string[]
 ): Promise<number> {
   const searchRoots = Array.from(new Set([repoRoot, ...(candidateRoots ?? [])]));
-  const legacyRoots = searchRoots.filter((root) => root !== repoRoot);
-
-  if (legacyRoots.length > 0) {
-    const placeholders = legacyRoots.map(() => "?").join(", ");
-    await db.run(
-      `UPDATE repo SET root = ?
-       WHERE root IN (${placeholders})`,
-      [repoRoot, ...legacyRoots]
-    );
-  }
-
-  await db.run(
-    `INSERT INTO repo (root, default_branch, indexed_at)
-     VALUES (?, ?, CURRENT_TIMESTAMP)
-     ON CONFLICT(root) DO UPDATE SET
-       default_branch = COALESCE(excluded.default_branch, repo.default_branch)`,
-    [repoRoot, defaultBranch]
-  );
-
   const placeholders = searchRoots.map(() => "?").join(", ");
-  const rows = await db.all<{ id: number }>(
-    `SELECT id FROM repo WHERE root IN (${placeholders}) LIMIT 1`,
+
+  let rows = await db.all<{ id: number; root: string }>(
+    `SELECT id, root FROM repo WHERE root IN (${placeholders})`,
     searchRoots
   );
+
+  if (rows.length === 0) {
+    await db.run(
+      `INSERT INTO repo (root, default_branch, indexed_at)
+       VALUES (?, ?, CURRENT_TIMESTAMP)
+       ON CONFLICT(root) DO UPDATE SET
+         default_branch = COALESCE(excluded.default_branch, repo.default_branch)`,
+      [repoRoot, defaultBranch]
+    );
+
+    rows = await db.all<{ id: number; root: string }>(
+      `SELECT id, root FROM repo WHERE root IN (${placeholders})`,
+      searchRoots
+    );
+  }
 
   if (rows.length === 0) {
     throw new Error(
       "Failed to create or find repository record. Check database constraints and schema."
     );
   }
-  const row = rows[0];
-  if (!row) {
+
+  let canonicalRow = rows.find((row) => row.root === repoRoot) ?? rows[0];
+  if (!canonicalRow) {
     throw new Error("Failed to retrieve repository record. Database returned empty result.");
   }
-  return row.id;
+
+  if (canonicalRow.root !== repoRoot) {
+    await db.run("UPDATE repo SET root = ? WHERE id = ?", [repoRoot, canonicalRow.id]);
+    canonicalRow = { ...canonicalRow, root: repoRoot };
+  }
+
+  const legacyIds = rows.filter((row) => row.id !== canonicalRow.id).map((row) => row.id);
+  await mergeLegacyRepoRows(db, canonicalRow.id, legacyIds);
+
+  return canonicalRow.id;
 }
 
 async function persistBlobs(db: DuckDBClient, blobs: Map<string, BlobRecord>): Promise<void> {
