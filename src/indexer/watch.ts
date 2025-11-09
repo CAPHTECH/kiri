@@ -1,10 +1,11 @@
 import { realpathSync } from "node:fs";
-import { resolve } from "node:path";
+import { resolve, relative, sep } from "node:path";
 import { performance } from "node:perf_hooks";
 
 import { watch, type FSWatcher } from "chokidar";
 
 import { acquireLock, releaseLock, getLockOwner, LockfileError } from "../shared/utils/lockfile.js";
+import { normalizeDbPath } from "../shared/utils/path.js";
 
 import { runIndexer } from "./cli.js";
 import { createDenylistFilter } from "./pipeline/filters/denylist.js";
@@ -76,7 +77,8 @@ export class IndexWatcher {
 
   constructor(options: IndexWatcherOptions) {
     // Fix #2: Normalize paths to prevent lock/queue bypass via symlinks or OS aliases
-    // Note: realpathSync throws if path doesn't exist, so we use try-catch fallback
+    // repoRoot: Use realpathSync for existing directories
+    // databasePath: Use normalizeDbPath helper (handles non-existent DB files safely)
     let repoRoot: string;
     let databasePath: string;
 
@@ -86,11 +88,9 @@ export class IndexWatcher {
       repoRoot = resolve(options.repoRoot);
     }
 
-    try {
-      databasePath = realpathSync.native(resolve(options.databasePath));
-    } catch {
-      databasePath = resolve(options.databasePath);
-    }
+    // Critical: Use normalizeDbPath to ensure consistent path with cli.ts
+    // This prevents lock file and queue key mismatch
+    databasePath = normalizeDbPath(options.databasePath);
 
     this.options = {
       repoRoot,
@@ -125,6 +125,33 @@ export class IndexWatcher {
   }
 
   /**
+   * Normalizes absolute file path to repository-relative path.
+   *
+   * Fix #3: Proper cross-platform path handling to prevent denylist bypass on Windows.
+   *
+   * Strategy:
+   * - Use path.relative() instead of string replacement
+   * - Normalize path separator to forward slash (git-compatible)
+   * - Reject paths outside repository (security check)
+   *
+   * @param absPath - Absolute path from file watcher
+   * @returns Git-compatible relative path, or null if outside repo
+   */
+  private normalizePathForRepo(absPath: string): string | null {
+    const rel = relative(this.options.repoRoot, absPath);
+
+    // Security: Reject paths outside repository
+    // ".." indicates parent directory traversal
+    if (rel.startsWith("..") || rel === "") {
+      return null;
+    }
+
+    // Normalize to forward slash for cross-platform compatibility
+    // Windows uses backslash, but git and denylist rules expect forward slash
+    return rel.split(sep).join("/");
+  }
+
+  /**
    * Starts the file watcher and begins monitoring for changes.
    *
    * @throws {Error} If the watcher is already running
@@ -142,7 +169,9 @@ export class IndexWatcher {
       persistent: true,
       ignoreInitial: true, // Don't trigger on existing files
       ignored: (path: string) => {
-        const relativePath = path.replace(this.options.repoRoot + "/", "");
+        const relativePath = this.normalizePathForRepo(path);
+        // Reject paths outside repo or invalid paths
+        if (!relativePath) return true;
         return denylistFilter.isDenied(relativePath);
       },
       // Editor-specific handling
@@ -187,7 +216,11 @@ export class IndexWatcher {
       return;
     }
 
-    const relativePath = path.replace(this.options.repoRoot + "/", "");
+    const relativePath = this.normalizePathForRepo(path);
+    // Ignore paths outside repository (security check)
+    if (!relativePath) {
+      return;
+    }
     this.pendingFiles.add(relativePath);
 
     // Clear existing timer if present
@@ -311,10 +344,21 @@ export class IndexWatcher {
           );
         }
       } catch (error) {
+        // Fix #2: Restore changedPaths for ALL errors, not just LockfileError
+        // This prevents permanent data loss when reindex fails due to:
+        // - Database I/O errors
+        // - Parsing failures
+        // - Network timeouts
+        // - Any other transient errors
+        for (const path of changedPaths) {
+          this.pendingFiles.add(path);
+        }
+        this.pendingReindex = true;
+
         process.stderr.write(
           `❌ Reindex failed: ${error instanceof Error ? error.message : String(error)}\n`
         );
-        process.stderr.write(`   Watch mode continues. Next change will trigger reindex.\n`);
+        process.stderr.write(`   Changes queued for retry on next file event.\n`);
       } finally {
         this.isReindexing = false;
 

@@ -367,7 +367,7 @@ export async function rebuildGlobalFTS(
         const success = await tryCreateFTSIndex(db, true);
 
         if (success) {
-          // Fix #3: Clear dirty flags based on rebuild context
+          // Fix #3 & #5: Clear dirty flags based on rebuild context using parameterized queries
           if (forceFTS) {
             // forceFTS case - unconditionally clear all (ignores generation changes)
             await db.run(
@@ -378,18 +378,18 @@ export async function rebuildGlobalFTS(
             );
           } else if (dirtyRepos.length > 0) {
             // Normal case: Only clear repos that haven't been re-dirtied
-            // Use generation-based WHERE clause to prevent lost concurrent updates
-            const conditions = dirtyRepos
-              .map((r) => `(id = ${r.id} AND fts_generation = ${r.fts_generation})`)
-              .join(" OR ");
-
-            await db.run(
-              `UPDATE repo
-               SET fts_dirty = false,
-                   fts_status = 'clean',
-                   fts_last_indexed_at = CURRENT_TIMESTAMP
-               WHERE ${conditions}`
-            );
+            // Use generation-based check to prevent lost concurrent updates
+            // Fix #5: Use parameterized queries instead of string concatenation to prevent SQL injection
+            for (const repo of dirtyRepos) {
+              await db.run(
+                `UPDATE repo
+                 SET fts_dirty = false,
+                     fts_status = 'clean',
+                     fts_last_indexed_at = CURRENT_TIMESTAMP
+                 WHERE id = ? AND fts_generation = ?`,
+                [repo.id, repo.fts_generation]
+              );
+            }
           } else {
             // No dirty repos but rebuild was needed (e.g., ftsExists=false)
             // This shouldn't normally happen but handle it by clearing all

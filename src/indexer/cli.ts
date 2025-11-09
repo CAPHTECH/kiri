@@ -7,6 +7,7 @@ import { pathToFileURL } from "node:url";
 import { DuckDBClient } from "../shared/duckdb.js";
 import { generateEmbedding } from "../shared/embedding.js";
 import { acquireLock, releaseLock, LockfileError, getLockOwner } from "../shared/utils/lockfile.js";
+import { normalizeDbPath } from "../shared/utils/path.js";
 
 import { analyzeSource, buildFallbackSnippet } from "./codeintel.js";
 import { getDefaultBranch, getHeadCommit, gitLsFiles } from "./git.js";
@@ -408,14 +409,20 @@ async function buildCodeIntel(
 async function scanFilesInBatches(
   repoRoot: string,
   paths: string[]
-): Promise<{ blobs: Map<string, BlobRecord>; files: FileRecord[]; embeddings: EmbeddingRow[] }> {
+): Promise<{
+  blobs: Map<string, BlobRecord>;
+  files: FileRecord[];
+  embeddings: EmbeddingRow[];
+  missingPaths: string[];
+}> {
   const allBlobs = new Map<string, BlobRecord>();
   const allFiles: FileRecord[] = [];
   const allEmbeddings: EmbeddingRow[] = [];
+  const allMissingPaths: string[] = [];
 
   for (let i = 0; i < paths.length; i += SCAN_BATCH_SIZE) {
     const batch = paths.slice(i, i + SCAN_BATCH_SIZE);
-    const { blobs, files, embeddings } = await scanFiles(repoRoot, batch);
+    const { blobs, files, embeddings, missingPaths } = await scanFiles(repoRoot, batch);
 
     // マージ: blobはhashでユニークなので重複排除
     for (const [hash, blob] of blobs) {
@@ -425,21 +432,33 @@ async function scanFilesInBatches(
     }
     allFiles.push(...files);
     allEmbeddings.push(...embeddings);
+    allMissingPaths.push(...missingPaths);
 
     // バッチデータを明示的にクリアしてGCを促す
     blobs.clear();
   }
 
-  return { blobs: allBlobs, files: allFiles, embeddings: allEmbeddings };
+  return {
+    blobs: allBlobs,
+    files: allFiles,
+    embeddings: allEmbeddings,
+    missingPaths: allMissingPaths,
+  };
 }
 
 async function scanFiles(
   repoRoot: string,
   paths: string[]
-): Promise<{ blobs: Map<string, BlobRecord>; files: FileRecord[]; embeddings: EmbeddingRow[] }> {
+): Promise<{
+  blobs: Map<string, BlobRecord>;
+  files: FileRecord[];
+  embeddings: EmbeddingRow[];
+  missingPaths: string[];
+}> {
   const blobs = new Map<string, BlobRecord>();
   const files: FileRecord[] = [];
   const embeddings: EmbeddingRow[] = [];
+  const missingPaths: string[] = [];
 
   for (const relativePath of paths) {
     const absolutePath = join(repoRoot, relativePath);
@@ -496,6 +515,13 @@ async function scanFiles(
         }
       }
     } catch (error) {
+      // Fix #4: Track deleted files (ENOENT) for database cleanup
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        missingPaths.push(relativePath);
+        continue;
+      }
+
+      // Other errors (permissions, etc.) - log and skip
       console.warn(
         `Cannot read ${relativePath} due to filesystem error. Fix file permissions or remove the file.`
       );
@@ -503,7 +529,7 @@ async function scanFiles(
     }
   }
 
-  return { blobs, files, embeddings };
+  return { blobs, files, embeddings, missingPaths };
 }
 
 /**
@@ -604,7 +630,8 @@ async function deleteFileRecords(
 
 export async function runIndexer(options: IndexerOptions): Promise<void> {
   // Fix #2: Normalize paths to prevent lock/queue bypass via symlinks or OS aliases
-  // Note: realpathSync throws if path doesn't exist, so we use try-catch fallback
+  // repoRoot: Use realpathSync for existing directories
+  // databasePath: Use normalizeDbPath helper (handles non-existent DB files safely)
   let repoRoot: string;
   let databasePath: string;
 
@@ -614,11 +641,9 @@ export async function runIndexer(options: IndexerOptions): Promise<void> {
     repoRoot = resolve(options.repoRoot);
   }
 
-  try {
-    databasePath = realpathSync.native(resolve(options.databasePath));
-  } catch {
-    databasePath = resolve(options.databasePath);
-  }
+  // Critical: Use normalizeDbPath to ensure consistent path across runs
+  // This prevents lock file and queue key bypass when DB is accessed via symlink
+  databasePath = normalizeDbPath(options.databasePath);
 
   // DuckDB single-writer制約対応: 同じdatabasePathへの並列書き込みを防ぐため、
   // databasePathごとのキューで直列化する
@@ -666,10 +691,18 @@ export async function runIndexer(options: IndexerOptions): Promise<void> {
         }
 
         const existingHashes = await getExistingFileHashes(db, repoId);
-        const { blobs, files, embeddings } = await scanFilesInBatches(
+        const { blobs, files, embeddings, missingPaths } = await scanFilesInBatches(
           repoRoot,
           options.changedPaths
         );
+
+        // Fix #4: Handle deleted files from watch mode (uncommitted deletions)
+        if (missingPaths.length > 0) {
+          await deleteFileRecords(db, repoId, missingPaths);
+          console.info(
+            `Removed ${missingPaths.length} missing file(s) from index (watch mode deletion).`
+          );
+        }
 
         // Filter out files that haven't actually changed (same hash)
         const changedFiles: FileRecord[] = [];
@@ -686,14 +719,14 @@ export async function runIndexer(options: IndexerOptions): Promise<void> {
           }
         }
 
-        if (changedFiles.length === 0) {
+        if (changedFiles.length === 0 && missingPaths.length === 0) {
           console.info(
             `No actual changes detected in ${options.changedPaths.length} file(s). Skipping reindex.`
           );
 
-          // Fix #3: If files were deleted, still need to dirty FTS and rebuild
+          // Fix #3 & #4: If files were deleted (git or watch mode), still need to dirty FTS and rebuild
           if (deletedPaths.length > 0) {
-            console.info(`${deletedPaths.length} file(s) deleted - marking FTS dirty`);
+            console.info(`${deletedPaths.length} file(s) deleted (git) - marking FTS dirty`);
 
             if (defaultBranch) {
               await db.run(
@@ -831,7 +864,16 @@ export async function runIndexer(options: IndexerOptions): Promise<void> {
 
       // Full mode: reindex entire repository
       const paths = await gitLsFiles(repoRoot);
-      const { blobs, files, embeddings } = await scanFilesInBatches(repoRoot, paths);
+      const { blobs, files, embeddings, missingPaths } = await scanFilesInBatches(repoRoot, paths);
+
+      // In full mode, missingPaths should be rare (git ls-files returns existing files)
+      // But log them if they occur (race condition: file deleted between ls-files and scan)
+      if (missingPaths.length > 0) {
+        console.warn(
+          `${missingPaths.length} file(s) disappeared during full reindex (race condition)`
+        );
+      }
+
       const codeIntel = await buildCodeIntel(files, blobs, repoRoot);
 
       await db.transaction(async () => {
