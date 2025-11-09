@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import { join, resolve, extname } from "node:path";
@@ -111,9 +112,15 @@ async function mergeLegacyRepoRows(
   }
 
   const referencingTables = await db.all<{ table_name: string }>(
-    `SELECT DISTINCT table_name
-     FROM duckdb_columns()
-     WHERE column_name = 'repo_id' AND table_name <> 'repo'`
+    `SELECT DISTINCT c.table_name
+       FROM duckdb_columns() AS c
+       JOIN duckdb_tables() AS t
+         ON c.database_name = t.database_name
+        AND c.schema_name = t.schema_name
+        AND c.table_name = t.table_name
+      WHERE c.column_name = 'repo_id'
+        AND c.table_name <> 'repo'
+        AND t.table_type = 'BASE TABLE'`
   );
 
   const safeTables = referencingTables
@@ -798,6 +805,10 @@ export async function runIndexer(options: IndexerOptions): Promise<void> {
 
         // Process all changed files in a single transaction for atomicity
         const fileSet = new Set<string>(files.map((f) => f.path));
+        const embeddingMap = new Map<string, EmbeddingRow>();
+        for (const embedding of embeddings) {
+          embeddingMap.set(embedding.path, embedding);
+        }
         let processedCount = 0;
 
         await db.transaction(async () => {
@@ -872,7 +883,7 @@ export async function runIndexer(options: IndexerOptions): Promise<void> {
               });
             }
 
-            const fileEmbedding = embeddings.find((e) => e.path === file.path) ?? null;
+            const fileEmbedding = embeddingMap.get(file.path) ?? null;
 
             // Delete old records for this file (within main transaction)
             await deleteFileRecords(db, repoId, headCommit, file.path);
@@ -1008,7 +1019,11 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
       }
     }
 
-    if (!options.changedPaths || options.changedPaths.length > 0 || options.full) {
+    const dbMissing = !existsSync(databasePath);
+    const shouldIndex =
+      options.full || !options.changedPaths || options.changedPaths.length > 0 || dbMissing;
+
+    if (shouldIndex) {
       await runIndexer(options);
     } else {
       // No diff results and not running full indexing: keep metadata fresh without DB writes
