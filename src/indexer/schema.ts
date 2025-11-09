@@ -150,24 +150,14 @@ export async function ensureRepoMetaColumns(db: DuckDBClient): Promise<void> {
     await db.run(`ALTER TABLE repo ADD COLUMN fts_dirty BOOLEAN DEFAULT false`);
   }
 
-  // 既存レコードの初期化：FTSが存在する場合はclean、しない場合はdirty
-  const ftsExists = await checkFTSSchemaExists(db);
-  if (ftsExists) {
-    // FTS存在 → dirty=false, last_indexed_at=now
-    await db.run(`
-      UPDATE repo
-      SET fts_dirty = false,
-          fts_last_indexed_at = COALESCE(fts_last_indexed_at, CURRENT_TIMESTAMP)
-      WHERE fts_last_indexed_at IS NULL
-    `);
-  } else {
-    // FTS不在 → dirty=true (次回インデクサーで再構築)
-    await db.run(`
-      UPDATE repo
-      SET fts_dirty = true
-      WHERE fts_last_indexed_at IS NULL
-    `);
-  }
+  // 既存レコードの初期化：常にdirty=trueで初期化
+  // (rebuildFTSIfNeededが実際のFTS状態を確認して処理を決定)
+  // 理由: multi-repo環境で新規repoが誤ってclean扱いされるのを防ぐため
+  await db.run(`
+    UPDATE repo
+    SET fts_dirty = true
+    WHERE fts_last_indexed_at IS NULL
+  `);
 }
 
 /**

@@ -737,14 +737,17 @@ export async function runIndexer(options: IndexerOptions): Promise<void> {
           processedCount++;
         }
 
-        // Update timestamp inside main transaction
+        // Update timestamp and mark FTS dirty inside transaction for atomicity
         if (defaultBranch) {
           await db.run(
-            "UPDATE repo SET indexed_at = CURRENT_TIMESTAMP, default_branch = ? WHERE id = ?",
+            "UPDATE repo SET indexed_at = CURRENT_TIMESTAMP, default_branch = ?, fts_dirty = true WHERE id = ?",
             [defaultBranch, repoId]
           );
         } else {
-          await db.run("UPDATE repo SET indexed_at = CURRENT_TIMESTAMP WHERE id = ?", [repoId]);
+          await db.run(
+            "UPDATE repo SET indexed_at = CURRENT_TIMESTAMP, fts_dirty = true WHERE id = ?",
+            [repoId]
+          );
         }
       });
 
@@ -752,7 +755,7 @@ export async function runIndexer(options: IndexerOptions): Promise<void> {
         `Incrementally indexed ${processedCount} changed file(s) for repo ${repoRoot} at ${databasePath} (commit ${headCommit.slice(0, 12)})`
       );
 
-      // Phase 2+3: Rebuild FTS index after incremental updates
+      // Phase 2+3: Rebuild FTS index after incremental updates (dirty=true triggers rebuild)
       await rebuildFTSIfNeeded(db, repoId);
       return;
     }
@@ -777,14 +780,17 @@ export async function runIndexer(options: IndexerOptions): Promise<void> {
       await persistDependencies(db, repoId, codeIntel.dependencies);
       await persistEmbeddings(db, repoId, embeddings);
 
-      // Update timestamp inside transaction to ensure atomicity
+      // Update timestamp and mark FTS dirty inside transaction to ensure atomicity
       if (defaultBranch) {
         await db.run(
-          "UPDATE repo SET indexed_at = CURRENT_TIMESTAMP, default_branch = ? WHERE id = ?",
+          "UPDATE repo SET indexed_at = CURRENT_TIMESTAMP, default_branch = ?, fts_dirty = true WHERE id = ?",
           [defaultBranch, repoId]
         );
       } else {
-        await db.run("UPDATE repo SET indexed_at = CURRENT_TIMESTAMP WHERE id = ?", [repoId]);
+        await db.run(
+          "UPDATE repo SET indexed_at = CURRENT_TIMESTAMP, fts_dirty = true WHERE id = ?",
+          [repoId]
+        );
       }
     });
 
@@ -792,8 +798,8 @@ export async function runIndexer(options: IndexerOptions): Promise<void> {
       `Indexed ${files.length} files for repo ${repoRoot} at ${databasePath} (commit ${headCommit.slice(0, 12)})`
     );
 
-    // Phase 2+3: Rebuild FTS index if dirty or missing
-    await rebuildFTSIfNeeded(db, repoId);
+    // Phase 2+3: Force rebuild FTS index after full reindex
+    await rebuildFTSIfNeeded(db, repoId, true);
   } finally {
     await db.close();
   }
