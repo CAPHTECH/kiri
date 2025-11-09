@@ -4,7 +4,13 @@ import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { tryCreateFTSIndex } from "../../src/indexer/schema.js";
+import {
+  ensureBaseSchema,
+  ensureRepoMetaColumns,
+  rebuildFTSIfNeeded,
+  setFTSDirty,
+  tryCreateFTSIndex,
+} from "../../src/indexer/schema.js";
 import { DuckDBClient } from "../../src/shared/duckdb.js";
 
 describe("tryCreateFTSIndex", () => {
@@ -160,5 +166,202 @@ describe("tryCreateFTSIndex", () => {
        WHERE schema_name = 'fts_main_blob' AND table_name IN ('docs', 'terms')`
     );
     expect(tables.length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("ensureRepoMetaColumns", () => {
+  let tempDir: string;
+  let db: DuckDBClient;
+
+  beforeEach(async () => {
+    tempDir = await mkdtemp(join(tmpdir(), "kiri-test-"));
+    const dbPath = join(tempDir, "test.duckdb");
+    db = await DuckDBClient.connect({ databasePath: dbPath });
+  });
+
+  afterEach(async () => {
+    if (db) {
+      await db.close();
+    }
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it("returns early if repo table doesn't exist", async () => {
+    // Should not throw when repo table doesn't exist
+    await expect(ensureRepoMetaColumns(db)).resolves.toBeUndefined();
+  });
+
+  it("adds fts_last_indexed_at and fts_dirty columns to existing repo table", async () => {
+    // Create repo table without FTS columns
+    await db.run(`
+      CREATE TABLE repo (
+        id INTEGER PRIMARY KEY,
+        root TEXT NOT NULL UNIQUE
+      )
+    `);
+
+    await ensureRepoMetaColumns(db);
+
+    // Verify columns were added
+    const columns = await db.all<{ column_name: string }>(
+      `SELECT column_name FROM duckdb_columns()
+       WHERE table_name = 'repo' AND column_name IN ('fts_last_indexed_at', 'fts_dirty')`
+    );
+
+    expect(columns.length).toBe(2);
+    expect(columns.map((c) => c.column_name)).toContain("fts_last_indexed_at");
+    expect(columns.map((c) => c.column_name)).toContain("fts_dirty");
+  });
+
+  it("is idempotent - doesn't fail if columns already exist", async () => {
+    await ensureBaseSchema(db);
+
+    // First call
+    await ensureRepoMetaColumns(db);
+
+    // Second call should not throw
+    await expect(ensureRepoMetaColumns(db)).resolves.toBeUndefined();
+  });
+
+  it("initializes fts_dirty=true when FTS doesn't exist", async () => {
+    await ensureBaseSchema(db);
+    await db.run(`INSERT INTO repo (root) VALUES ('/test')`);
+
+    await ensureRepoMetaColumns(db);
+
+    const rows = await db.all<{ fts_dirty: boolean }>(
+      `SELECT fts_dirty FROM repo WHERE root = '/test'`
+    );
+    expect(rows[0]?.fts_dirty).toBe(true);
+  });
+});
+
+describe("rebuildFTSIfNeeded", () => {
+  let tempDir: string;
+  let db: DuckDBClient;
+  let repoId: number;
+
+  beforeEach(async () => {
+    tempDir = await mkdtemp(join(tmpdir(), "kiri-test-"));
+    const dbPath = join(tempDir, "test.duckdb");
+    db = await DuckDBClient.connect({ databasePath: dbPath });
+
+    // Set up base schema and repo
+    await ensureBaseSchema(db);
+    await db.run(`INSERT INTO repo (root) VALUES ('/test')`);
+    const rows = await db.all<{ id: number }>(`SELECT id FROM repo WHERE root = '/test'`);
+    repoId = rows[0]!.id;
+
+    // Create blob table for FTS
+    await db.run(`
+      CREATE TABLE IF NOT EXISTS blob (
+        hash TEXT PRIMARY KEY,
+        content TEXT
+      )
+    `);
+  });
+
+  afterEach(async () => {
+    if (db) {
+      await db.close();
+    }
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it("rebuilds FTS when dirty flag is true", async () => {
+    // Set dirty flag
+    await setFTSDirty(db, repoId);
+
+    const result = await rebuildFTSIfNeeded(db, repoId);
+
+    if (result) {
+      // FTS is available - verify dirty flag was cleared
+      const rows = await db.all<{ fts_dirty: boolean }>(`SELECT fts_dirty FROM repo WHERE id = ?`, [
+        repoId,
+      ]);
+      expect(rows[0]?.fts_dirty).toBe(false);
+    }
+  });
+
+  it("skips rebuild when FTS is clean and exists", async () => {
+    // First rebuild to create FTS
+    const firstResult = await rebuildFTSIfNeeded(db, repoId);
+
+    if (!firstResult) {
+      // FTS not available, skip test
+      return;
+    }
+
+    // Verify dirty flag is false
+    const beforeRows = await db.all<{ fts_dirty: boolean }>(
+      `SELECT fts_dirty FROM repo WHERE id = ?`,
+      [repoId]
+    );
+    expect(beforeRows[0]?.fts_dirty).toBe(false);
+
+    // Second call should skip rebuild
+    const secondResult = await rebuildFTSIfNeeded(db, repoId);
+    expect(secondResult).toBe(true);
+  });
+
+  it("forces rebuild when forceFTS=true", async () => {
+    // First rebuild
+    await rebuildFTSIfNeeded(db, repoId);
+
+    // Force rebuild even if clean
+    const result = await rebuildFTSIfNeeded(db, repoId, true);
+
+    if (result) {
+      // Verify it succeeded
+      const rows = await db.all<{ fts_dirty: boolean }>(`SELECT fts_dirty FROM repo WHERE id = ?`, [
+        repoId,
+      ]);
+      expect(rows[0]?.fts_dirty).toBe(false);
+    }
+  });
+});
+
+describe("setFTSDirty", () => {
+  let tempDir: string;
+  let db: DuckDBClient;
+  let repoId: number;
+
+  beforeEach(async () => {
+    tempDir = await mkdtemp(join(tmpdir(), "kiri-test-"));
+    const dbPath = join(tempDir, "test.duckdb");
+    db = await DuckDBClient.connect({ databasePath: dbPath });
+
+    await ensureBaseSchema(db);
+    await db.run(`INSERT INTO repo (root) VALUES ('/test')`);
+    const rows = await db.all<{ id: number }>(`SELECT id FROM repo WHERE root = '/test'`);
+    repoId = rows[0]!.id;
+  });
+
+  afterEach(async () => {
+    if (db) {
+      await db.close();
+    }
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it("sets fts_dirty to true", async () => {
+    await setFTSDirty(db, repoId);
+
+    const rows = await db.all<{ fts_dirty: boolean }>(`SELECT fts_dirty FROM repo WHERE id = ?`, [
+      repoId,
+    ]);
+    expect(rows[0]?.fts_dirty).toBe(true);
+  });
+
+  it("ensures columns exist before setting dirty flag", async () => {
+    // setFTSDirty should call ensureRepoMetaColumns internally
+    await setFTSDirty(db, repoId);
+
+    // Verify column exists
+    const columns = await db.all<{ column_name: string }>(
+      `SELECT column_name FROM duckdb_columns()
+       WHERE table_name = 'repo' AND column_name = 'fts_dirty'`
+    );
+    expect(columns.length).toBe(1);
   });
 });

@@ -9,7 +9,7 @@ import { generateEmbedding } from "../shared/embedding.js";
 import { analyzeSource, buildFallbackSnippet } from "./codeintel.js";
 import { getDefaultBranch, getHeadCommit, gitLsFiles } from "./git.js";
 import { detectLanguage } from "./language.js";
-import { ensureBaseSchema, rebuildFTSIfNeeded, setFTSDirty } from "./schema.js";
+import { ensureBaseSchema, rebuildFTSIfNeeded } from "./schema.js";
 import { IndexWatcher } from "./watch.js";
 
 interface IndexerOptions {
@@ -752,8 +752,8 @@ export async function runIndexer(options: IndexerOptions): Promise<void> {
         `Incrementally indexed ${processedCount} changed file(s) for repo ${repoRoot} at ${databasePath} (commit ${headCommit.slice(0, 12)})`
       );
 
-      // Phase 2+3: Mark FTS as dirty after blob updates
-      await setFTSDirty(db, repoId);
+      // Phase 2+3: Rebuild FTS index after incremental updates
+      await rebuildFTSIfNeeded(db, repoId);
       return;
     }
 

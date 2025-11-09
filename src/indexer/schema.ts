@@ -118,50 +118,55 @@ export async function ensureBaseSchema(db: DuckDBClient): Promise<void> {
  * repoテーブルにFTSメタデータ列を追加（Phase 3マイグレーション）
  * 既存DBとの互換性のため、列が存在しない場合のみ追加
  * @param db - DuckDBクライアント
+ * @throws Error if migration fails (except when repo table doesn't exist yet)
  */
 export async function ensureRepoMetaColumns(db: DuckDBClient): Promise<void> {
-  try {
-    // 列の存在確認
-    const columns = await db.all<{ column_name: string }>(
-      `SELECT column_name FROM duckdb_columns()
-       WHERE table_name = 'repo' AND column_name IN ('fts_last_indexed_at', 'fts_dirty')`
-    );
+  // Check if repo table exists first
+  const tables = await db.all<{ table_name: string }>(
+    `SELECT table_name FROM duckdb_tables() WHERE table_name = 'repo'`
+  );
 
-    const hasLastIndexedAt = columns.some((c) => c.column_name === "fts_last_indexed_at");
-    const hasDirty = columns.some((c) => c.column_name === "fts_dirty");
+  if (tables.length === 0) {
+    // repo table doesn't exist yet - will be created by ensureBaseSchema()
+    return;
+  }
 
-    // fts_last_indexed_atの追加
-    if (!hasLastIndexedAt) {
-      await db.run(`ALTER TABLE repo ADD COLUMN fts_last_indexed_at TIMESTAMP`);
-    }
+  // 列の存在確認
+  const columns = await db.all<{ column_name: string }>(
+    `SELECT column_name FROM duckdb_columns()
+     WHERE table_name = 'repo' AND column_name IN ('fts_last_indexed_at', 'fts_dirty')`
+  );
 
-    // fts_dirtyの追加
-    if (!hasDirty) {
-      await db.run(`ALTER TABLE repo ADD COLUMN fts_dirty BOOLEAN DEFAULT false`);
-    }
+  const hasLastIndexedAt = columns.some((c) => c.column_name === "fts_last_indexed_at");
+  const hasDirty = columns.some((c) => c.column_name === "fts_dirty");
 
-    // 既存レコードの初期化：FTSが存在する場合はclean、しない場合はdirty
-    const ftsExists = await checkFTSSchemaExists(db);
-    if (ftsExists) {
-      // FTS存在 → dirty=false, last_indexed_at=now
-      await db.run(`
-        UPDATE repo
-        SET fts_dirty = false,
-            fts_last_indexed_at = COALESCE(fts_last_indexed_at, CURRENT_TIMESTAMP)
-        WHERE fts_last_indexed_at IS NULL
-      `);
-    } else {
-      // FTS不在 → dirty=true (次回インデクサーで再構築)
-      await db.run(`
-        UPDATE repo
-        SET fts_dirty = true
-        WHERE fts_last_indexed_at IS NULL
-      `);
-    }
-  } catch (error) {
-    // テーブルが存在しない場合などは継続
-    // ensureBaseSchema()で作成されるため、初回は正常
-    console.warn("Failed to ensure repo meta columns, continuing:", error);
+  // fts_last_indexed_atの追加
+  if (!hasLastIndexedAt) {
+    await db.run(`ALTER TABLE repo ADD COLUMN fts_last_indexed_at TIMESTAMP`);
+  }
+
+  // fts_dirtyの追加
+  if (!hasDirty) {
+    await db.run(`ALTER TABLE repo ADD COLUMN fts_dirty BOOLEAN DEFAULT false`);
+  }
+
+  // 既存レコードの初期化：FTSが存在する場合はclean、しない場合はdirty
+  const ftsExists = await checkFTSSchemaExists(db);
+  if (ftsExists) {
+    // FTS存在 → dirty=false, last_indexed_at=now
+    await db.run(`
+      UPDATE repo
+      SET fts_dirty = false,
+          fts_last_indexed_at = COALESCE(fts_last_indexed_at, CURRENT_TIMESTAMP)
+      WHERE fts_last_indexed_at IS NULL
+    `);
+  } else {
+    // FTS不在 → dirty=true (次回インデクサーで再構築)
+    await db.run(`
+      UPDATE repo
+      SET fts_dirty = true
+      WHERE fts_last_indexed_at IS NULL
+    `);
   }
 }
 
@@ -332,14 +337,15 @@ export async function rebuildFTSIfNeeded(
 
 /**
  * FTS dirty flagを設定（Phase 3: ウォッチモード用）
+ * Note: 現在は rebuildFTSIfNeeded() の使用を推奨。この関数は将来のウォッチモード実装用に保持。
  * @param db - DuckDBクライアント
  * @param repoId - リポジトリID
+ * @throws Error if database update fails
  */
 export async function setFTSDirty(db: DuckDBClient, repoId: number): Promise<void> {
-  try {
-    await db.run(`UPDATE repo SET fts_dirty = true WHERE id = ?`, [repoId]);
-  } catch (error) {
-    // エラーは警告のみ（列が存在しない場合など）
-    console.warn("Failed to set FTS dirty flag:", error);
-  }
+  // Ensure the fts_dirty column exists before trying to update it
+  await ensureRepoMetaColumns(db);
+
+  // Update the dirty flag (errors are propagated to caller)
+  await db.run(`UPDATE repo SET fts_dirty = true WHERE id = ?`, [repoId]);
 }
