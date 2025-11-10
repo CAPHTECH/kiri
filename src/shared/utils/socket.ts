@@ -10,14 +10,48 @@ import * as crypto from "crypto";
 import * as os from "os";
 import * as path from "path";
 
+const UNIX_SOCKET_PATH_MAX = 96; // macOS 104-byte limitに安全マージンを残す
+const SOCKET_PREFIX = "kiri";
+const SOCKET_DIR_ENV = "KIRI_SOCKET_DIR";
+
+function sanitizeBaseName(fileName: string): string {
+  const sanitized = fileName.replace(/[^a-zA-Z0-9]/g, "-");
+  return sanitized.length > 0 ? sanitized.toLowerCase() : "db";
+}
+
+function buildFallbackUnixSocketPath(databasePath: string): string {
+  const fallbackDir = process.env[SOCKET_DIR_ENV] || os.tmpdir();
+  const hash = crypto.createHash("sha256").update(databasePath).digest("hex");
+  const baseName = sanitizeBaseName(path.basename(databasePath));
+
+  const candidates = [
+    path.join(fallbackDir, `${SOCKET_PREFIX}-${baseName}-${hash.slice(0, 12)}.sock`),
+    path.join(fallbackDir, `${SOCKET_PREFIX}-${hash.slice(0, 12)}.sock`),
+    path.join(fallbackDir, `${SOCKET_PREFIX}-${hash.slice(0, 8)}.sock`),
+  ];
+
+  for (const candidate of candidates) {
+    if (candidate.length <= UNIX_SOCKET_PATH_MAX) {
+      return candidate;
+    }
+  }
+
+  throw new Error(
+    `Unable to construct Unix socket path under ${UNIX_SOCKET_PATH_MAX} characters. ` +
+      `Set ${SOCKET_DIR_ENV} to a shorter directory.`
+  );
+}
+
 /**
  * プラットフォームに応じた適切なソケットパスを生成
  *
  * Windows環境では名前付きパイプ形式（\\.\pipe\kiri-<hash>）を使用し、
- * Unix系環境ではファイルシステムパス（<databasePath>.sock）を使用する。
+ * Unix系環境ではファイルシステムパス（<databasePath>.sock）を使用し、
+ * パス長が上限を超える場合は /tmp などの短いディレクトリに自動フォールバックする。
  *
  * **セキュリティ注意事項**:
  * - Unix: ソケットファイルは0600パーミッション（所有者のみアクセス可能）で保護
+ *   しつつ、KIRI_SOCKET_DIR でフォールバック先ディレクトリを明示できます。
  * - Windows: 名前付きパイプはデフォルトACLを使用（同一システムの他ユーザーが
  *   アクセス可能な場合がある）。ハッシュベースのパイプ名で曖昧性を提供するが、
  *   マルチユーザー環境では信頼できる環境でのみ使用することを推奨。
@@ -47,14 +81,18 @@ export function getSocketPath(databasePath: string): string {
     // データベースパスのハッシュを使ってユニークなパイプ名を生成
     const hash = crypto.createHash("sha256").update(databasePath).digest("hex");
     // 環境変数でプレフィックスをカスタマイズ可能（追加のセキュリティ層）
-    const prefix = process.env.KIRI_PIPE_PREFIX || "kiri";
+    const prefix = process.env.KIRI_PIPE_PREFIX || SOCKET_PREFIX;
     // 最初の16文字を使用（衝突リスクは極めて低い）
     const pipeName = `${prefix}-${hash.substring(0, 16)}`;
     return `\\\\.\\pipe\\${pipeName}`;
-  } else {
-    // Unix系: ファイルシステムパスを使用
-    return `${databasePath}.sock`;
   }
+
+  const defaultSocketPath = `${databasePath}.sock`;
+  if (defaultSocketPath.length <= UNIX_SOCKET_PATH_MAX) {
+    return defaultSocketPath;
+  }
+
+  return buildFallbackUnixSocketPath(databasePath);
 }
 
 /**
@@ -89,6 +127,7 @@ export function getDatabasePathFromSocket(socketPath: string): string | null {
 export function getSocketPathDebugInfo(databasePath: string): string {
   const socketPath = getSocketPath(databasePath);
   const platform = os.platform();
+  const defaultUnixSocket = `${databasePath}.sock`;
 
   // プラットフォーム固有のpathモジュールを使用して正しくパースする
   const pathModule = platform === "win32" ? path.win32 : path.posix;
@@ -102,10 +141,18 @@ export function getSocketPathDebugInfo(databasePath: string): string {
       `Note: Pipe name is derived from database path hash for uniqueness`,
     ].join("\n");
   } else {
-    return [
+    const lines = [
       `Database: ${dbBase} (${dbDir})`,
       `Socket: ${socketPath} (Unix domain socket)`,
       `Permissions: Owner-only (0600)`,
-    ].join("\n");
+    ];
+
+    if (socketPath !== defaultUnixSocket) {
+      lines.push(
+        `Fallback: Socket path shortened (set ${SOCKET_DIR_ENV} to override base directory)`
+      );
+    }
+
+    return lines.join("\n");
   }
 }

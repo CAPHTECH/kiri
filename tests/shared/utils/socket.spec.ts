@@ -8,21 +8,29 @@ import {
 
 describe("Socket Path Utility", () => {
   let originalPlatform: NodeJS.Platform;
-  let originalEnv: string | undefined;
+  let originalPipePrefix: string | undefined;
+  let originalSocketDir: string | undefined;
 
   beforeEach(() => {
     // プラットフォームと環境変数をバックアップ
     originalPlatform = process.platform;
-    originalEnv = process.env.KIRI_PIPE_PREFIX;
+    originalPipePrefix = process.env.KIRI_PIPE_PREFIX;
+    originalSocketDir = process.env.KIRI_SOCKET_DIR;
   });
 
   afterEach(() => {
     // プラットフォームと環境変数を復元
     Object.defineProperty(process, "platform", { value: originalPlatform, configurable: true });
-    if (originalEnv === undefined) {
+    if (originalPipePrefix === undefined) {
       delete process.env.KIRI_PIPE_PREFIX;
     } else {
-      process.env.KIRI_PIPE_PREFIX = originalEnv;
+      process.env.KIRI_PIPE_PREFIX = originalPipePrefix;
+    }
+
+    if (originalSocketDir === undefined) {
+      delete process.env.KIRI_SOCKET_DIR;
+    } else {
+      process.env.KIRI_SOCKET_DIR = originalSocketDir;
     }
   });
 
@@ -47,6 +55,37 @@ describe("Socket Path Utility", () => {
 
         const result = getSocketPath("/path with spaces/database.duckdb");
         expect(result).toBe("/path with spaces/database.duckdb.sock");
+      });
+
+      it("should fall back to tmp directory when path exceeds limit", () => {
+        Object.defineProperty(process, "platform", { value: "linux", configurable: true });
+        process.env.KIRI_SOCKET_DIR = "/tmp";
+
+        const longSegment = "nested".repeat(20);
+        const longPath = `/very/long/${longSegment}/path/to/database.duckdb`;
+        const result = getSocketPath(longPath);
+
+        expect(result.startsWith("/tmp/kiri-")).toBe(true);
+        expect(result.endsWith(".sock")).toBe(true);
+        expect(result.length).toBeLessThanOrEqual(96);
+      });
+
+      it("should allow overriding fallback directory via KIRI_SOCKET_DIR", () => {
+        Object.defineProperty(process, "platform", { value: "linux", configurable: true });
+        process.env.KIRI_SOCKET_DIR = "/var/run";
+
+        const veryLongPath = `/repo/${"component".repeat(15)}/db.duckdb`;
+        const result = getSocketPath(veryLongPath);
+
+        expect(result.startsWith("/var/run/kiri-")).toBe(true);
+      });
+
+      it("should throw if fallback directory is also too long", () => {
+        Object.defineProperty(process, "platform", { value: "linux", configurable: true });
+        process.env.KIRI_SOCKET_DIR = `/${"a".repeat(150)}`;
+
+        const veryLongPath = `/repo/${"component".repeat(30)}/db.duckdb`;
+        expect(() => getSocketPath(veryLongPath)).toThrow(/KIRI_SOCKET_DIR/);
       });
     });
 
@@ -142,6 +181,14 @@ describe("Socket Path Utility", () => {
       expect(result).toContain("/var/lib/kiri");
       expect(result).toContain("Unix domain socket");
       expect(result).toContain("0600");
+    });
+
+    it("should mention fallback when Unix socket path is shortened", () => {
+      Object.defineProperty(process, "platform", { value: "linux", configurable: true });
+      process.env.KIRI_SOCKET_DIR = "/tmp";
+
+      const info = getSocketPathDebugInfo(`/repo/${"deep".repeat(20)}/index.duckdb`);
+      expect(info).toContain("Fallback: Socket path shortened");
     });
 
     it("should generate debug info for Windows named pipe", () => {

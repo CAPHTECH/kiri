@@ -111,9 +111,14 @@ For very large repositories (10,000+ files), you may need to increase the timeou
 
 > **Note**: The example shows `480` seconds (8 minutes) for very large repositories (>20,000 files). The default `240` seconds (4 minutes) is sufficient for most projects with <10,000 files.
 
-| Variable                    | Default | Description                                                                    |
-| --------------------------- | ------- | ------------------------------------------------------------------------------ |
-| `KIRI_DAEMON_READY_TIMEOUT` | `240`   | Daemon initialization timeout in seconds. Increase for very large repositories |
+| Variable                    | Default          | Description                                                                                                           |
+| --------------------------- | ---------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `KIRI_DAEMON_READY_TIMEOUT` | `240`            | Daemon initialization timeout in seconds. Increase for very large repositories                                        |
+| `KIRI_SOCKET_DIR`           | OS tmp directory | Directory for Unix socket fallback when repo paths are too long (e.g., `/var/run/kiri`). Keeps worktree sockets short |
+
+> **Tip**: Worktree や深いモノレポで `listen EINVAL` が発生する場合は、`export KIRI_SOCKET_DIR=/var/run/kiri` のように短いディレクトリを
+> 指定してから `kiri` を再起動してください。0.9.9 以降は長すぎるパスを自動でフォールバックしますが、明示的に設定するとログや
+> 監査も追いやすくなります。
 
 **Dart Analysis Server Configuration:**
 
