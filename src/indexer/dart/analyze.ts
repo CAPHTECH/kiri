@@ -3,14 +3,16 @@
  */
 
 import path from "node:path";
+
 import type { SymbolRecord, SnippetRecord, DependencyRecord } from "../codeintel.js";
+
 import { DartAnalysisClient } from "./client.js";
-import { outlineToSymbols } from "./transform.js";
-import { isDartSdkAvailable } from "./sdk.js";
-// import { extractDependencies } from "./dependencies.js"; // Phase 4で使用予定
+import { parseMaxClients, parseClientWaitMs, parseIdleTtlMs } from "./config.js";
 import { normalizeWorkspaceKey } from "./pathKey.js";
 import { createCapacityLimiter, type CapacityLimiter } from "./poolGate.js";
-import { parseMaxClients, parseClientWaitMs, parseIdleTtlMs } from "./config.js";
+import { isDartSdkAvailable } from "./sdk.js";
+import { outlineToSymbols } from "./transform.js";
+// import { extractDependencies } from "./dependencies.js"; // Phase 4で使用予定
 
 // ワークスペース毎のクライアント管理（参照カウント + アイドルTTL方式）
 interface ClientEntry {

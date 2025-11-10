@@ -5,8 +5,8 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { runIndexer } from "../../src/indexer/cli.js";
-import { ensureBaseSchema } from "../../src/indexer/schema.js";
 import { clearAllQueues } from "../../src/indexer/queue.js";
+import { ensureBaseSchema } from "../../src/indexer/schema.js";
 import { DuckDBClient } from "../../src/shared/duckdb.js";
 import { createTempRepo } from "../helpers/test-repo.js";
 
@@ -15,7 +15,6 @@ describe("repo path normalization", () => {
 
   afterEach(async () => {
     while (cleanup.length > 0) {
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
       await cleanup.pop()!();
     }
     clearAllQueues();

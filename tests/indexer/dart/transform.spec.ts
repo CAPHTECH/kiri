@@ -2,10 +2,12 @@
  * Tests for Outline → SymbolRecord transformation (src/indexer/dart/transform.ts)
  */
 
-import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { describe, expect, it } from "vitest";
+
 import { outlineToSymbols } from "../../../src/indexer/dart/transform.js";
 import type { Outline } from "../../../src/indexer/dart/types.js";
 

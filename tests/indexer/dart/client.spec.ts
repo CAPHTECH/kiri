@@ -3,9 +3,16 @@
  */
 
 import { describe, expect, it, beforeEach, vi, afterEach } from "vitest";
-import type { BufferEncoding } from "node:fs";
+
 import { DartAnalysisClient, DAPProtocolError } from "../../../src/indexer/dart/client.js";
+
 import { MockChildProcess, createMockSdkInfo } from "./test-helpers.js";
+
+type RecordedMessage = {
+  id?: string | number;
+  method?: string;
+  params?: Record<string, unknown>;
+};
 
 // Mock dependencies
 vi.mock("../../../src/indexer/dart/sdk.js");
@@ -60,10 +67,10 @@ describe("DartAnalysisClient", () => {
       mockProcess.stdin.write = vi.fn(
         (
           chunk: Buffer | string,
-          encoding?: BufferEncoding | (() => void),
+          encoding?: NodeJS.BufferEncoding | (() => void),
           callback?: () => void
         ) => {
-          const msg = JSON.parse(chunk.toString());
+          const msg = JSON.parse(chunk.toString()) as RecordedMessage;
           mockProcess.sendMessage({ id: msg.id, result: {} });
           if (typeof callback === "function") {
             callback();
@@ -72,7 +79,7 @@ describe("DartAnalysisClient", () => {
           }
           return true;
         }
-      );
+      ) as unknown as MockChildProcess["stdin"]["write"];
 
       await client.initialize();
 
@@ -84,15 +91,15 @@ describe("DartAnalysisClient", () => {
     });
 
     it("sets analysis roots during initialization", async () => {
-      const messages: unknown[] = [];
+      const messages: RecordedMessage[] = [];
 
       mockProcess.stdin.write = vi.fn(
         (
           chunk: Buffer | string,
-          encoding?: BufferEncoding | (() => void),
+          encoding?: NodeJS.BufferEncoding | (() => void),
           callback?: () => void
         ) => {
-          const msg = JSON.parse(chunk.toString());
+          const msg = JSON.parse(chunk.toString()) as RecordedMessage;
           messages.push(msg);
           mockProcess.sendMessage({ id: msg.id, result: {} });
           if (typeof callback === "function") {
@@ -102,13 +109,14 @@ describe("DartAnalysisClient", () => {
           }
           return true;
         }
-      );
+      ) as unknown as MockChildProcess["stdin"]["write"];
 
       await client.initialize();
 
       const setRootsMsg = messages.find((m) => m.method === "analysis.setAnalysisRoots");
       expect(setRootsMsg).toBeDefined();
-      expect(setRootsMsg?.params.included).toContain("/test/workspace");
+      const included = (setRootsMsg?.params?.included as string[] | undefined) ?? [];
+      expect(included).toContain("/test/workspace");
     });
   });
 
@@ -117,10 +125,10 @@ describe("DartAnalysisClient", () => {
       mockProcess.stdin.write = vi.fn(
         (
           chunk: Buffer | string,
-          encoding?: BufferEncoding | (() => void),
+          encoding?: NodeJS.BufferEncoding | (() => void),
           callback?: () => void
         ) => {
-          const msg = JSON.parse(chunk.toString());
+          const msg = JSON.parse(chunk.toString()) as RecordedMessage;
           mockProcess.sendMessage({ id: msg.id, result: {} });
           if (typeof callback === "function") {
             callback();
@@ -129,21 +137,21 @@ describe("DartAnalysisClient", () => {
           }
           return true;
         }
-      );
+      ) as unknown as MockChildProcess["stdin"]["write"];
 
       await client.initialize();
     });
 
     it("sends updateContent and getOutline requests", async () => {
-      const messages: unknown[] = [];
+      const messages: RecordedMessage[] = [];
 
       mockProcess.stdin.write = vi.fn(
         (
           chunk: Buffer | string,
-          encoding?: BufferEncoding | (() => void),
+          encoding?: NodeJS.BufferEncoding | (() => void),
           callback?: () => void
         ) => {
-          const msg = JSON.parse(chunk.toString());
+          const msg = JSON.parse(chunk.toString()) as RecordedMessage;
           messages.push(msg);
 
           if (msg.method === "analysis.getOutline") {
@@ -168,7 +176,7 @@ describe("DartAnalysisClient", () => {
           }
           return true;
         }
-      );
+      ) as unknown as MockChildProcess["stdin"]["write"];
 
       await client.analyzeFile("/test/file.dart", "void main() {}");
 
@@ -180,10 +188,10 @@ describe("DartAnalysisClient", () => {
       mockProcess.stdin.write = vi.fn(
         (
           chunk: Buffer | string,
-          encoding?: BufferEncoding | (() => void),
+          encoding?: NodeJS.BufferEncoding | (() => void),
           callback?: () => void
         ) => {
-          const msg = JSON.parse(chunk.toString());
+          const msg = JSON.parse(chunk.toString()) as RecordedMessage;
 
           if (msg.method === "analysis.getOutline") {
             mockProcess.sendMessage({
@@ -207,7 +215,7 @@ describe("DartAnalysisClient", () => {
           }
           return true;
         }
-      );
+      ) as unknown as MockChildProcess["stdin"]["write"];
 
       const result = await client.analyzeFile("/test/file.dart", "class TestClass {}");
 
@@ -220,10 +228,10 @@ describe("DartAnalysisClient", () => {
       mockProcess.stdin.write = vi.fn(
         (
           chunk: Buffer | string,
-          encoding?: BufferEncoding | (() => void),
+          encoding?: NodeJS.BufferEncoding | (() => void),
           callback?: () => void
         ) => {
-          const msg = JSON.parse(chunk.toString());
+          const msg = JSON.parse(chunk.toString()) as RecordedMessage;
           mockProcess.sendMessage({
             id: msg.id,
             error: { code: -1, message: "Invalid file" },
@@ -235,7 +243,7 @@ describe("DartAnalysisClient", () => {
           }
           return true;
         }
-      );
+      ) as unknown as MockChildProcess["stdin"]["write"];
 
       await expect(client.initialize()).rejects.toThrow(DAPProtocolError);
     });
@@ -247,7 +255,7 @@ describe("DartAnalysisClient", () => {
       mockProcess.stdin.write = vi.fn(
         (
           _chunk: Buffer | string,
-          encoding?: BufferEncoding | (() => void),
+          encoding?: NodeJS.BufferEncoding | (() => void),
           callback?: () => void
         ) => {
           if (typeof callback === "function") {
@@ -257,7 +265,7 @@ describe("DartAnalysisClient", () => {
           }
           return true;
         }
-      );
+      ) as unknown as MockChildProcess["stdin"]["write"];
 
       const promise = client.initialize();
 
@@ -271,15 +279,15 @@ describe("DartAnalysisClient", () => {
   describe("cleanup", () => {
     it("sends shutdown request on dispose", async () => {
       skipDisposal = true; // We test disposal in this test
-      const messages: unknown[] = [];
+      const messages: RecordedMessage[] = [];
 
       mockProcess.stdin.write = vi.fn(
         (
           chunk: Buffer | string,
-          encoding?: BufferEncoding | (() => void),
+          encoding?: NodeJS.BufferEncoding | (() => void),
           callback?: () => void
         ) => {
-          const msg = JSON.parse(chunk.toString());
+          const msg = JSON.parse(chunk.toString()) as RecordedMessage;
           messages.push(msg);
           mockProcess.sendMessage({ id: msg.id, result: {} });
 
@@ -297,7 +305,7 @@ describe("DartAnalysisClient", () => {
           }
           return true;
         }
-      );
+      ) as unknown as MockChildProcess["stdin"]["write"];
 
       await client.initialize();
       await client.dispose();
@@ -311,10 +319,10 @@ describe("DartAnalysisClient", () => {
       mockProcess.stdin.write = vi.fn(
         (
           chunk: Buffer | string,
-          encoding?: BufferEncoding | (() => void),
+          encoding?: NodeJS.BufferEncoding | (() => void),
           callback?: () => void
         ) => {
-          const msg = JSON.parse(chunk.toString());
+          const msg = JSON.parse(chunk.toString()) as RecordedMessage;
           mockProcess.sendMessage({ id: msg.id, result: {} });
 
           // Simulate process exit after shutdown request
@@ -331,7 +339,7 @@ describe("DartAnalysisClient", () => {
           }
           return true;
         }
-      );
+      ) as unknown as MockChildProcess["stdin"]["write"];
 
       await client.initialize();
       await client.dispose();
@@ -384,10 +392,10 @@ describe("DartAnalysisClient", () => {
       mockProcess.stdin.write = vi.fn(
         (
           chunk: Buffer | string,
-          encoding?: BufferEncoding | (() => void),
+          encoding?: NodeJS.BufferEncoding | (() => void),
           callback?: () => void
         ) => {
-          const msg = JSON.parse(chunk.toString());
+          const msg = JSON.parse(chunk.toString()) as RecordedMessage;
 
           // Track call order
           if (msg.method === "analysis.updateContent") {
@@ -429,7 +437,7 @@ describe("DartAnalysisClient", () => {
           }
           return true;
         }
-      );
+      ) as unknown as MockChildProcess["stdin"]["write"];
 
       await client.initialize();
 
@@ -449,10 +457,10 @@ describe("DartAnalysisClient", () => {
       mockProcess.stdin.write = vi.fn(
         (
           chunk: Buffer | string,
-          encoding?: BufferEncoding | (() => void),
+          encoding?: NodeJS.BufferEncoding | (() => void),
           callback?: () => void
         ) => {
-          const msg = JSON.parse(chunk.toString());
+          const msg = JSON.parse(chunk.toString()) as RecordedMessage;
 
           // Send mock responses
           if (
@@ -484,7 +492,7 @@ describe("DartAnalysisClient", () => {
           }
           return true;
         }
-      );
+      ) as unknown as MockChildProcess["stdin"]["write"];
 
       await client.initialize();
 

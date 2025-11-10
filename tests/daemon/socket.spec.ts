@@ -13,6 +13,13 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createSocketServer } from "../../src/daemon/socket.js";
 import type { JsonRpcRequest, RpcHandleResult } from "../../src/server/rpc.js";
 
+const normalizeRequestId = (id: unknown): string | number | null => {
+  if (typeof id === "string" || typeof id === "number" || id === null) {
+    return id;
+  }
+  return null;
+};
+
 describe("Socket Transport", () => {
   let socketPath: string;
   let closeServer: (() => Promise<void>) | null = null;
@@ -50,7 +57,7 @@ describe("Socket Transport", () => {
       return {
         response: {
           jsonrpc: "2.0",
-          id: request.id,
+          id: normalizeRequestId(request.id),
           result: { echo: request.method },
         },
         statusCode: 200,
@@ -76,7 +83,7 @@ describe("Socket Transport", () => {
       return {
         response: {
           jsonrpc: "2.0",
-          id: request.id,
+          id: normalizeRequestId(request.id),
           result: { method: request.method, params: request.params },
         },
         statusCode: 200,
@@ -129,7 +136,7 @@ describe("Socket Transport", () => {
       return {
         response: {
           jsonrpc: "2.0",
-          id: request.id,
+          id: normalizeRequestId(request.id),
           result: { count: requestCount },
         },
         statusCode: 200,
@@ -189,10 +196,14 @@ describe("Socket Transport", () => {
 
     const handler = async (request: JsonRpcRequest): Promise<RpcHandleResult | null> => {
       handled++;
+      const normalizedId = normalizeRequestId(request.id);
+      if (normalizedId === null) {
+        return null;
+      }
       return {
         response: {
           jsonrpc: "2.0",
-          id: request.id ?? "ignored",
+          id: normalizedId,
           result: { ok: true },
         },
         statusCode: 200,
@@ -278,7 +289,7 @@ describe("Socket Transport", () => {
   it("cleans up socket file on close", async () => {
     const handler = async (request: JsonRpcRequest): Promise<RpcHandleResult | null> => {
       return {
-        response: { jsonrpc: "2.0", id: request.id, result: {} },
+        response: { jsonrpc: "2.0", id: normalizeRequestId(request.id), result: {} },
         statusCode: 200,
       };
     };
@@ -302,7 +313,7 @@ describe("Socket Transport", () => {
   it("handles malformed JSON gracefully", async () => {
     const handler = async (request: JsonRpcRequest): Promise<RpcHandleResult | null> => {
       return {
-        response: { jsonrpc: "2.0", id: request.id, result: {} },
+        response: { jsonrpc: "2.0", id: normalizeRequestId(request.id), result: {} },
         statusCode: 200,
       };
     };

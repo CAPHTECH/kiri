@@ -5,8 +5,8 @@
  * when same physical path is referenced with different casing (C:\repo vs c:\repo)
  */
 
-import path from "node:path";
 import { realpathSync } from "node:fs";
+import path from "node:path";
 
 /**
  * Normalize workspace root path for use as Map key

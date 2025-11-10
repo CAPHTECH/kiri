@@ -5,10 +5,10 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { ensureBaseSchema, ensureRepoMetaColumns } from "../../src/indexer/schema.js";
-import { DuckDBClient } from "../../src/shared/duckdb.js";
-import { filesSearch } from "../../src/server/handlers.js";
 import { type ServerContext } from "../../src/server/context.js";
+import { filesSearch } from "../../src/server/handlers.js";
 import { WarningManager } from "../../src/server/rpc.js";
+import { DuckDBClient } from "../../src/shared/duckdb.js";
 
 describe("FTS status cache invalidation", () => {
   it("degrades immediately when repo becomes dirty after caching", async () => {

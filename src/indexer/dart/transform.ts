@@ -3,6 +3,7 @@
  */
 
 import type { SymbolRecord, SnippetRecord } from "../codeintel.js";
+
 import type { Outline, ElementKind } from "./types.js";
 
 /**

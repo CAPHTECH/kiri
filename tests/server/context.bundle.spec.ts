@@ -171,7 +171,8 @@ describe("context_bundle", () => {
     const readme = bundle.context.find((item) => item.path === "README.md");
     expect(readme).toBeDefined();
     expect(readme?.range).toBeDefined();
-    expect(readme?.preview.length).toBeGreaterThan(0);
+    const preview = readme?.preview ?? "";
+    expect(preview.length).toBeGreaterThan(0);
   });
 
   it("handles CJK and emoji-rich keywords gracefully", async () => {

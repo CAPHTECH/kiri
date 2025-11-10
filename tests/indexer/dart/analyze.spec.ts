@@ -3,20 +3,24 @@
  */
 
 import { describe, expect, it, beforeEach, vi, afterEach } from "vitest";
+
 import { analyzeDartSource, cleanup } from "../../../src/indexer/dart/analyze.js";
+import type { DartAnalysisClient } from "../../../src/indexer/dart/client.js";
 
 // Mock dependencies
 vi.mock("../../../src/indexer/dart/client.js");
 vi.mock("../../../src/indexer/dart/sdk.js");
 
 describe("analyzeDartSource", () => {
-  let mockClient: {
+  type ClientMethodMocks = {
     initialize: ReturnType<typeof vi.fn>;
     analyzeFile: ReturnType<typeof vi.fn>;
     getLibraryDependencies: ReturnType<typeof vi.fn>;
     dispose: ReturnType<typeof vi.fn>;
     forceKill: ReturnType<typeof vi.fn>;
   };
+
+  let mockClient: ClientMethodMocks;
   let isDartSdkAvailableMock: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
@@ -55,7 +59,9 @@ describe("analyzeDartSource", () => {
     };
 
     const clientModule = await import("../../../src/indexer/dart/client.js");
-    vi.mocked(clientModule.DartAnalysisClient).mockImplementation(() => mockClient);
+    vi.mocked(clientModule.DartAnalysisClient).mockImplementation(
+      () => mockClient as unknown as DartAnalysisClient
+    );
   });
 
   afterEach(async () => {

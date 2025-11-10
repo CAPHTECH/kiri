@@ -4,12 +4,10 @@
 
 import { EventEmitter } from "node:events";
 import { Readable, Writable } from "node:stream";
-import type { ChildProcess } from "node:child_process";
-
 /**
  * Mock ChildProcess for Analysis Server tests
  */
-export class MockChildProcess extends EventEmitter implements Partial<ChildProcess> {
+export class MockChildProcess extends EventEmitter {
   stdin: Writable;
   stdout: Readable;
   stderr: Readable;

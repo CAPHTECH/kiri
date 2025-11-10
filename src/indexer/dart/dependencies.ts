@@ -6,7 +6,9 @@
 
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
 import type { DependencyRecord } from "../codeintel.js";
+
 import type { GetLibraryDependenciesResult } from "./types.js";
 
 /**

@@ -10,10 +10,18 @@ import {
   createRpcHandler,
   type JsonRpcRequest,
   type JsonRpcSuccess,
+  type RpcHandleResult,
 } from "../../src/server/rpc.js";
 import { createServerRuntime } from "../../src/server/runtime.js";
 import { loadSecurityConfig, updateSecurityLock } from "../../src/shared/security/config.js";
 import { createTempRepo } from "../helpers/test-repo.js";
+
+const ensureResponse = (result: RpcHandleResult | null): RpcHandleResult => {
+  if (result === null) {
+    throw new Error("Expected RPC handler to return a response");
+  }
+  return result;
+};
 
 interface CleanupTarget {
   dispose: () => Promise<void>;
@@ -53,7 +61,7 @@ describe("MCP標準エンドポイント", () => {
 
     const handler = createRpcHandler(runtime);
     const request: JsonRpcRequest = { jsonrpc: "2.0", id: 1, method: "initialize" };
-    const response = await handler(request);
+    const response = ensureResponse(await handler(request));
 
     expect(response.statusCode).toBe(200);
     const payload = response.response as JsonRpcSuccess;
@@ -91,7 +99,7 @@ describe("MCP標準エンドポイント", () => {
 
     const handler = createRpcHandler(runtime);
     const request: JsonRpcRequest = { jsonrpc: "2.0", id: 2, method: "tools/list" };
-    const response = await handler(request);
+    const response = ensureResponse(await handler(request));
 
     expect(response.statusCode).toBe(200);
     const payload = response.response as JsonRpcSuccess;
@@ -131,7 +139,7 @@ describe("MCP標準エンドポイント", () => {
 
     const handler = createRpcHandler(runtime);
     const request: JsonRpcRequest = { jsonrpc: "2.0", id: 3, method: "resources/list" };
-    const response = await handler(request);
+    const response = ensureResponse(await handler(request));
 
     expect(response.statusCode).toBe(200);
     const payload = response.response as JsonRpcSuccess;
@@ -176,7 +184,7 @@ describe("MCP標準エンドポイント", () => {
         },
       },
     };
-    const response = await handler(request);
+    const response = ensureResponse(await handler(request));
 
     expect(response.statusCode).toBe(200);
     const payload = response.response as JsonRpcSuccess;
@@ -242,7 +250,7 @@ describe("MCP標準エンドポイント", () => {
       },
     };
 
-    const response = await handler(request);
+    const response = ensureResponse(await handler(request));
     expect(response.statusCode).toBe(200);
     const payload = response.response as JsonRpcSuccess;
     const result = payload.result as Record<string, unknown>;
@@ -297,7 +305,7 @@ describe("MCP標準エンドポイント", () => {
         arguments: {},
       },
     };
-    const response = await handler(request);
+    const response = ensureResponse(await handler(request));
 
     expect(response.statusCode).toBe(200);
     const payload = response.response as JsonRpcSuccess;
@@ -348,7 +356,7 @@ describe("MCP標準エンドポイント", () => {
         arguments: {},
       },
     };
-    const response = await handler(request);
+    const response = ensureResponse(await handler(request));
 
     expect(response.statusCode).toBe(400);
     const payload = response.response;
@@ -436,7 +444,7 @@ describe("MCP標準エンドポイント", () => {
         },
       };
 
-      const response = await handler(request);
+      const response = ensureResponse(await handler(request));
       expect(response.statusCode).toBe(200);
 
       const payload = response.response as JsonRpcSuccess;
@@ -490,7 +498,7 @@ describe("MCP標準エンドポイント", () => {
         },
       };
 
-      const response = await handler(request);
+      const response = ensureResponse(await handler(request));
       expect(response.statusCode).toBe(200);
 
       const payload = response.response as JsonRpcSuccess;
@@ -545,7 +553,7 @@ describe("MCP標準エンドポイント", () => {
         },
       };
 
-      const response = await handler(request);
+      const response = ensureResponse(await handler(request));
       expect(response.statusCode).toBe(200);
 
       const payload = response.response as JsonRpcSuccess;

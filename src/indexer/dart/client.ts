@@ -4,17 +4,12 @@
 
 import { spawn, type ChildProcess, execSync } from "node:child_process";
 import { createInterface, type Interface } from "node:readline";
+
 import PQueue from "p-queue";
-import { detectDartSdk } from "./sdk.js";
-import { normalizeFileKey } from "./pathKey.js";
+
 import { parseFileQueueTtlMs } from "./config.js";
-
-// Fix #4: File queue TTL (default: 30000ms = 30 seconds)
-// Fix #15 (Codex Critical Review): Enforce minimum 1000ms to prevent memory leak when set to 0
-// Fix #19 (Codex Critical Review Round 3): Validate TTL to prevent NaN
-// Extracted to config.ts for testability
-const FILE_QUEUE_TTL_MS = parseFileQueueTtlMs();
-
+import { normalizeFileKey } from "./pathKey.js";
+import { detectDartSdk } from "./sdk.js";
 import type {
   RpcRequest,
   RpcResponse,
@@ -26,6 +21,12 @@ import type {
   ServerConnectedParams,
   ServerErrorParams,
 } from "./types.js";
+
+// Fix #4: File queue TTL (default: 30000ms = 30 seconds)
+// Fix #15 (Codex Critical Review): Enforce minimum 1000ms to prevent memory leak when set to 0
+// Fix #19 (Codex Critical Review Round 3): Validate TTL to prevent NaN
+// Extracted to config.ts for testability
+const FILE_QUEUE_TTL_MS = parseFileQueueTtlMs();
 
 export interface DartAnalysisClientOptions {
   workspaceRoots: string[];

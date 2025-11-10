@@ -5,8 +5,8 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { ensureBaseSchema } from "../../src/indexer/schema.js";
-import { DuckDBClient } from "../../src/shared/duckdb.js";
 import { resolveRepoId } from "../../src/server/handlers.js";
+import { DuckDBClient } from "../../src/shared/duckdb.js";
 import { createTempRepo } from "../helpers/test-repo.js";
 
 describe("resolveRepoId legacy compatibility", () => {

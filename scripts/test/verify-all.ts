@@ -26,11 +26,13 @@ interface TestResult {
   details?: string;
 }
 
+type VerificationCategory = "unit" | "integration" | "dart" | "eval" | "tools" | "watch" | "all";
+
 interface VerificationOptions {
-  category?: "unit" | "integration" | "dart" | "eval" | "tools" | "watch" | "all";
-  retry?: number;
-  skipCoverage?: boolean;
-  verbose?: boolean;
+  category: VerificationCategory;
+  retry: number;
+  skipCoverage: boolean;
+  verbose: boolean;
 }
 
 const COLORS = {
@@ -523,15 +525,23 @@ async function main(): Promise<void> {
 
   // Parse arguments
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--category" && args[i + 1]) {
-      options.category = args[i + 1] as VerificationOptions["category"];
-      i++;
-    } else if (args[i] === "--retry" && args[i + 1]) {
-      options.retry = parseInt(args[i + 1], 10);
-      i++;
-    } else if (args[i] === "--skip-coverage") {
+    const arg = args[i];
+
+    if (arg === "--category") {
+      const categoryArg = args[i + 1];
+      if (typeof categoryArg === "string") {
+        options.category = categoryArg as VerificationCategory;
+        i++;
+      }
+    } else if (arg === "--retry") {
+      const retryArg = args[i + 1];
+      if (typeof retryArg === "string") {
+        options.retry = parseInt(retryArg, 10);
+        i++;
+      }
+    } else if (arg === "--skip-coverage") {
       options.skipCoverage = true;
-    } else if (args[i] === "--verbose") {
+    } else if (arg === "--verbose") {
       options.verbose = true;
     }
   }

@@ -620,6 +620,45 @@ KIRI automatically filters sensitive files and masks sensitive values:
    - Medium project (1,000-10,000 files): 10-100 MB
    - Large project (>10,000 files): 100-500 MB
 
+#### DuckDB Native Binding Errors
+
+**Problem**: Error message like `Cannot find module '.../duckdb.node'` when running from a cloned repository
+
+**Root Cause**: Using `npm link` with pnpm-installed packages causes native module path resolution issues
+
+**Solutions**:
+
+1. **Use pnpm link instead of npm link**:
+
+   ```bash
+   # Remove existing npm link (if any)
+   npm unlink -g kiri-mcp-server 2>/dev/null || true
+
+   # Clean and reinstall
+   rm -rf node_modules pnpm-lock.yaml
+   pnpm install --frozen-lockfile
+
+   # Verify native binding exists
+   ls -la node_modules/.pnpm/duckdb@*/node_modules/duckdb/lib/binding/duckdb.node
+
+   # If missing, rebuild DuckDB
+   pnpm rebuild duckdb
+
+   # Build and link (use pnpm, not npm!)
+   pnpm run build
+   pnpm link --global
+   ```
+
+2. **Prerequisites for building DuckDB**:
+   - **macOS**: Install Xcode Command Line Tools: `xcode-select --install`
+   - **Node.js**: Version 20 or higher: `node -v`
+   - **Network**: Access to `npm.duckdb.org` for prebuilt binaries
+
+3. **Unlink when done**:
+   ```bash
+   pnpm unlink --global kiri-mcp-server
+   ```
+
 ### Getting Help
 
 If you encounter issues not covered here:
@@ -721,14 +760,23 @@ pnpm install
 # Build
 pnpm run build
 
-# Link globally for testing
-npm link
+# Link globally for testing (IMPORTANT: use pnpm link, not npm link)
+pnpm link --global
+
+# Verify DuckDB native binding is installed
+ls -la node_modules/.pnpm/duckdb@*/node_modules/duckdb/lib/binding/duckdb.node
+
+# If duckdb.node is missing, rebuild it
+pnpm rebuild duckdb
 
 # Run tests
 pnpm run test
 
 # Start in development mode (HTTP server on :8765)
 pnpm run dev
+
+# Unlink when done
+pnpm unlink --global kiri-mcp-server
 ```
 
 ### Commands Reference
