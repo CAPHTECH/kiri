@@ -73,6 +73,7 @@ export async function ensureDatabaseIndexed(
       repoRoot: absoluteRepoRoot,
       databasePath: absoluteDatabasePath,
       full: true,
+      skipLocking: true,
     });
 
     process.stderr.write(`✅ Indexing complete. Database created at ${absoluteDatabasePath}\n`);
