@@ -6,8 +6,8 @@
  * - Windows: Named pipes (e.g., \\.\pipe\kiri-<hash>)
  */
 
-import { mkdirSync } from "node:fs";
 import * as crypto from "crypto";
+import { mkdirSync } from "node:fs";
 import * as os from "os";
 import * as path from "path";
 
