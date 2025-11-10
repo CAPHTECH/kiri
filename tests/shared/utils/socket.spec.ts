@@ -116,7 +116,7 @@ describe("Socket Path Utility", () => {
         try {
           expect(existsSync(tempDir)).toBe(false);
           const longPath = `/repo/${"component".repeat(25)}/db.duckdb`;
-          const result = getSocketPath(longPath);
+          const result = getSocketPath(longPath, { ensureDir: true });
           expect(result.startsWith(`${tempDir}/kiri-`)).toBe(true);
           expect(existsSync(tempDir)).toBe(true);
         } finally {

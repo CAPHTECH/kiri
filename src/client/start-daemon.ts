@@ -33,7 +33,7 @@ export interface StartDaemonOptions {
  */
 export async function isDaemonRunning(databasePath: string): Promise<boolean> {
   const pidFilePath = `${databasePath}.daemon.pid`;
-  const socketPath = getSocketPath(databasePath);
+  const socketPath = getSocketPath(databasePath, { ensureDir: true });
 
   try {
     // PIDファイルが存在するかチェック

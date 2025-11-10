@@ -20,7 +20,7 @@ function sanitizeBaseName(fileName: string): string {
   return sanitized.length > 0 ? sanitized.toLowerCase() : "db";
 }
 
-function ensureFallbackDir(dirPath: string): void {
+function ensureSocketDir(dirPath: string): void {
   try {
     mkdirSync(dirPath, { recursive: true, mode: 0o700 });
   } catch (error) {
@@ -32,7 +32,7 @@ function ensureFallbackDir(dirPath: string): void {
   }
 }
 
-function buildFallbackUnixSocketPath(databasePath: string): string {
+function buildFallbackUnixSocketPath(databasePath: string, ensureDir: boolean): string {
   const fallbackDir = process.env[SOCKET_DIR_ENV] || os.tmpdir();
   const hash = crypto.createHash("sha256").update(databasePath).digest("hex");
   const baseName = sanitizeBaseName(path.basename(databasePath));
@@ -45,7 +45,9 @@ function buildFallbackUnixSocketPath(databasePath: string): string {
 
   for (const candidate of candidates) {
     if (Buffer.byteLength(candidate, "utf8") <= UNIX_SOCKET_PATH_MAX) {
-      ensureFallbackDir(path.dirname(candidate));
+      if (ensureDir) {
+        ensureSocketDir(path.dirname(candidate));
+      }
       return candidate;
     }
   }
@@ -89,7 +91,8 @@ function buildFallbackUnixSocketPath(databasePath: string): string {
  * getSocketPath("C:\\Users\\user\\database.duckdb")
  * // => "\\\\.\\pipe\\myapp-a1b2c3d4..."
  */
-export function getSocketPath(databasePath: string): string {
+export function getSocketPath(databasePath: string, options?: { ensureDir?: boolean }): string {
+  const ensureDir = options?.ensureDir ?? false;
   if (os.platform() === "win32") {
     // Windows: 名前付きパイプを使用
     // データベースパスのハッシュを使ってユニークなパイプ名を生成
@@ -103,10 +106,13 @@ export function getSocketPath(databasePath: string): string {
 
   const defaultSocketPath = `${databasePath}.sock`;
   if (Buffer.byteLength(defaultSocketPath, "utf8") <= UNIX_SOCKET_PATH_MAX) {
+    if (ensureDir) {
+      ensureSocketDir(path.dirname(defaultSocketPath));
+    }
     return defaultSocketPath;
   }
 
-  return buildFallbackUnixSocketPath(databasePath);
+  return buildFallbackUnixSocketPath(databasePath, ensureDir);
 }
 
 /**

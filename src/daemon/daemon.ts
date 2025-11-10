@@ -53,7 +53,7 @@ function parseDaemonArgs(): DaemonOptions {
   const databasePath = path.resolve(values.db || path.join(repoRoot, "var", "index.duckdb"));
   const socketPath = values["socket-path"]
     ? path.resolve(values["socket-path"])
-    : getSocketPath(databasePath);
+    : getSocketPath(databasePath, { ensureDir: true });
 
   return {
     repoRoot,
@@ -129,7 +129,8 @@ async function main() {
     const rpcHandler = createRpcHandler(runtime);
 
     // ソケットサーバーを作成（プラットフォームに応じてUnixソケットまたはWindows名前付きパイプ）
-    const socketPath = options.socketPath || getSocketPath(options.databasePath);
+    const socketPath =
+      options.socketPath || getSocketPath(options.databasePath, { ensureDir: true });
     const closeServer = await createSocketServer({
       socketPath,
       onRequest: async (request) => {
