@@ -12,8 +12,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Java language support with tree-sitter-java**
   - Symbol extraction for classes, interfaces, enums, annotations, methods, constructors, and fields
   - Javadoc comment parsing
-  - Import dependency resolution with wildcard and static import support
-  - Full test coverage with 23 test cases
+- Import dependency resolution with wildcard and static import support
+- Full test coverage with 23 test cases
+
+## [0.9.8] - 2025-11-10
+
+### Fixed
+
+- `ensureDatabaseIndexed` now invokes `runIndexer` with `skipLocking: true`, so first-time bootstrap no longer deadlocks on its own DuckDB lock file and `kiri`/`kiri-server` can index fresh repositories without manual intervention.
+
+### Added
+
+- Added `tests/server/indexBootstrap.spec.ts` to exercise the bootstrap path (first run + consecutive run) and prevent regressions around lock release.
 
 ## [0.9.7] - 2025-11-10
 
