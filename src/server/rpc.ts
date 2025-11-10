@@ -251,9 +251,9 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
         },
         boost_profile: {
           type: "string",
-          enum: ["default", "docs", "none"],
+          enum: ["default", "docs", "balanced", "none"],
           description:
-            'File type boosting mode: "default" prioritizes implementation files (src/app/, src/components/), "docs" prioritizes documentation (*.md), "none" disables boosting. Default is "default".',
+            'File type boosting mode: "default" prioritizes implementation files (src/app/, src/components/), "docs" prioritizes documentation (*.md), "balanced" applies equal weight to both docs and implementation (NEW in v0.9.10), "none" disables boosting. Default is "default".',
         },
         artifacts: {
           type: "object",
@@ -348,9 +348,9 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
         },
         boost_profile: {
           type: "string",
-          enum: ["default", "docs", "none"],
+          enum: ["default", "docs", "balanced", "none"],
           description:
-            'File type boosting mode: "default" prioritizes implementation files (src/app/, src/components/), "docs" prioritizes documentation (*.md), "none" disables boosting. Default is "default".',
+            'File type boosting mode: "default" prioritizes implementation files (src/app/, src/components/), "docs" prioritizes documentation (*.md), "balanced" applies equal weight to both docs and implementation (NEW in v0.9.10), "none" disables boosting. Default is "default".',
         },
         compact: {
           type: "boolean",

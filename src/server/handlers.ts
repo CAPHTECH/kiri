@@ -1208,7 +1208,7 @@ function applyAdditiveFilePenalties(
     return true;
   }
 
-  // Configuration files - strong penalty
+  // Configuration files - penalty handling depends on profile
   const configPatterns = [
     ".config.js",
     ".config.ts",
@@ -1231,6 +1231,12 @@ function applyAdditiveFilePenalties(
     fileName === "docker-compose.yml" ||
     fileName === "docker-compose.yaml"
   ) {
+    // For balanced profile, skip additive penalty and let multiplicative penalty be applied
+    // This ensures 0.3x multiplier is applied in applyFileTypeMultipliers
+    if (profile === "balanced") {
+      return false; // Continue to multiplicative penalty
+    }
+    // For other profiles, apply strong additive penalty
     candidate.score -= 1.5;
     candidate.reasons.add("penalty:config-file");
     return true;
@@ -1330,7 +1336,7 @@ function applyFileTypeMultipliers(
 function applyBoostProfile(
   candidate: CandidateInfo,
   row: { path: string; ext: string | null },
-  profile: "default" | "docs" | "none",
+  profile: BoostProfileName,
   weights: ScoringWeights,
   extractedTerms?: ExtractedTerms
 ): void {
