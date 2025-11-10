@@ -6,7 +6,7 @@ import { generateEmbedding, structuralSimilarity } from "../shared/embedding.js"
 import { encode as encodeGPT, tokenizeText } from "../shared/tokenizer.js";
 import { getRepoPathCandidates, normalizeRepoPath } from "../shared/utils/path.js";
 
-import { ServerContext } from "./context.js";
+import { FtsStatusCache, ServerContext } from "./context.js";
 import { coerceProfileName, loadScoringProfile, type ScoringWeights } from "./scoring.js";
 
 // Configuration file patterns (v0.8.0+: consolidated to avoid duplication)
@@ -153,6 +153,72 @@ const CONFIG_PATTERNS = [
   ".circleci/config.yml",
   ".github/workflows",
 ] as const;
+
+const FTS_STATUS_CACHE_TTL_MS = 10_000;
+
+async function refreshFtsStatus(context: ServerContext): Promise<FtsStatusCache> {
+  const previousReady = context.features?.fts ?? false;
+  const cache: FtsStatusCache = {
+    ready: false,
+    schemaExists: false,
+    anyDirty: false,
+    lastChecked: Date.now(),
+  };
+
+  try {
+    cache.schemaExists = await checkFTSSchemaExists(context.db);
+    if (!cache.schemaExists) {
+      context.warningManager.warnForRequest(
+        "fts-schema-missing",
+        "FTS schema not found, falling back to ILIKE"
+      );
+    } else {
+      const statusCheck = await context.db.all<{ count: number }>(
+        `SELECT COUNT(*) as count FROM repo
+         WHERE fts_dirty = true OR fts_status IN ('dirty', 'rebuilding')`
+      );
+      cache.anyDirty = (statusCheck[0]?.count ?? 0) > 0;
+      if (cache.anyDirty) {
+        context.warningManager.warnForRequest(
+          "fts-stale",
+          "FTS index is stale or rebuilding, using ILIKE fallback. Run indexer to update FTS."
+        );
+      } else {
+        await context.db.run("LOAD fts;");
+        cache.ready = true;
+      }
+    }
+  } catch (error) {
+    cache.ready = false;
+    cache.schemaExists = false;
+    context.warningManager.warnForRequest(
+      "fts-check-failed",
+      `FTS availability check failed: ${error}`
+    );
+  }
+
+  if (!context.features) {
+    context.features = {};
+  }
+  context.features.fts = cache.ready;
+  context.ftsStatusCache = cache;
+
+  if (cache.ready && !previousReady) {
+    console.info("✅ FTS recovered and enabled");
+  } else if (!cache.ready && previousReady) {
+    console.warn("⚠️  FTS became unavailable; falling back to ILIKE");
+  }
+
+  return cache;
+}
+
+async function getFreshFtsStatus(context: ServerContext): Promise<FtsStatusCache> {
+  const cache = context.ftsStatusCache;
+  if (cache && Date.now() - cache.lastChecked < FTS_STATUS_CACHE_TTL_MS) {
+    return cache;
+  }
+  return refreshFtsStatus(context);
+}
 
 /**
  * Check if a file path represents a configuration file
@@ -1297,56 +1363,8 @@ export async function filesSearch(
 
   const limit = normalizeLimit(params.limit);
 
-  // Fix #4: Always perform FTS health check to detect recovery after startup
-  // This allows the server to automatically switch to FTS mode when indexer rebuilds it
-  let hasFTS = context.features?.fts ?? false;
-
-  try {
-    const ftsExists = await checkFTSSchemaExists(db);
-    if (!ftsExists) {
-      hasFTS = false;
-      if (context.features?.fts) {
-        // FTS disappeared after startup - update context
-        context.features.fts = false;
-        context.warningManager.warnForRequest(
-          "fts-schema-missing",
-          "FTS schema not found, falling back to ILIKE"
-        );
-      }
-    } else {
-      // Check if any repo is dirty or rebuilding
-      const statusCheck = await db.all<{ count: number }>(
-        `SELECT COUNT(*) as count FROM repo
-         WHERE fts_dirty = true OR fts_status IN ('dirty', 'rebuilding')`
-      );
-      const anyDirtyOrRebuilding = (statusCheck[0]?.count ?? 0) > 0;
-      if (anyDirtyOrRebuilding) {
-        hasFTS = false;
-        context.warningManager.warnForRequest(
-          "fts-stale",
-          "FTS index is stale or rebuilding, using ILIKE fallback. Run indexer to update FTS."
-        );
-      } else if (!context.features?.fts) {
-        // FTS became available after startup - update context and load extension
-        await db.run("LOAD fts;");
-        if (!context.features) {
-          context.features = {};
-        }
-        context.features.fts = true;
-        hasFTS = true;
-        console.info("✅ FTS recovered and enabled");
-      } else {
-        hasFTS = true;
-      }
-    }
-  } catch (error) {
-    // On error, fallback to ILIKE for safety
-    hasFTS = false;
-    context.warningManager.warnForRequest(
-      "fts-check-failed",
-      `FTS availability check failed: ${error}`
-    );
-  }
+  const ftsStatus = await getFreshFtsStatus(context);
+  const hasFTS = ftsStatus.ready;
 
   let sql: string;
   let values: unknown[];

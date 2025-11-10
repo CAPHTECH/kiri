@@ -41,6 +41,25 @@ const COLORS = {
   cyan: "\x1b[36m",
 };
 
+function buildVitestArgs(suites: string[], enableCoverage: boolean): string[] {
+  const args = [
+    "exec",
+    "vitest",
+    "run",
+    enableCoverage ? "--coverage" : "--no-coverage",
+    "--pool=forks",
+    "--poolOptions.forks.singleFork",
+    "--poolOptions.forks.maxForks=1",
+    "--poolOptions.forks.minForks=1",
+  ];
+
+  if (suites.length > 0) {
+    args.push(...suites);
+  }
+
+  return args;
+}
+
 function log(message: string, color?: keyof typeof COLORS): void {
   const colorCode = color ? COLORS[color] : "";
   console.log(`${colorCode}${message}${COLORS.reset}`);
@@ -85,11 +104,10 @@ async function runUnitTests(options: VerificationOptions): Promise<TestResult> {
   log("\n📦 Running Unit Tests...", "cyan");
   const start = Date.now();
 
-  const args = ["exec", "vitest", "run"];
-  if (!options.skipCoverage) {
-    args.push("--coverage");
-  }
-  args.push("tests/indexer", "tests/server", "tests/shared", "tests/client", "tests/daemon");
+  const args = buildVitestArgs(
+    ["tests/indexer", "tests/server", "tests/shared", "tests/client", "tests/daemon"],
+    !options.skipCoverage
+  );
 
   try {
     const result = await runCommand("pnpm", args, { timeout: 120000 });
@@ -117,18 +135,14 @@ async function runUnitTests(options: VerificationOptions): Promise<TestResult> {
   }
 }
 
-async function runDartTests(options: VerificationOptions): Promise<TestResult> {
+async function runDartTests(_options: VerificationOptions): Promise<TestResult> {
   log("\n🎯 Running Dart Analysis Server Tests...", "cyan");
   const start = Date.now();
 
-  const args = ["exec", "vitest", "run"];
-  if (!options.skipCoverage) {
-    args.push("--coverage");
-  }
-  args.push("tests/indexer/dart");
+  const args = buildVitestArgs(["tests/indexer/dart"], false);
 
   try {
-    const result = await runCommand("pnpm", args, { timeout: 120000 });
+    const result = await runCommand("pnpm", args, { timeout: 60000 });
     const duration = Date.now() - start;
 
     if (result.exitCode === 0) {
@@ -153,15 +167,11 @@ async function runDartTests(options: VerificationOptions): Promise<TestResult> {
   }
 }
 
-async function runIntegrationTests(options: VerificationOptions): Promise<TestResult> {
+async function runIntegrationTests(_options: VerificationOptions): Promise<TestResult> {
   log("\n🔗 Running Integration Tests...", "cyan");
   const start = Date.now();
 
-  const args = ["exec", "vitest", "run"];
-  if (!options.skipCoverage) {
-    args.push("--coverage");
-  }
-  args.push("tests/integration");
+  const args = buildVitestArgs(["tests/integration"], false);
 
   try {
     const result = await runCommand("pnpm", args, { timeout: 120000 });
@@ -426,18 +436,14 @@ async function runWatchModeTests(_options: VerificationOptions): Promise<TestRes
   }
 }
 
-async function runEvalTests(options: VerificationOptions): Promise<TestResult> {
+async function runEvalTests(_options: VerificationOptions): Promise<TestResult> {
   log("\n📊 Running Evaluation Tests...", "cyan");
   const start = Date.now();
 
-  const args = ["exec", "vitest", "run"];
-  if (!options.skipCoverage) {
-    args.push("--coverage");
-  }
-  args.push("tests/eval");
+  const args = buildVitestArgs(["tests/eval"], false);
 
   try {
-    const result = await runCommand("pnpm", args, { timeout: 120000 });
+    const result = await runCommand("pnpm", args, { timeout: 60000 });
     const duration = Date.now() - start;
 
     if (result.exitCode === 0) {

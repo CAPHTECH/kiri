@@ -5,7 +5,7 @@ import { DuckDBClient } from "../shared/duckdb.js";
 import { ensureDbParentDir, normalizeDbPath, getRepoPathCandidates } from "../shared/utils/path.js";
 
 import { bootstrapServer, type BootstrapOptions } from "./bootstrap.js";
-import { ServerContext } from "./context.js";
+import { FtsStatusCache, ServerContext } from "./context.js";
 import { DegradeController } from "./fallbacks/degradeController.js";
 import { resolveRepoId } from "./handlers.js";
 import { MetricsRegistry } from "./observability/metrics.js";
@@ -59,6 +59,12 @@ export async function createServerRuntime(options: CommonServerOptions): Promise
 
     // Phase 2: FTS拡張の利用可否を確認（作成はしない）
     let hasFTS = await checkFTSAvailability(db);
+    const ftsStatus: FtsStatusCache = {
+      ready: hasFTS,
+      schemaExists: hasFTS,
+      anyDirty: false,
+      lastChecked: Date.now(),
+    };
 
     // Phase 3: FTSが存在してもdirty flagが立っている場合は無効化（degrade to ILIKE）
     // CRITICAL: Check if ANY repo is dirty (FTS is global, not per-repo)
@@ -68,15 +74,21 @@ export async function createServerRuntime(options: CommonServerOptions): Promise
           `SELECT COUNT(*) as count FROM repo WHERE fts_dirty = true`
         );
         const anyDirty = (dirtyCount[0]?.count ?? 0) > 0;
+        ftsStatus.anyDirty = anyDirty;
         if (anyDirty) {
           hasFTS = false; // Disable FTS if ANY repo's index is stale
+          ftsStatus.ready = false;
           console.warn(
             "FTS index is stale (dirty flag set on one or more repos). Using ILIKE fallback. Run indexer to rebuild FTS."
           );
+        } else {
+          ftsStatus.ready = true;
         }
       } catch (error) {
         // If we can't check the dirty flag, err on the side of caution and disable FTS
         hasFTS = false;
+        ftsStatus.ready = false;
+        ftsStatus.schemaExists = false;
         console.warn("Unable to check FTS dirty flag, using ILIKE fallback:", error);
       }
     }
@@ -89,6 +101,7 @@ export async function createServerRuntime(options: CommonServerOptions): Promise
       features: {
         fts: hasFTS,
       },
+      ftsStatusCache: ftsStatus,
       warningManager,
     };
 
