@@ -9,11 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **"balanced" boost profile for equal weighting of docs and implementation**
+  - New boost_profile option that applies 1.0x multiplier to both documentation and implementation files
+  - Allows docs/ directory files (via blacklistExceptions)
+  - Still penalizes config files (0.3x multiplier)
+  - No path-specific multipliers (unlike "default" profile)
+  - Works consistently across `files_search` and `context_bundle`
+  - Addresses [#63](https://github.com/CAPHTECH/kiri/issues/63) - documentation discovery issues
 - **Java language support with tree-sitter-java**
   - Symbol extraction for classes, interfaces, enums, annotations, methods, constructors, and fields
   - Javadoc comment parsing
 - Import dependency resolution with wildcard and static import support
 - Full test coverage with 23 test cases
+
+### Changed
+
+- **Refactored boost profile logic to use table-driven configuration**
+  - Created centralized `src/server/boost-profiles.ts` module with `BoostProfileConfig` interface
+  - Replaced scattered if-statements across 3 functions with configuration lookups
+  - All boost profiles (default, docs, balanced, none) now use unified `BOOST_PROFILES` table
+  - Improved maintainability: adding new profiles no longer requires modifying multiple functions
+  - Added `isValidBoostProfile()` type guard for runtime validation
+- Updated `boost_profile` parameter validation in RPC handlers to use centralized validation
 
 ## [0.9.9] - 2025-11-10
 

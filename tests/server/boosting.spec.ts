@@ -425,4 +425,279 @@ describe("Unified Boosting Logic (v0.7.0+)", () => {
       expect(gitFile.score).toBeLessThan(0);
     }
   });
+
+  // ✅ NEW (v0.9.10): Test balanced profile - equal weight for docs and implementation
+  it("boost_profile='balanced' applies equal weight to docs and implementation", async () => {
+    const repo = await createTempRepo({
+      "src/feature.ts": `export function feature() {\n  return "implementation";\n}\n`,
+      "README.md": `# Feature Guide\n\nDocumentation about the feature.\n`,
+    });
+    cleanupTargets.push({ dispose: repo.cleanup });
+
+    const dbDir = await mkdtemp(join(tmpdir(), "kiri-balanced-equal-"));
+    const dbPath = join(dbDir, "index.duckdb");
+    cleanupTargets.push({ dispose: async () => await rm(dbDir, { recursive: true, force: true }) });
+
+    await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+    const db = await DuckDBClient.connect({ databasePath: dbPath });
+    cleanupTargets.push({ dispose: async () => await db.close() });
+
+    const repoId = await resolveRepoId(db, repo.path);
+    const context: ServerContext = { db, repoId, warningManager: new WarningManager() };
+
+    // Test with balanced profile - should apply 1.0x to both docs and impl
+    const resultsBalanced = await filesSearch(context, {
+      query: "feature",
+      boost_profile: "balanced",
+    });
+
+    const implFile = resultsBalanced.find((r) => r.path === "src/feature.ts");
+    const docFile = resultsBalanced.find((r) => r.path === "README.md");
+
+    // Both files should be found with positive scores
+    expect(implFile).toBeDefined();
+    expect(docFile).toBeDefined();
+    expect(implFile?.score).toBeGreaterThan(0);
+    expect(docFile?.score).toBeGreaterThan(0);
+
+    // Compare with default profile to verify equal weighting
+    const resultsDefault = await filesSearch(context, {
+      query: "feature",
+      boost_profile: "default",
+    });
+
+    const implFileDefault = resultsDefault.find((r) => r.path === "src/feature.ts");
+    const docFileDefault = resultsDefault.find((r) => r.path === "README.md");
+
+    if (implFile && docFile && implFileDefault && docFileDefault) {
+      // In balanced mode, the score ratio should be closer to 1.0
+      const balancedRatio = implFile.score / docFile.score;
+      // In default mode, impl files get 1.3x boost and docs get 0.5x penalty
+      const defaultRatio = implFileDefault.score / docFileDefault.score;
+
+      // Default should have larger ratio (impl much higher than docs)
+      expect(defaultRatio).toBeGreaterThan(balancedRatio);
+      // Balanced ratio should be closer to 1.0 (allowing for BM25 variance)
+      expect(Math.abs(balancedRatio - 1.0)).toBeLessThan(Math.abs(defaultRatio - 1.0));
+    }
+  });
+
+  // ✅ NEW (v0.9.10): Test that balanced profile allows docs/ directory files
+  it("boost_profile='balanced' allows docs/ directory files", async () => {
+    const repo = await createTempRepo({
+      "src/feature.ts": `export function feature() {\n  return "implementation";\n}\n`,
+      "docs/guide.md": `# Feature Guide\n\nHow to use the feature.\n`,
+      "README.md": `# Project\n\nOverview.\n`,
+    });
+    cleanupTargets.push({ dispose: repo.cleanup });
+
+    const dbDir = await mkdtemp(join(tmpdir(), "kiri-balanced-docs-"));
+    const dbPath = join(dbDir, "index.duckdb");
+    cleanupTargets.push({ dispose: async () => await rm(dbDir, { recursive: true, force: true }) });
+
+    await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+    const db = await DuckDBClient.connect({ databasePath: dbPath });
+    cleanupTargets.push({ dispose: async () => await db.close() });
+
+    const repoId = await resolveRepoId(db, repo.path);
+    const context: ServerContext = { db, repoId, warningManager: new WarningManager() };
+
+    // Test with balanced profile - should include docs/ files
+    const bundleResults = await contextBundle(context, {
+      goal: "feature guide",
+      boost_profile: "balanced",
+      limit: 10,
+    });
+
+    const docsFile = bundleResults.context.find((r) => r.path === "docs/guide.md");
+    expect(docsFile).toBeDefined();
+    expect(docsFile?.score).toBeGreaterThan(0);
+
+    // filesSearch should also respect balanced profile
+    const filesResults = await filesSearch(context, {
+      query: "feature guide",
+      boost_profile: "balanced",
+    });
+
+    const docsFileInSearch = filesResults.find((r) => r.path === "docs/guide.md");
+    expect(docsFileInSearch).toBeDefined();
+  });
+
+  // ✅ NEW (v0.9.10): Test that balanced profile penalizes config files
+  it("boost_profile='balanced' still penalizes config files", async () => {
+    const repo = await createTempRepo({
+      "src/feature.ts": `export function feature() {\n  return "implementation";\n}\n`,
+      "README.md": `# Project\n\nDocumentation.\n`,
+      "tsconfig.json": `{"compilerOptions": {"strict": true}}\n`,
+      "package.json": `{"name": "test-project"}\n`,
+    });
+    cleanupTargets.push({ dispose: repo.cleanup });
+
+    const dbDir = await mkdtemp(join(tmpdir(), "kiri-balanced-config-"));
+    const dbPath = join(dbDir, "index.duckdb");
+    cleanupTargets.push({ dispose: async () => await rm(dbDir, { recursive: true, force: true }) });
+
+    await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+    const db = await DuckDBClient.connect({ databasePath: dbPath });
+    cleanupTargets.push({ dispose: async () => await db.close() });
+
+    const repoId = await resolveRepoId(db, repo.path);
+    const context: ServerContext = { db, repoId, warningManager: new WarningManager() };
+
+    const results = await filesSearch(context, {
+      query: "test project",
+      boost_profile: "balanced",
+    });
+
+    const srcFile = results.find((r) => r.path === "src/feature.ts");
+    const readmeFile = results.find((r) => r.path === "README.md");
+    const configFile = results.find((r) => r.path === "tsconfig.json" || r.path === "package.json");
+
+    // Config files should have lower scores due to 0.3x multiplier
+    if (srcFile && configFile) {
+      expect(srcFile.score).toBeGreaterThan(configFile.score);
+    }
+    if (readmeFile && configFile) {
+      expect(readmeFile.score).toBeGreaterThan(configFile.score);
+    }
+  });
+
+  // ✅ NEW (v0.9.10): Test that balanced profile doesn't apply path-specific multipliers
+  it("boost_profile='balanced' doesn't apply path-specific multipliers", async () => {
+    const repo = await createTempRepo({
+      "src/app/page.ts": `export function page() { return "app"; }\n`,
+      "src/components/Button.tsx": `export function Button() { return "component"; }\n`,
+      "src/lib/utils.ts": `export function util() { return "lib"; }\n`,
+      "src/index.ts": `export function main() { return "index"; }\n`,
+    });
+    cleanupTargets.push({ dispose: repo.cleanup });
+
+    const dbDir = await mkdtemp(join(tmpdir(), "kiri-balanced-paths-"));
+    const dbPath = join(dbDir, "index.duckdb");
+    cleanupTargets.push({ dispose: async () => await rm(dbDir, { recursive: true, force: true }) });
+
+    await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+    const db = await DuckDBClient.connect({ databasePath: dbPath });
+    cleanupTargets.push({ dispose: async () => await db.close() });
+
+    const repoId = await resolveRepoId(db, repo.path);
+    const context: ServerContext = { db, repoId, warningManager: new WarningManager() };
+
+    // Use a generic query that matches all files
+    const resultsBalanced = await filesSearch(context, {
+      query: "export function",
+      boost_profile: "balanced",
+    });
+
+    const resultsDefault = await filesSearch(context, {
+      query: "export function",
+      boost_profile: "default",
+    });
+
+    expect(resultsBalanced.length).toBe(4);
+    expect(resultsDefault.length).toBe(4);
+
+    // In balanced mode, no path-specific multipliers should be applied
+    // So the score differences should be minimal (only from BM25 differences)
+    const balancedScores = resultsBalanced.map((r) => r.score);
+    const balancedRange = Math.max(...balancedScores) - Math.min(...balancedScores);
+
+    // In default mode, path multipliers create larger score differences
+    const defaultScores = resultsDefault.map((r) => r.score);
+    const defaultRange = Math.max(...defaultScores) - Math.min(...defaultScores);
+
+    // Balanced mode should have smaller score range than default
+    expect(balancedRange).toBeLessThan(defaultRange);
+  });
+
+  // ✅ NEW (v0.9.10): Test consistency between files_search and context_bundle for balanced
+  it("files_search and context_bundle rank files consistently with balanced profile", async () => {
+    const repo = await createTempRepo({
+      "src/app/router.ts": `export function route(path: string) {\n  return { path, component: "Page" };\n}\n`,
+      "src/components/Nav.tsx": `export function Nav() {\n  return <nav>Navigation</nav>;\n}\n`,
+      "docs/routing.md": `# URL Patterns\n\nRouting and navigation patterns for pages.\n`,
+      "README.md": `# Routing Guide\n\nThis explains the routing system and navigation.\n`,
+    });
+    cleanupTargets.push({ dispose: repo.cleanup });
+
+    const dbDir = await mkdtemp(join(tmpdir(), "kiri-balanced-consistency-"));
+    const dbPath = join(dbDir, "index.duckdb");
+    cleanupTargets.push({ dispose: async () => await rm(dbDir, { recursive: true, force: true }) });
+
+    await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+    const db = await DuckDBClient.connect({ databasePath: dbPath });
+    cleanupTargets.push({ dispose: async () => await db.close() });
+
+    const repoId = await resolveRepoId(db, repo.path);
+    const context: ServerContext = { db, repoId, warningManager: new WarningManager() };
+
+    // Run both tools with balanced profile
+    const filesResults = await filesSearch(context, {
+      query: "routing patterns",
+      boost_profile: "balanced",
+    });
+
+    const bundleResults = await contextBundle(context, {
+      goal: "routing patterns navigation",
+      boost_profile: "balanced",
+      limit: 10,
+    });
+
+    // Both should include docs/ files (docs/routing.md has "routing" and "patterns" in content)
+    const filesHasDocs = filesResults.some((r) => r.path.startsWith("docs/"));
+    const bundleHasDocs = bundleResults.context.some((r) => r.path.startsWith("docs/"));
+
+    expect(filesHasDocs).toBe(true);
+    expect(bundleHasDocs).toBe(true);
+
+    // Compare with default profile to verify balanced reduces score gap
+    const filesResultsDefault = await filesSearch(context, {
+      query: "routing patterns",
+      boost_profile: "default",
+    });
+
+    const bundleResultsDefault = await contextBundle(context, {
+      goal: "routing patterns navigation",
+      boost_profile: "default",
+      limit: 10,
+    });
+
+    // Find docs and impl files in both profiles
+    const filesDocsBalanced = filesResults.find((r) => r.path === "docs/routing.md");
+    const filesImplBalanced = filesResults.find((r) => r.path.startsWith("src/"));
+    const filesDocsDefault = filesResultsDefault.find((r) => r.path === "docs/routing.md");
+
+    // Verify balanced profile allows docs/ directory (which is blacklisted in default)
+    if (filesDocsBalanced && filesImplBalanced) {
+      expect(filesDocsBalanced.score).toBeGreaterThan(0);
+      expect(filesImplBalanced.score).toBeGreaterThan(0);
+    }
+
+    // In default profile, docs/ directory is blacklisted, so docs file has negative score
+    if (filesDocsDefault) {
+      expect(filesDocsDefault.score).toBeLessThan(0); // Should be blacklisted (-100)
+    }
+
+    // Same check for context_bundle
+    const bundleDocsBalanced = bundleResults.context.find((r) => r.path === "docs/routing.md");
+    const bundleImplBalanced = bundleResults.context.find((r) => r.path.startsWith("src/"));
+    const bundleDocsDefault = bundleResultsDefault.context.find(
+      (r) => r.path === "docs/routing.md"
+    );
+
+    if (bundleDocsBalanced && bundleImplBalanced) {
+      expect(bundleDocsBalanced.score).toBeGreaterThan(0);
+      expect(bundleImplBalanced.score).toBeGreaterThan(0);
+    }
+
+    // In default profile, docs/ directory is blacklisted, so docs file has negative score or is filtered out
+    if (bundleDocsDefault) {
+      expect(bundleDocsDefault.score).toBeLessThan(0); // Should be blacklisted (-100)
+    }
+  });
 });
