@@ -1,6 +1,8 @@
 import packageJson from "../../package.json" with { type: "json" };
 import { maskValue } from "../shared/security/masker.js";
 
+const RESPONSE_MASK_SKIP_KEYS = ["path"];
+
 import { ServerContext } from "./context.js";
 import { DegradeController } from "./fallbacks/degradeController.js";
 import {
@@ -27,19 +29,53 @@ import { withSpan } from "./observability/tracing.js";
  *
  * メモリリーク防止のため、保持する警告キーの数に上限を設定しています。
  */
+interface WarningManagerSharedState {
+  shownWarnings: Set<string>;
+  limitReachedWarningShown: { value: boolean };
+}
+
 export class WarningManager {
-  private readonly shownWarnings = new Set<string>();
-  public readonly responseWarnings: string[] = [];
+  private readonly shared: WarningManagerSharedState;
+  private requestWarnings: string[] = []; // Per-request warning buffer
   private readonly maxUniqueWarnings: number;
-  private limitReachedWarningShown = false;
 
   /**
    * WarningManagerを構築します
    *
    * @param maxUniqueWarnings - 追跡する一意の警告の最大数（デフォルト: 1000）
    */
-  constructor(maxUniqueWarnings: number = 1000) {
+  constructor(maxUniqueWarnings: number = 1000, sharedState?: WarningManagerSharedState) {
     this.maxUniqueWarnings = maxUniqueWarnings;
+    this.shared = sharedState ?? {
+      shownWarnings: new Set<string>(),
+      limitReachedWarningShown: { value: false },
+    };
+  }
+
+  /**
+   * 共有状態を保ったまま、新しい WarningManager インスタンスを作成します。
+   * リクエスト単位での警告管理に利用します。
+   */
+  fork(): WarningManager {
+    return new WarningManager(this.maxUniqueWarnings, this.shared);
+  }
+
+  /**
+   * 新しいリクエストコンテキストを開始し、前回のリクエストの警告をクリアします
+   *
+   * 各リクエストの開始時に呼び出す必要があります。
+   */
+  startRequest(): void {
+    this.requestWarnings = [];
+  }
+
+  /**
+   * 現在のリクエストの警告のみを取得します
+   *
+   * リクエスト間での警告の混入を防ぐため、配列のコピーを返します。
+   */
+  get responseWarnings(): string[] {
+    return [...this.requestWarnings];
   }
 
   /**
@@ -51,38 +87,61 @@ export class WarningManager {
    * @returns 警告が表示された場合はtrue、既に表示済みの場合はfalse
    */
   warnOnce(key: string, message: string, forResponse: boolean = false): boolean {
-    if (this.shownWarnings.has(key)) {
+    if (this.shared.shownWarnings.has(key)) {
       return false;
     }
 
     // メモリリーク防止: 上限に達したら新しい警告を追加しない
-    if (this.shownWarnings.size >= this.maxUniqueWarnings) {
-      if (!this.limitReachedWarningShown) {
+    if (this.shared.shownWarnings.size >= this.maxUniqueWarnings) {
+      if (!this.shared.limitReachedWarningShown.value) {
         console.warn(
           "WarningManager: Unique warning limit reached. No new warnings will be shown."
         );
-        this.limitReachedWarningShown = true;
+        this.shared.limitReachedWarningShown.value = true;
       }
       return false;
     }
 
     console.warn(message);
-    this.shownWarnings.add(key);
+    this.shared.shownWarnings.add(key);
 
     if (forResponse) {
-      this.responseWarnings.push(message);
+      this.requestWarnings.push(message);
     }
 
     return true;
   }
 
   /**
+   * リクエストごとに警告を表示します（サーバーライフタイムでの重複チェックなし）
+   *
+   * warnOnce()と異なり、この方法は毎回警告をレスポンスに追加します。
+   * ユーザーが危険なリクエストを繰り返し送信する場合に、
+   * 毎回通知する必要がある警告に使用します。
+   *
+   * リクエスト内での重複は排除され、同じキーの警告は1度だけ追加されます。
+   *
+   * @param key - 警告を識別するキー（ログ記録用）
+   * @param message - 表示する警告メッセージ
+   */
+  warnForRequest(key: string, message: string): void {
+    const keyPrefix = `[${key}]`;
+    if (this.requestWarnings.some((warning) => warning.startsWith(keyPrefix))) {
+      return;
+    }
+
+    const formattedMessage = `${keyPrefix} ${message}`;
+    this.requestWarnings.push(formattedMessage);
+    console.warn(formattedMessage);
+  }
+
+  /**
    * テスト用：表示済み警告の履歴をクリアします
    */
   reset(): void {
-    this.shownWarnings.clear();
-    this.responseWarnings.length = 0;
-    this.limitReachedWarningShown = false;
+    this.shared.shownWarnings.clear();
+    this.requestWarnings = [];
+    this.shared.limitReachedWarningShown.value = false;
   }
 }
 
@@ -138,39 +197,16 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
   {
     name: "context_bundle",
     description:
-      "🎯 PRIMARY TOOL: Extracts relevant code context for a specific task or question.\n\n" +
-      "Use this tool as your first step for any code-related task. It intelligently finds and ranks relevant files and code snippets using:\n" +
-      "- **Phrase-aware tokenization**: Recognizes compound terms (kebab-case like 'page-agent', snake_case like 'user_profile') as single phrases with 2× scoring weight\n" +
-      "- **Path-based scoring**: Boosts files when keywords appear in their path (e.g., searching 'auth' prioritizes src/auth/login.ts)\n" +
-      "- **File type prioritization**: Uses boost_profile to prioritize implementation files over docs (configurable)\n" +
-      "- **Dependency analysis**: Considers import relationships between files\n" +
-      "- **Semantic similarity**: Ranks by structural similarity to your query\n\n" +
-      "IMPORTANT: The 'goal' parameter MUST be a clear and specific description of your objective. Use concrete keywords, not abstract verbs.\n\n" +
-      "✅ GOOD EXAMPLES (use specific keywords):\n" +
-      "- goal='User authentication flow, JWT token validation'\n" +
-      "- goal='Canvas page routing, API endpoints, navigation patterns'\n" +
-      "- goal='Fix pagination off-by-one error in product listing'\n" +
-      "- goal='Database connection pooling, retry logic'\n" +
-      "- goal='page-agent Lambda handler request processing error handling'  (hyphenated terms recognized as phrases)\n" +
-      "- goal='context_bundle scoring logic'  (underscore terms recognized as phrases)\n\n" +
-      "❌ BAD EXAMPLES (too vague, avoid these):\n" +
-      "- goal='Understand how canvas pages are accessed' (starts with abstract verb)\n" +
-      "- goal='understand' (single word, no context)\n" +
-      "- goal='explore the authentication system' (vague verb + long sentence)\n" +
-      "- goal='fix bug' (which bug? be specific)\n" +
-      "- goal='authentication' (noun only, what about it?)\n" +
-      "- goal='authentication implementation' (too generic - specify: handler? validator? storage?)\n" +
-      "- goal='search implementation' (add concrete aspects: parser, ranking, indexer)\n\n" +
-      "GUIDELINE: Avoid generic terms like 'implementation', 'code', or 'logic' alone. " +
-      "Instead, specify concrete aspects: 'handler', 'validator', 'parser', 'storage', 'error handling', 'data flow'.\n\n" +
-      "TOKEN OPTIMIZATION: Use 'compact: true' to reduce token consumption by ~95%. Returns only metadata (path, range, why, score) without preview field. " +
-      "Combine with snippets.get for two-tier approach: first get candidate list (compact), then fetch selected content.\n\n" +
-      "Example workflow:\n" +
-      "  1. context_bundle({goal: 'auth handler', compact: true, limit: 10}) → ~2,500 tokens\n" +
-      "  2. Review paths and scores from results\n" +
-      "  3. snippets.get({path: result.context[0].path}) → Get only needed files\n" +
-      "Total: ~5K tokens instead of 55K tokens (90% savings)\n\n" +
-      "Returns ranked code snippets with explanations (e.g., 'phrase:page-agent', 'path-keyword:auth', 'dep:login.ts', 'boost:app-file') and automatically optimizes token usage.",
+      "Primary code discovery tool. Provide a concrete, keyword-rich `goal` (modules, files, symptoms) to receive ranked `context` entries containing `path`, `range`, optional `preview`, scoring `why`, and `score`. Avoid leading with generic imperatives such as 'find' or 'locate'; list the signals you have instead.\n\n" +
+      "Returns {context, tokens_estimate?, warnings?}; computing tokens_estimate is optional and should be requested explicitly when needed. Empty or vague goals raise an MCP error that asks for specific keywords, and imperative-only phrasing usually lowers ranking quality.\n\n" +
+      "Example: context_bundle({goal: 'pagination off-by-one bug; file=src/catalog/products.ts; expected=20 items; observed=19'}) surfaces the affected files. Less effective: goal='Find where pagination breaks'.\n\n" +
+      "Goal-crafting best practices (applies to every high-signal identifier, not only function names):\n" +
+      "- List the crucial identifiers (functions, hooks, components, file names, config IDs, etc.) first so the highest-signal terms are always at the front.\n" +
+      "- Stay within 3-5 concrete keywords (about 80 characters) to limit noise and keep scoring sharp.\n" +
+      "- Keep generic errors or narration minimal; if you need them, append short suffixes or parentheses after the identifiers.\n" +
+      "- Attach conditions or context as concise trailing phrases (e.g., 'conditional hook calls').\n\n" +
+      "Before: 'Find where pagination breaks in React hooks error'\n" +
+      "After: 'useOrdersPagination src/orders/pagination.ts offByOne (React hooks error)'.",
     inputSchema: {
       type: "object",
       required: ["goal"],
@@ -197,6 +233,11 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
             "Returns only metadata: path, range, why, score. Use with snippets.get for two-tier approach. " +
             "Default: true (v0.8.0+). Set to false if you need immediate code previews.",
         },
+        includeTokensEstimate: {
+          type: "boolean",
+          description:
+            "If true, computes the tokens_estimate field. This is slower and should be used only when you need projected token counts.",
+        },
         profile: {
           type: "string",
           description: "Evaluation profile name (bugfix, testfail, refactor, typeerror, feature).",
@@ -213,8 +254,9 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
           properties: {
             editing_path: {
               type: "string",
+              pattern: "^(?!.*\\.\\.)[A-Za-z0-9_./\\-]+$",
               description:
-                "Path to the file currently being edited. Strongly recommended to provide for better context.",
+                "Path to the file currently being edited. Strongly recommended to provide for better context; boosts that file and related dependencies in the bundle output.",
             },
             failing_tests: {
               type: "array",
@@ -233,7 +275,9 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
   {
     name: "semantic_rerank",
     description:
-      "Re-rank a list of file candidates by semantic similarity to a query text. Uses structural embeddings to compute similarity scores and combines them with existing scores. Use as a REFINEMENT step after files.search or when you have a list of candidates and want to prioritize them by semantic relevance. Not needed with context.bundle (which already does semantic ranking internally). Returns candidates sorted by combined score (base + semantic similarity). Example: after getting 20 search results, rerank them by semantic similarity to 'user authentication flow' to surface the most contextually relevant files.",
+      "Reorders candidate files by embedding similarity to `text`. Use after keyword or heuristic search when you already have `candidates` and want a semantic ranking update without fetching new files.\n\n" +
+      "Returns {candidates: [{path, semantic, base, combined}]}; purely read-only. Missing `text` or an empty candidate list causes an MCP error describing the required inputs.\n\n" +
+      "Example: semantic_rerank({text: 'JWT login flow', candidates: [...]}) reprioritises auth code. Invalid: semantic_rerank({text: '', candidates: [...]}) raises a validation error.",
     inputSchema: {
       type: "object",
       required: ["text", "candidates"],
@@ -260,20 +304,9 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
   {
     name: "files_search",
     description:
-      "Search files by specific keywords or identifiers. Use when you know EXACT terms to search for: function names, class names, error messages, or code patterns.\n\n" +
-      "IMPORTANT: For broader exploration like 'understand feature X' or 'how does Y work', use context.bundle instead. This tool is for TARGETED searches with specific identifiers.\n\n" +
-      "✅ GOOD EXAMPLES (specific identifiers):\n" +
-      "- query='validateToken' (exact function name)\n" +
-      "- query='AuthenticationError' (specific class/error)\n" +
-      "- query='Cannot read property' (exact error message)\n" +
-      "- query='import { jwt }' (specific import pattern)\n" +
-      "- query='userId' (variable name)\n\n" +
-      "❌ BAD EXAMPLES (too vague or abstract):\n" +
-      "- query='understand authentication' (use context.bundle instead)\n" +
-      "- query='how login works' (use context.bundle instead)\n" +
-      "- query='explore' (no specific target)\n" +
-      "- query='auth' (too generic, will match too many files)\n\n" +
-      "Supports filters: lang (e.g., 'typescript'), ext (e.g., '.ts'), path_prefix (e.g., 'src/auth/'). Returns matching files with previews and line numbers.",
+      "Token-aware substring search for precise identifiers, error messages, or import fragments. Prefer this tool when you already know the exact string you need to locate; use `context_bundle` for exploratory work.\n\n" +
+      "Returns an array of `{path, matchLine, lang, ext, score}` objects with optional `preview`; the tool never mutates the repo. Set `compact: true` to omit previews entirely for maximum token savings. Empty queries raise an MCP error prompting you to provide a concrete keyword. If DuckDB is unavailable but the server runs with `--allow-degrade`, the same array shape is returned using filesystem-based fallbacks (with `lang`/`ext` set to null).\n\n" +
+      'Example: files_search({query: "AuthenticationError", path_prefix: "src/auth/"}) narrows to auth handlers. Invalid: files_search({query: ""}) reports that the query must be non-empty.',
     inputSchema: {
       type: "object",
       required: ["query"],
@@ -296,6 +329,7 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
         },
         path_prefix: {
           type: "string",
+          pattern: "^(?!.*\\.\\.)[A-Za-z0-9_./\\-]+/?$",
           description: "Filter by path prefix (e.g., 'src/auth/', 'tests/'). No '..' allowed.",
         },
         limit: {
@@ -311,34 +345,59 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
           description:
             'File type boosting mode: "default" prioritizes implementation files (src/app/, src/components/), "docs" prioritizes documentation (*.md), "none" disables boosting. Default is "default".',
         },
+        compact: {
+          type: "boolean",
+          description:
+            "If true, omits previews to minimize response tokens. Pair with snippets_get for detail-on-demand workflows.",
+        },
       },
     },
   },
   {
     name: "snippets_get",
     description:
-      "Retrieve code snippets from a specific file path. Intelligently extracts relevant code sections using symbol boundaries (functions, classes, methods) when available. Use when you already know the exact file path and want to read its content efficiently without loading the entire file. Automatically selects appropriate snippet based on start_line or returns symbol-aligned chunks. Reduces token usage compared to reading full files. Use context.bundle instead if you don't know which file to read. Example: path='src/auth/login.ts' returns the most relevant function or class in that file.",
+      "Focused snippet retrieval by file path. The tool uses recorded symbol boundaries to return the smallest readable span, or falls back to the requested line window.\n\n" +
+      "Returns {path, startLine, endLine, totalLines, symbolName, symbolKind} with optional `content`. Set `compact: true` to omit content, or `include_line_numbers: true` to prefix each line with its number; this is a read-only lookup. Missing `path`, binary files, or absent index entries raise an MCP error with guidance to re-run the indexer.\n\n" +
+      "Example: snippets_get({path: 'src/auth/login.ts'}) surfaces the enclosing function. Invalid: snippets_get({path: 'assets/logo.png'}) reports that binary snippets are unsupported.",
     inputSchema: {
       type: "object",
       required: ["path"],
       additionalProperties: true,
       properties: {
-        path: { type: "string" },
+        path: {
+          type: "string",
+          pattern: "^(?!.*\\.\\.)[A-Za-z0-9_./\\-]+$",
+        },
         start_line: { type: "number", minimum: 0 },
         end_line: { type: "number", minimum: 0 },
+        compact: {
+          type: "boolean",
+          description:
+            "If true, returns only metadata (path, range, totals, symbols) without content payload.",
+        },
+        include_line_numbers: {
+          type: "boolean",
+          description:
+            "If true, prefixes each returned line with its line number (ignored when compact is true).",
+        },
       },
     },
   },
   {
     name: "deps_closure",
     description:
-      "Traverse the dependency graph from a starting file. Finds all files that depend on the target (inbound) or that the target depends on (outbound). Essential for impact analysis: understanding what breaks if you change a file, tracing import chains, or mapping module relationships. Returns nodes (files/packages) and edges (import statements) with depth levels. Use when: planning refactoring, understanding module boundaries, finding circular dependencies, or analyzing affected files. Example: path='src/utils.ts', direction='inbound' shows all files importing utils.ts. Set max_depth to limit traversal (default 3).",
+      "Dependency graph traversal from a starting file. Use it during impact analysis to map outbound imports or inbound dependents before large refactors.\n\n" +
+      "Returns {root, direction, nodes, edges}; nodes/edges include depth metadata and never mutate repository state. Invalid paths, excessive depth, or non-indexed files raise MCP errors with remediation tips.\n\n" +
+      "Example: deps_closure({path: 'src/shared/config.ts', direction: 'inbound', max_depth: 2}) lists consumers. Invalid: deps_closure({path: '../secret'}) fails path validation.",
     inputSchema: {
       type: "object",
       required: ["path"],
       additionalProperties: true,
       properties: {
-        path: { type: "string" },
+        path: {
+          type: "string",
+          pattern: "^(?!.*\\.\\.)[A-Za-z0-9_./\\-]+$",
+        },
         max_depth: { type: "number", minimum: 0 },
         direction: { type: "string", enum: ["outbound", "inbound"] },
         include_packages: { type: "boolean" },
@@ -399,6 +458,10 @@ function parseFilesSearchParams(input: unknown): FilesSearchParams {
     params.boost_profile = boostProfile;
   }
 
+  if (typeof record.compact === "boolean") {
+    params.compact = record.compact;
+  }
+
   return params;
 }
 
@@ -424,6 +487,11 @@ function parseSnippetsGetParams(input: unknown): SnippetsGetParams {
   };
   if (startLine !== undefined) params.start_line = startLine;
   if (endLine !== undefined) params.end_line = endLine;
+  if (typeof record.compact === "boolean") params.compact = record.compact;
+  const includeLineNumbersValue = record.includeLineNumbers ?? record.include_line_numbers;
+  if (typeof includeLineNumbersValue === "boolean") {
+    params.includeLineNumbers = includeLineNumbersValue;
+  }
   return params;
 }
 
@@ -536,6 +604,11 @@ function parseContextBundleParams(input: unknown, context: ServerContext): Conte
     );
   }
 
+  const includeTokensEstimate = record.includeTokensEstimate ?? record.include_tokens_estimate;
+  if (typeof includeTokensEstimate === "boolean") {
+    params.includeTokensEstimate = includeTokensEstimate;
+  }
+
   return params;
 }
 
@@ -638,17 +711,18 @@ async function executeToolByName(
     case "files_search": {
       const params = parseFilesSearchParams(toolParams);
       if (degrade.current.active && allowDegrade) {
-        return {
-          hits: degrade.search(params.query, params.limit ?? 20).map((hit) => ({
+        // Use same output option logic as normal mode for consistency
+        const includePreview = params.compact !== true;
+        return degrade.search(params.query, params.limit ?? 20).map((hit) => {
+          const result = {
             path: hit.path,
-            preview: hit.preview,
             matchLine: hit.matchLine,
             lang: null,
             ext: null,
             score: 0,
-          })),
-          degrade: true,
-        };
+          };
+          return includePreview ? { ...result, preview: hit.preview } : result;
+        });
       } else {
         const handler = async () =>
           await withSpan("files_search", async () => await filesSearch(context, params));
@@ -676,6 +750,11 @@ export function createRpcHandler(
   dependencies: RpcHandlerDependencies
 ): (payload: JsonRpcRequest) => Promise<RpcHandleResult | null> {
   const { context, degrade, metrics, tokens, allowDegrade } = dependencies;
+  const buildRequestContext = (): ServerContext => {
+    const warningManager = context.warningManager.fork();
+    warningManager.startRequest();
+    return { ...context, warningManager };
+  };
   return async (payload: JsonRpcRequest): Promise<RpcHandleResult | null> => {
     const hasResponseId = typeof payload.id === "string" || typeof payload.id === "number";
     try {
@@ -737,12 +816,13 @@ export function createRpcHandler(
           }
 
           const toolArguments = paramsRecord.arguments ?? {};
+          const scopedContext = buildRequestContext();
 
           try {
             const toolResult = await executeToolByName(
               toolName,
               toolArguments,
-              context,
+              scopedContext,
               degrade,
               allowDegrade
             );
@@ -780,50 +860,55 @@ export function createRpcHandler(
         }
         // Legacy direct method invocation (backward compatibility)
         case "context_bundle": {
+          const scopedContext = buildRequestContext();
           result = await executeToolByName(
             "context_bundle",
             payload.params,
-            context,
+            scopedContext,
             degrade,
             allowDegrade
           );
           break;
         }
         case "semantic_rerank": {
+          const scopedContext = buildRequestContext();
           result = await executeToolByName(
             "semantic_rerank",
             payload.params,
-            context,
+            scopedContext,
             degrade,
             allowDegrade
           );
           break;
         }
         case "files_search": {
+          const scopedContext = buildRequestContext();
           result = await executeToolByName(
             "files_search",
             payload.params,
-            context,
+            scopedContext,
             degrade,
             allowDegrade
           );
           break;
         }
         case "snippets_get": {
+          const scopedContext = buildRequestContext();
           result = await executeToolByName(
             "snippets_get",
             payload.params,
-            context,
+            scopedContext,
             degrade,
             allowDegrade
           );
           break;
         }
         case "deps_closure": {
+          const scopedContext = buildRequestContext();
           result = await executeToolByName(
             "deps_closure",
             payload.params,
-            context,
+            scopedContext,
             degrade,
             allowDegrade
           );
@@ -842,7 +927,7 @@ export function createRpcHandler(
             : null;
         }
       }
-      const masked = maskValue(result, { tokens });
+      const masked = maskValue(result, { tokens, skipKeys: RESPONSE_MASK_SKIP_KEYS });
       if (masked.applied > 0) {
         metrics.recordMask(masked.applied);
       }

@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { realpathSync } from "node:fs";
 import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -28,8 +29,11 @@ export async function createTempRepo(files: Record<string, string>): Promise<Tem
   await execFileAsync("git", ["add", "."], { cwd: repoDir });
   await execFileAsync("git", ["commit", "-m", "init"], { cwd: repoDir });
 
+  // Normalize path to match what runIndexer stores (Fix #2 compatibility)
+  const normalizedPath = realpathSync.native(repoDir);
+
   return {
-    path: repoDir,
+    path: normalizedPath,
     cleanup: async () => {
       await rm(repoDir, { recursive: true, force: true });
     },

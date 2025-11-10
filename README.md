@@ -2,7 +2,7 @@
 
 > Intelligent code context extraction for LLMs via Model Context Protocol
 
-[![Version](https://img.shields.io/badge/version-0.9.0-blue.svg)](package.json)
+[![Version](https://img.shields.io/badge/version-0.9.8-blue.svg)](package.json)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.6-blue.svg)](https://www.typescriptlang.org/)
 [![MCP](https://img.shields.io/badge/MCP-Compatible-green.svg)](https://modelcontextprotocol.io/)
@@ -18,6 +18,13 @@
 - **👁️ Auto-Sync**: Watch mode automatically re-indexes when files change
 - **🛡️ Reliable**: Degrade-first architecture works without optional extensions
 - **📝 Phrase-Aware**: Recognizes compound terms (kebab-case, snake_case) for precise matching
+- **🔒 Concurrency-Safe** _(v0.9.7+)_: Per-database queues, canonicalized DuckDB paths, and bootstrap-safe locking prevent FTS rebuild conflicts and keep locks consistent across symlinks—even on first run
+
+## 🆕 What’s New in v0.9.8
+
+- First-time bootstrap now skips redundant DuckDB locking, so `kiri` / `kiri-server` can index fresh repositories without deadlocking on their own locks.
+- Added regression coverage (`tests/server/indexBootstrap.spec.ts`) to ensure repeated `ensureDatabaseIndexed` calls reuse the lock cleanly.
+- All reliability upgrades from v0.9.7 (automatic ILIKE degrade during FTS rebuilds, canonicalized DB paths, expanded verify suite) remain in effect.
 
 ## ⚙️ Prerequisites
 
@@ -108,6 +115,25 @@ For very large repositories (10,000+ files), you may need to increase the timeou
 | --------------------------- | ------- | ------------------------------------------------------------------------------ |
 | `KIRI_DAEMON_READY_TIMEOUT` | `240`   | Daemon initialization timeout in seconds. Increase for very large repositories |
 
+**Dart Analysis Server Configuration:**
+
+For projects containing Dart code, KIRI uses the Dart Analysis Server to extract accurate symbol information. The following environment variables control the Dart analyzer behavior:
+
+| Variable                       | Default | Description                                                                                       |
+| ------------------------------ | ------- | ------------------------------------------------------------------------------------------------- |
+| `DART_SDK_DETECT_TIMEOUT_MS`   | `5000`  | Timeout in milliseconds for SDK detection (prevents hanging on network issues)                    |
+| `DART_ANALYSIS_MAX_CLIENTS`    | `8`     | Maximum concurrent Dart Analysis Server processes (prevents memory exhaustion on large monorepos) |
+| `DART_ANALYSIS_CLIENT_WAIT_MS` | `10000` | Max wait time in milliseconds for available analysis server slot                                  |
+| `DART_ANALYSIS_IDLE_MS`        | `60000` | Idle time in milliseconds before disposing unused analysis server (60s default)                   |
+| `DART_FILE_QUEUE_TTL_MS`       | `30000` | TTL in milliseconds for file-level request queues (prevents memory leaks)                         |
+
+**When to adjust these values:**
+
+- **Large Dart projects (>500 files)**: Increase `DART_ANALYSIS_MAX_CLIENTS` to 16 or 32
+- **Network/UNC path issues**: Decrease `DART_SDK_DETECT_TIMEOUT_MS` to 2000 for faster failure
+- **Memory constraints**: Decrease `DART_ANALYSIS_MAX_CLIENTS` to 4 and increase `DART_ANALYSIS_IDLE_MS` to 30000
+- **Monorepo with many workspaces**: Increase `DART_ANALYSIS_CLIENT_WAIT_MS` to 30000
+
 #### For Codex CLI
 
 Edit `~/.config/codex/mcp.toml`:
@@ -157,6 +183,8 @@ KIRI provides 5 MCP tools for intelligent code exploration:
 
 The most powerful tool for getting started with unfamiliar code. Provide a task description, and KIRI returns the most relevant code snippets using phrase-aware tokenization and path-based scoring.
 
+Tip: Avoid leading command words like `find` or `show`; instead list concrete modules, files, and observed symptoms to keep rankings sharp.
+
 **v0.8.0 improvements:**
 
 - **⚡ Compact mode default (BREAKING)**: `compact: true` is now default, reducing token usage by ~95% (55K → 2.5K tokens). Set `compact: false` to restore full preview mode.
@@ -183,7 +211,7 @@ The most powerful tool for getting started with unfamiliar code. Provide a task 
 ```typescript
 // Request
 {
-  "goal": "User authentication flow with JWT tokens",
+  "goal": "auth token refresh bug; file=src/server/auth/session.ts; symptom=expired tokens accepted",
   "limit": 10
 }
 
@@ -649,8 +677,18 @@ KIRI provides AST-based symbol extraction for the following languages:
 | **TypeScript** | `.ts`, `.tsx` | `class`, `interface`, `enum`, `function`, `method`                                       | TypeScript Compiler API             |
 | **Swift**      | `.swift`      | `class`, `struct`, `protocol`, `enum`, `extension`, `func`, `init`, `property`           | tree-sitter-swift                   |
 | **PHP**        | `.php`        | `class`, `interface`, `trait`, `function`, `method`, `property`, `constant`, `namespace` | tree-sitter-php (pure & HTML-mixed) |
+| **Java**       | `.java`       | `class`, `interface`, `enum`, `annotation`, `method`, `constructor`, `field`             | tree-sitter-java                    |
+| **Dart**       | `.dart`       | `class`, `mixin`, `enum`, `extension`, `function`, `method`, `getter`, `setter`          | Dart Analysis Server                |
 
-Other languages are detected and indexed but use full-file snippets instead of symbol-level extraction. Support for additional languages (Rust, Go, Python, Java, etc.) is planned.
+**Dart Integration Features:**
+
+- Full IDE-quality symbol extraction via official Dart Analysis Server
+- Automatic SDK detection from PATH or `DART_SDK` environment variable
+- Memory-efficient client pooling with configurable limits
+- Windows path normalization for case-insensitive filesystems
+- Graceful degradation when Dart SDK is unavailable
+
+Other languages are detected and indexed but use full-file snippets instead of symbol-level extraction. Support for additional languages (Rust, Go, Python, etc.) is planned.
 
 ## 🏗️ How It Works
 

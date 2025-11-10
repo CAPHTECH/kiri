@@ -4,7 +4,7 @@ import { analyzeSource } from "../../src/indexer/codeintel.js";
 
 describe("PHP code intelligence", () => {
   describe("symbol extraction", () => {
-    it("extracts class declaration with methods and properties", () => {
+    it("extracts class declaration with methods and properties", async () => {
       const phpCode = `<?php
 /**
  * A sample class with documentation
@@ -21,7 +21,7 @@ class MyClass {
   }
 }`;
 
-      const result = analyzeSource("test.php", "PHP", phpCode, new Set());
+      const result = await analyzeSource("test.php", "PHP", phpCode, new Set());
 
       expect(result.symbols).toHaveLength(4);
 
@@ -64,7 +64,7 @@ class MyClass {
       });
     });
 
-    it("extracts interface declaration", () => {
+    it("extracts interface declaration", async () => {
       const phpCode = `<?php
 /**
  * Sample interface
@@ -74,7 +74,7 @@ interface MyInterface {
   public function anotherMethod($param);
 }`;
 
-      const result = analyzeSource("test.php", "PHP", phpCode, new Set());
+      const result = await analyzeSource("test.php", "PHP", phpCode, new Set());
 
       expect(result.symbols).toHaveLength(3);
       expect(result.symbols[0]).toMatchObject({
@@ -94,7 +94,7 @@ interface MyInterface {
       });
     });
 
-    it("extracts trait declaration", () => {
+    it("extracts trait declaration", async () => {
       const phpCode = `<?php
 trait MyTrait {
   private $traitProperty;
@@ -104,7 +104,7 @@ trait MyTrait {
   }
 }`;
 
-      const result = analyzeSource("test.php", "PHP", phpCode, new Set());
+      const result = await analyzeSource("test.php", "PHP", phpCode, new Set());
 
       expect(result.symbols).toHaveLength(3);
       expect(result.symbols[0]).toMatchObject({
@@ -123,7 +123,7 @@ trait MyTrait {
       });
     });
 
-    it("extracts top-level function", () => {
+    it("extracts top-level function", async () => {
       const phpCode = `<?php
 /**
  * A top-level function
@@ -132,7 +132,7 @@ function myFunction($param1, $param2) {
   return $param1 + $param2;
 }`;
 
-      const result = analyzeSource("test.php", "PHP", phpCode, new Set());
+      const result = await analyzeSource("test.php", "PHP", phpCode, new Set());
 
       expect(result.symbols).toHaveLength(1);
       expect(result.symbols[0]).toMatchObject({
@@ -145,7 +145,7 @@ function myFunction($param1, $param2) {
       expect(result.symbols[0]?.signature).toContain("function myFunction");
     });
 
-    it("extracts namespace declaration", () => {
+    it("extracts namespace declaration", async () => {
       const phpCode = `<?php
 namespace App\\Services;
 
@@ -155,7 +155,7 @@ class MyService {
   }
 }`;
 
-      const result = analyzeSource("test.php", "PHP", phpCode, new Set());
+      const result = await analyzeSource("test.php", "PHP", phpCode, new Set());
 
       expect(result.symbols).toHaveLength(3);
       expect(result.symbols[0]).toMatchObject({
@@ -174,14 +174,14 @@ class MyService {
       });
     });
 
-    it("extracts class constants", () => {
+    it("extracts class constants", async () => {
       const phpCode = `<?php
 class MyClass {
   const VERSION = '1.0.0';
   const STATUS_ACTIVE = 1;
 }`;
 
-      const result = analyzeSource("test.php", "PHP", phpCode, new Set());
+      const result = await analyzeSource("test.php", "PHP", phpCode, new Set());
 
       expect(result.symbols).toHaveLength(3);
       expect(result.symbols[0]).toMatchObject({
@@ -198,7 +198,7 @@ class MyClass {
       });
     });
 
-    it("extracts static methods and properties", () => {
+    it("extracts static methods and properties", async () => {
       const phpCode = `<?php
 class StaticExample {
   private static $counter = 0;
@@ -208,7 +208,7 @@ class StaticExample {
   }
 }`;
 
-      const result = analyzeSource("test.php", "PHP", phpCode, new Set());
+      const result = await analyzeSource("test.php", "PHP", phpCode, new Set());
 
       expect(result.symbols).toHaveLength(3);
       expect(result.symbols[0]).toMatchObject({
@@ -225,7 +225,7 @@ class StaticExample {
       });
     });
 
-    it("extracts abstract classes and methods", () => {
+    it("extracts abstract classes and methods", async () => {
       const phpCode = `<?php
 abstract class AbstractClass {
   abstract public function abstractMethod();
@@ -235,7 +235,7 @@ abstract class AbstractClass {
   }
 }`;
 
-      const result = analyzeSource("test.php", "PHP", phpCode, new Set());
+      const result = await analyzeSource("test.php", "PHP", phpCode, new Set());
 
       expect(result.symbols).toHaveLength(3);
       expect(result.symbols[0]).toMatchObject({
@@ -252,7 +252,7 @@ abstract class AbstractClass {
       });
     });
 
-    it("extracts visibility modifiers correctly", () => {
+    it("extracts visibility modifiers correctly", async () => {
       const phpCode = `<?php
 class VisibilityExample {
   public $publicProp;
@@ -264,7 +264,7 @@ class VisibilityExample {
   private function privateMethod() {}
 }`;
 
-      const result = analyzeSource("test.php", "PHP", phpCode, new Set());
+      const result = await analyzeSource("test.php", "PHP", phpCode, new Set());
 
       expect(result.symbols).toHaveLength(7);
       expect(result.symbols[0]).toMatchObject({
@@ -281,7 +281,7 @@ class VisibilityExample {
       expect(result.symbols[6]?.name).toBe("privateMethod");
     });
 
-    it("handles multiple classes in one file", () => {
+    it("handles multiple classes in one file", async () => {
       const phpCode = `<?php
 class FirstClass {
   public function firstMethod() {}
@@ -291,7 +291,7 @@ class SecondClass {
   public function secondMethod() {}
 }`;
 
-      const result = analyzeSource("test.php", "PHP", phpCode, new Set());
+      const result = await analyzeSource("test.php", "PHP", phpCode, new Set());
 
       expect(result.symbols).toHaveLength(4);
       expect(result.symbols[0]).toMatchObject({
@@ -314,7 +314,7 @@ class SecondClass {
   });
 
   describe("snippet generation", () => {
-    it("generates snippets aligned to symbol boundaries", () => {
+    it("generates snippets aligned to symbol boundaries", async () => {
       const phpCode = `<?php
 class MyClass {
   public function myMethod() {
@@ -322,7 +322,7 @@ class MyClass {
   }
 }`;
 
-      const result = analyzeSource("test.php", "PHP", phpCode, new Set());
+      const result = await analyzeSource("test.php", "PHP", phpCode, new Set());
 
       expect(result.snippets).toHaveLength(2);
       expect(result.snippets[0]).toMatchObject({
@@ -339,7 +339,7 @@ class MyClass {
   });
 
   describe("dependency analysis", () => {
-    it("extracts use statements for packages", () => {
+    it("extracts use statements for packages", async () => {
       const phpCode = `<?php
 use App\\Services\\MyService;
 use Vendor\\Package\\AnotherClass;
@@ -348,7 +348,7 @@ class MyClass {
   public function test() {}
 }`;
 
-      const result = analyzeSource("test.php", "PHP", phpCode, new Set());
+      const result = await analyzeSource("test.php", "PHP", phpCode, new Set());
 
       expect(result.dependencies).toHaveLength(2);
       expect(result.dependencies).toContainEqual({
@@ -363,7 +363,7 @@ class MyClass {
       });
     });
 
-    it("extracts multiple use statements from grouped imports", () => {
+    it("extracts multiple use statements from grouped imports", async () => {
       const phpCode = `<?php
 use App\\Services\\{ServiceA, ServiceB, ServiceC};
 
@@ -371,7 +371,7 @@ class MyClass {
   public function test() {}
 }`;
 
-      const result = analyzeSource("test.php", "PHP", phpCode, new Set());
+      const result = await analyzeSource("test.php", "PHP", phpCode, new Set());
 
       expect(result.dependencies).toHaveLength(3);
       expect(result.dependencies).toEqual(
@@ -395,7 +395,7 @@ class MyClass {
       );
     });
 
-    it("handles aliased imports", () => {
+    it("handles aliased imports", async () => {
       const phpCode = `<?php
 use App\\Services\\LongServiceName as Service;
 
@@ -403,20 +403,20 @@ class MyClass {
   public function test() {}
 }`;
 
-      const result = analyzeSource("test.php", "PHP", phpCode, new Set());
+      const result = await analyzeSource("test.php", "PHP", phpCode, new Set());
 
       expect(result.dependencies).toHaveLength(1);
       expect(result.dependencies[0]?.dst).toContain("LongServiceName");
     });
 
-    it("treats all namespaced imports as packages (interim until composer.json parsing)", () => {
+    it("treats all namespaced imports as packages (interim until composer.json parsing)", async () => {
       const phpCode = `<?php
 use App\\Services\\MyService;`;
 
       // Even if the file exists in fileSet, it should be treated as a package
       // until proper PSR-4 resolution via composer.json is implemented
       const fileSet = new Set(["App/Services/MyService.php"]);
-      const result = analyzeSource("test.php", "PHP", phpCode, fileSet);
+      const result = await analyzeSource("test.php", "PHP", phpCode, fileSet);
 
       expect(result.dependencies).toHaveLength(1);
       expect(result.dependencies[0]?.dstKind).toBe("package");
@@ -425,14 +425,14 @@ use App\\Services\\MyService;`;
   });
 
   describe("signature extraction", () => {
-    it("truncates long signatures to 200 characters", () => {
+    it("truncates long signatures to 200 characters", async () => {
       const longParams = Array.from({ length: 20 }, (_, i) => `$param${i}`).join(", ");
       const phpCode = `<?php
 function longFunction(${longParams}) {
   return 'result';
 }`;
 
-      const result = analyzeSource("test.php", "PHP", phpCode, new Set());
+      const result = await analyzeSource("test.php", "PHP", phpCode, new Set());
 
       expect(result.symbols).toHaveLength(1);
       const signature = result.symbols[0]?.signature ?? "";
@@ -441,14 +441,14 @@ function longFunction(${longParams}) {
       expect(signature).not.toContain("return");
     });
 
-    it("excludes function body from signature", () => {
+    it("excludes function body from signature", async () => {
       const phpCode = `<?php
 function myFunction($param) {
   $result = $param * 2;
   return $result;
 }`;
 
-      const result = analyzeSource("test.php", "PHP", phpCode, new Set());
+      const result = await analyzeSource("test.php", "PHP", phpCode, new Set());
 
       expect(result.symbols).toHaveLength(1);
       const signature = result.symbols[0]?.signature ?? "";
@@ -457,7 +457,7 @@ function myFunction($param) {
       expect(signature).not.toContain("return");
     });
 
-    it("compresses signature to single line", () => {
+    it("compresses signature to single line", async () => {
       const phpCode = `<?php
 function multilineFunction(
   $param1,
@@ -467,7 +467,7 @@ function multilineFunction(
   return 'result';
 }`;
 
-      const result = analyzeSource("test.php", "PHP", phpCode, new Set());
+      const result = await analyzeSource("test.php", "PHP", phpCode, new Set());
 
       expect(result.symbols).toHaveLength(1);
       const signature = result.symbols[0]?.signature ?? "";
@@ -477,7 +477,7 @@ function multilineFunction(
   });
 
   describe("PHPDoc comment extraction", () => {
-    it("extracts /** */ style documentation", () => {
+    it("extracts /** */ style documentation", async () => {
       const phpCode = `<?php
 /**
  * This is a class documentation
@@ -492,7 +492,7 @@ class MyClass {
   public function myMethod($param) {}
 }`;
 
-      const result = analyzeSource("test.php", "PHP", phpCode, new Set());
+      const result = await analyzeSource("test.php", "PHP", phpCode, new Set());
 
       expect(result.symbols).toHaveLength(2);
       expect(result.symbols[0]?.doc).toContain("This is a class documentation");
@@ -502,7 +502,7 @@ class MyClass {
       expect(result.symbols[1]?.doc).toContain("@return void");
     });
 
-    it("does not extract non-PHPDoc comments", () => {
+    it("does not extract non-PHPDoc comments", async () => {
       const phpCode = `<?php
 // This is a single-line comment
 class MyClass {
@@ -510,7 +510,7 @@ class MyClass {
   public function myMethod() {}
 }`;
 
-      const result = analyzeSource("test.php", "PHP", phpCode, new Set());
+      const result = await analyzeSource("test.php", "PHP", phpCode, new Set());
 
       expect(result.symbols).toHaveLength(2);
       expect(result.symbols[0]?.doc).toBeNull();
@@ -519,41 +519,41 @@ class MyClass {
   });
 
   describe("edge cases", () => {
-    it("handles empty PHP file", () => {
+    it("handles empty PHP file", async () => {
       const phpCode = "<?php\n";
 
-      const result = analyzeSource("test.php", "PHP", phpCode, new Set());
+      const result = await analyzeSource("test.php", "PHP", phpCode, new Set());
 
       expect(result.symbols).toHaveLength(0);
       expect(result.snippets).toHaveLength(0);
       expect(result.dependencies).toHaveLength(0);
     });
 
-    it("handles file with only imports", () => {
+    it("handles file with only imports", async () => {
       const phpCode = `<?php
 use App\\Services\\MyService;
 use Vendor\\Package\\AnotherClass;`;
 
-      const result = analyzeSource("test.php", "PHP", phpCode, new Set());
+      const result = await analyzeSource("test.php", "PHP", phpCode, new Set());
 
       expect(result.symbols).toHaveLength(0);
       expect(result.dependencies).toHaveLength(2);
     });
 
-    it("handles symbols without documentation", () => {
+    it("handles symbols without documentation", async () => {
       const phpCode = `<?php
 class UndocumentedClass {
   public function undocumentedMethod() {}
 }`;
 
-      const result = analyzeSource("test.php", "PHP", phpCode, new Set());
+      const result = await analyzeSource("test.php", "PHP", phpCode, new Set());
 
       expect(result.symbols).toHaveLength(2);
       expect(result.symbols[0]?.doc).toBeNull();
       expect(result.symbols[1]?.doc).toBeNull();
     });
 
-    it("handles nested classes (PHP 7.0+ anonymous classes)", () => {
+    it("handles nested classes (PHP 7.0+ anonymous classes)", async () => {
       const phpCode = `<?php
 class OuterClass {
   public function getAnonymousClass() {
@@ -563,7 +563,7 @@ class OuterClass {
   }
 }`;
 
-      const result = analyzeSource("test.php", "PHP", phpCode, new Set());
+      const result = await analyzeSource("test.php", "PHP", phpCode, new Set());
 
       // Should extract outer class and its method at minimum
       expect(result.symbols.length).toBeGreaterThanOrEqual(2);
@@ -573,11 +573,11 @@ class OuterClass {
       });
     });
 
-    it("returns empty result for unsupported language", () => {
+    it("returns empty result for unsupported language", async () => {
       const phpCode = `<?php
 class MyClass {}`;
 
-      const result = analyzeSource("test.php", "JavaScript", phpCode, new Set());
+      const result = await analyzeSource("test.php", "JavaScript", phpCode, new Set());
 
       expect(result.symbols).toHaveLength(0);
       expect(result.snippets).toHaveLength(0);
@@ -586,7 +586,7 @@ class MyClass {}`;
   });
 
   describe("HTML-mixed PHP", () => {
-    it("extracts symbols from HTML-mixed PHP files", () => {
+    it("extracts symbols from HTML-mixed PHP files", async () => {
       const htmlMixedCode = `<!DOCTYPE html>
 <html>
 <head>
@@ -612,7 +612,7 @@ class MyClass {}`;
 </body>
 </html>`;
 
-      const result = analyzeSource("test.php", "PHP", htmlMixedCode, new Set());
+      const result = await analyzeSource("test.php", "PHP", htmlMixedCode, new Set());
 
       // Should extract class, method, and function
       expect(result.symbols).toHaveLength(3);
@@ -630,7 +630,7 @@ class MyClass {}`;
       });
     });
 
-    it("extracts dependencies from HTML-mixed PHP files", () => {
+    it("extracts dependencies from HTML-mixed PHP files", async () => {
       const htmlMixedCode = `<!DOCTYPE html>
 <html>
 <body>
@@ -645,7 +645,7 @@ class MyClass {}`;
 </body>
 </html>`;
 
-      const result = analyzeSource("test.php", "PHP", htmlMixedCode, new Set());
+      const result = await analyzeSource("test.php", "PHP", htmlMixedCode, new Set());
 
       expect(result.dependencies).toHaveLength(3);
       expect(result.dependencies).toContainEqual({
@@ -665,7 +665,7 @@ class MyClass {}`;
       });
     });
 
-    it("handles multiple PHP blocks in HTML", () => {
+    it("handles multiple PHP blocks in HTML", async () => {
       const htmlMixedCode = `<!DOCTYPE html>
 <html>
 <body>
@@ -683,7 +683,7 @@ class MyClass {}`;
 </body>
 </html>`;
 
-      const result = analyzeSource("test.php", "PHP", htmlMixedCode, new Set());
+      const result = await analyzeSource("test.php", "PHP", htmlMixedCode, new Set());
 
       expect(result.symbols).toHaveLength(4);
       expect(result.symbols[0]?.name).toBe("FirstClass");
@@ -692,13 +692,13 @@ class MyClass {}`;
       expect(result.symbols[3]?.name).toBe("second");
     });
 
-    it("detects pure PHP files correctly", () => {
+    it("detects pure PHP files correctly", async () => {
       const purePhpCode = `<?php
 class MyClass {
     public function test() {}
 }`;
 
-      const result = analyzeSource("test.php", "PHP", purePhpCode, new Set());
+      const result = await analyzeSource("test.php", "PHP", purePhpCode, new Set());
 
       expect(result.symbols).toHaveLength(2);
       expect(result.symbols[0]).toMatchObject({
@@ -707,14 +707,14 @@ class MyClass {
       });
     });
 
-    it("handles PHP files without <?php tag as HTML-mixed", () => {
+    it("handles PHP files without <?php tag as HTML-mixed", async () => {
       const noTagCode = `<html>
 <body>
     <h1>No PHP here</h1>
 </body>
 </html>`;
 
-      const result = analyzeSource("test.php", "PHP", noTagCode, new Set());
+      const result = await analyzeSource("test.php", "PHP", noTagCode, new Set());
 
       // Should parse without errors but extract no symbols
       expect(result.symbols).toHaveLength(0);
@@ -722,7 +722,7 @@ class MyClass {
   });
 
   describe("edge cases for PHP type detection", () => {
-    it("correctly detects pure PHP file with shebang", () => {
+    it("correctly detects pure PHP file with shebang", async () => {
       const shebangCode = `#!/usr/bin/env php
 <?php
 class MyCliTool {
@@ -731,7 +731,7 @@ class MyCliTool {
   }
 }`;
 
-      const result = analyzeSource("test.php", "PHP", shebangCode, new Set());
+      const result = await analyzeSource("test.php", "PHP", shebangCode, new Set());
 
       // Should detect as pure PHP and extract symbols correctly
       expect(result.symbols).toHaveLength(2);
@@ -745,14 +745,14 @@ class MyCliTool {
       });
     });
 
-    it("correctly detects pure PHP file with UTF-8 BOM", () => {
+    it("correctly detects pure PHP file with UTF-8 BOM", async () => {
       // UTF-8 BOM is \uFEFF
       const bomCode = `\uFEFF<?php
 class BomClass {
   public function test() {}
 }`;
 
-      const result = analyzeSource("test.php", "PHP", bomCode, new Set());
+      const result = await analyzeSource("test.php", "PHP", bomCode, new Set());
 
       // Should detect as pure PHP and extract symbols correctly
       expect(result.symbols).toHaveLength(2);
@@ -762,14 +762,14 @@ class BomClass {
       });
     });
 
-    it("correctly handles short echo tag", () => {
+    it("correctly handles short echo tag", async () => {
       const shortTagCode = `<?= "Hello World" ?>
 <?php
 class ShortTagClass {
   public function test() {}
 }`;
 
-      const result = analyzeSource("test.php", "PHP", shortTagCode, new Set());
+      const result = await analyzeSource("test.php", "PHP", shortTagCode, new Set());
 
       // Should parse and extract class symbol
       expect(result.symbols.length).toBeGreaterThanOrEqual(1);
@@ -778,14 +778,14 @@ class ShortTagClass {
       expect(classSymbol?.name).toBe("ShortTagClass");
     });
 
-    it("correctly handles case-insensitive PHP tags", () => {
+    it("correctly handles case-insensitive PHP tags", async () => {
       // PHP tags are case-insensitive
       const upperCaseCode = `<?PHP
 class UpperCaseTag {
   public function test() {}
 }`;
 
-      const result = analyzeSource("test.php", "PHP", upperCaseCode, new Set());
+      const result = await analyzeSource("test.php", "PHP", upperCaseCode, new Set());
 
       // Should detect as pure PHP and extract symbols correctly
       expect(result.symbols).toHaveLength(2);
@@ -795,7 +795,7 @@ class UpperCaseTag {
       });
     });
 
-    it("correctly handles whitespace before PHP tag", () => {
+    it("correctly handles whitespace before PHP tag", async () => {
       const whitespaceCode = `
 
 <?php
@@ -803,7 +803,7 @@ class WhitespaceClass {
   public function test() {}
 }`;
 
-      const result = analyzeSource("test.php", "PHP", whitespaceCode, new Set());
+      const result = await analyzeSource("test.php", "PHP", whitespaceCode, new Set());
 
       // Should detect as pure PHP (whitespace is allowed)
       expect(result.symbols).toHaveLength(2);

@@ -175,6 +175,15 @@ export class DuckDBClient {
   }
 
   async close(): Promise<void> {
+    // Checkpoint WAL to ensure all writes are flushed to the main database file
+    // This is critical for multi-connection scenarios where subsequent connections
+    // need to see all changes from previous connections
+    try {
+      await this.run("CHECKPOINT");
+    } catch {
+      // Ignore checkpoint errors - database might be in read-only mode or already checkpointed
+    }
+
     await new Promise<void>((resolve, reject) => {
       this.database.close((err: Error | null) => {
         if (err) {

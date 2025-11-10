@@ -1,21 +1,25 @@
 /**
- * Unix Socket Transport Layer for KIRI Daemon
+ * IPC Transport Layer for KIRI Daemon
  *
- * Provides IPC communication between daemon and clients via Unix domain sockets.
+ * Provides IPC communication between daemon and clients:
+ * - Unix/Linux/macOS: Unix domain sockets
+ * - Windows: Named pipes
  * Handles multiple concurrent client connections with newline-delimited JSON-RPC protocol.
  */
 
 import * as fs from "fs/promises";
 import * as net from "net";
+import * as os from "os";
 import * as readline from "readline";
 
 import type { JsonRpcRequest, RpcHandleResult } from "../server/rpc.js";
+import { acquireLock, releaseLock } from "../shared/utils/lockfile.js";
 
 /**
- * Unix socket server configuration
+ * Socket server configuration
  */
 export interface SocketServerOptions {
-  /** Unix socket file path (e.g., /path/to/database.duckdb.sock) */
+  /** Socket path (Unix socket file path or Windows named pipe) */
   socketPath: string;
   /** Handler function for JSON-RPC requests */
   onRequest: (request: JsonRpcRequest) => Promise<RpcHandleResult | null>;
@@ -33,31 +37,70 @@ export async function createSocketServer(
   options: SocketServerOptions
 ): Promise<() => Promise<void>> {
   const { socketPath, onRequest, onError } = options;
+  const isWindows = os.platform() === "win32";
 
-  // 既存のソケットファイルが残っている場合は削除
+  // プラットフォーム非依存の排他ロックでデーモン重複起動を防止
+  // ロックファイルベースの検出により、IPC接続テストより信頼性が高い
+  const lockfilePath = `${socketPath}.lock`;
   try {
-    await fs.unlink(socketPath);
-  } catch (err) {
-    // ファイルが存在しない場合は無視
-    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
-      throw err;
+    acquireLock(lockfilePath);
+  } catch (error) {
+    const err = error as Error;
+    throw new Error(
+      `Failed to acquire daemon lock: ${err.message}. ` +
+        `Another daemon may be running. Lock file: ${lockfilePath}`
+    );
+  }
+
+  // Unix系の場合: 既存のソケットファイルが残っている場合は削除
+  // ロック取得済みのため、古いソケットファイルの削除は安全
+  if (!isWindows) {
+    try {
+      await fs.unlink(socketPath);
+    } catch (err) {
+      // ファイルが存在しない場合は無視
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw err;
+      }
     }
   }
+  // Windows: 名前付きパイプは自動的にクリーンアップされるため、特別な処理不要
+  // ロックファイルにより二重起動は既に防止済み
 
   const server = net.createServer((socket) => {
     handleClientConnection(socket, onRequest, onError);
   });
 
-  // Unixソケットをリッスン
+  // ソケット/名前付きパイプをリッスン
   await new Promise<void>((resolve, reject) => {
     server.listen(socketPath, () => {
       resolve();
     });
-    server.on("error", reject);
+
+    server.on("error", (err: NodeJS.ErrnoException) => {
+      // プラットフォーム固有のエラーメッセージを提供
+      if (err.code === "EADDRINUSE") {
+        const msg = isWindows
+          ? `Named pipe already in use: ${socketPath}. Another daemon may be running.`
+          : `Socket file in use: ${socketPath}. Another daemon may be running or stale socket exists.`;
+        reject(new Error(msg));
+      } else if (err.code === "EACCES") {
+        reject(
+          new Error(
+            `Permission denied for socket: ${socketPath}. Run as administrator or check permissions.`
+          )
+        );
+      } else {
+        reject(new Error(`Failed to listen on ${socketPath}: ${err.message} (code: ${err.code})`));
+      }
+    });
   });
 
-  // ソケットファイルのパーミッションを0600に設定（所有者のみアクセス可能）
-  await fs.chmod(socketPath, 0o600);
+  // Unix系の場合: ソケットファイルのパーミッションを0600に設定（所有者のみアクセス可能）
+  // Windows: 名前付きパイプにはファイルパーミッションが存在しないためスキップ
+  if (!isWindows) {
+    await fs.chmod(socketPath, 0o600);
+  }
 
   console.error(`[Daemon] Listening on socket: ${socketPath}`);
 
@@ -65,11 +108,18 @@ export async function createSocketServer(
   return async () => {
     return new Promise<void>((resolve) => {
       server.close(async () => {
-        try {
-          await fs.unlink(socketPath);
-          // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        } catch (_err) {
-          // 削除エラーは無視（既に削除されている可能性）
+        // 排他ロックを解放
+        releaseLock(lockfilePath);
+
+        // Unix系の場合のみソケットファイルを削除
+        // Windows: 名前付きパイプは自動的にクリーンアップされる
+        if (!isWindows) {
+          try {
+            await fs.unlink(socketPath);
+            // eslint-disable-next-line @typescript-eslint/no-unused-vars
+          } catch (_err) {
+            // 削除エラーは無視（既に削除されている可能性）
+          }
         }
         resolve();
       });

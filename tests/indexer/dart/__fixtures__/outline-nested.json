@@ -1,0 +1,82 @@
+{
+  "kind": "COMPILATION_UNIT",
+  "offset": 0,
+  "length": 250,
+  "element": {
+    "kind": "COMPILATION_UNIT",
+    "name": "nested.dart"
+  },
+  "children": [
+    {
+      "kind": "CLASS",
+      "offset": 0,
+      "length": 200,
+      "element": {
+        "kind": "CLASS",
+        "name": "Outer"
+      },
+      "children": [
+        {
+          "kind": "METHOD",
+          "offset": 20,
+          "length": 80,
+          "element": {
+            "kind": "METHOD",
+            "name": "process",
+            "parameters": "()",
+            "returnType": "void"
+          }
+        },
+        {
+          "kind": "GETTER",
+          "offset": 105,
+          "length": 45,
+          "element": {
+            "kind": "GETTER",
+            "name": "value",
+            "returnType": "int"
+          }
+        },
+        {
+          "kind": "SETTER",
+          "offset": 155,
+          "length": 40,
+          "element": {
+            "kind": "SETTER",
+            "name": "value",
+            "parameters": "(int v)"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "ENUM",
+      "offset": 205,
+      "length": 45,
+      "element": {
+        "kind": "ENUM",
+        "name": "Status"
+      },
+      "children": [
+        {
+          "kind": "ENUM_CONSTANT",
+          "offset": 220,
+          "length": 10,
+          "element": {
+            "kind": "ENUM_CONSTANT",
+            "name": "active"
+          }
+        },
+        {
+          "kind": "ENUM_CONSTANT",
+          "offset": 235,
+          "length": 10,
+          "element": {
+            "kind": "ENUM_CONSTANT",
+            "name": "inactive"
+          }
+        }
+      ]
+    }
+  ]
+}

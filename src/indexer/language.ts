@@ -19,6 +19,7 @@ const LANGUAGE_BY_EXTENSION: Record<string, string> = {
   ".cc": "C++",
   ".hh": "C++",
   ".cs": "C#",
+  ".dart": "Dart",
   ".php": "PHP",
   ".swift": "Swift",
   ".kt": "Kotlin",

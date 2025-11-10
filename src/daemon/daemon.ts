@@ -13,6 +13,7 @@ import { ensureDatabaseIndexed } from "../server/indexBootstrap.js";
 import { createRpcHandler } from "../server/rpc.js";
 import { createServerRuntime } from "../server/runtime.js";
 import type { ServerRuntime } from "../server/runtime.js";
+import { getSocketPath } from "../shared/utils/socket.js";
 
 import { DaemonLifecycle } from "./lifecycle.js";
 import { createSocketServer } from "./socket.js";
@@ -52,7 +53,7 @@ function parseDaemonArgs(): DaemonOptions {
   const databasePath = path.resolve(values.db || path.join(repoRoot, "var", "index.duckdb"));
   const socketPath = values["socket-path"]
     ? path.resolve(values["socket-path"])
-    : `${databasePath}.sock`;
+    : getSocketPath(databasePath);
 
   return {
     repoRoot,
@@ -127,9 +128,10 @@ async function main() {
     // RPCハンドラを作成（既存のロジックを再利用）
     const rpcHandler = createRpcHandler(runtime);
 
-    // Unixソケットサーバーを作成
+    // ソケットサーバーを作成（プラットフォームに応じてUnixソケットまたはWindows名前付きパイプ）
+    const socketPath = options.socketPath || getSocketPath(options.databasePath);
     const closeServer = await createSocketServer({
-      socketPath: options.socketPath || `${options.databasePath}.sock`,
+      socketPath,
       onRequest: async (request) => {
         lifecycle.incrementConnections();
         try {
@@ -144,9 +146,7 @@ async function main() {
       },
     });
 
-    await lifecycle.log(
-      `Socket server listening on: ${options.socketPath || `${options.databasePath}.sock`}`
-    );
+    await lifecycle.log(`Socket server listening on: ${socketPath}`);
 
     // スタートアップロックを解放（起動完了）
     await lifecycle.releaseStartupLock();

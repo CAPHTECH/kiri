@@ -13,3 +13,5 @@ package/
 # Development test scripts
 test-*.mjs
 debug-*.mjs
+.serena/
+tests/fixtures/sample-repo/.git

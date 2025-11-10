@@ -1,0 +1,55 @@
+{
+  "kind": "COMPILATION_UNIT",
+  "offset": 0,
+  "length": 180,
+  "element": {
+    "kind": "COMPILATION_UNIT",
+    "name": "example.dart"
+  },
+  "children": [
+    {
+      "kind": "CLASS",
+      "offset": 0,
+      "length": 120,
+      "element": {
+        "kind": "CLASS",
+        "name": "Greeter",
+        "dartdoc": "A simple greeter class",
+        "typeParameters": "<T>"
+      },
+      "children": [
+        {
+          "kind": "METHOD",
+          "offset": 30,
+          "length": 50,
+          "element": {
+            "kind": "METHOD",
+            "name": "sayHello",
+            "parameters": "(String name)",
+            "returnType": "String"
+          }
+        },
+        {
+          "kind": "FIELD",
+          "offset": 85,
+          "length": 20,
+          "element": {
+            "kind": "FIELD",
+            "name": "greeting"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "FUNCTION",
+      "offset": 125,
+      "length": 55,
+      "element": {
+        "kind": "FUNCTION",
+        "name": "main",
+        "parameters": "()",
+        "returnType": "void"
+      }
+    }
+  ]
+}

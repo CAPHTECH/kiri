@@ -6,9 +6,9 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { runIndexer } from "../../src/indexer/cli.js";
 import { ServerContext } from "../../src/server/context.js";
-import { WarningManager } from "../../src/server/rpc.js";
 import { contextBundle, resolveRepoId, semanticRerank } from "../../src/server/handlers.js";
 import { startServer } from "../../src/server/main.js";
+import { WarningManager } from "../../src/server/rpc.js";
 import { DuckDBClient } from "../../src/shared/duckdb.js";
 import { loadSecurityConfig, updateSecurityLock } from "../../src/shared/security/config.js";
 import { createTempRepo } from "../helpers/test-repo.js";
@@ -74,6 +74,7 @@ describe("context_bundle", () => {
         failing_tests: ["TokenVerifier handles expiration"],
       },
       limit: 5,
+      includeTokensEstimate: true,
     });
 
     expect(bundle.context.length).toBeGreaterThan(0);
@@ -92,6 +93,33 @@ describe("context_bundle", () => {
     expect(nearby).toBeDefined();
     expect(nearby?.why.some((reason) => reason.startsWith("near:"))).toBe(true);
   }, 10000);
+
+  it("skips tokens_estimate calculation unless requested", async () => {
+    const repo = await createTempRepo({
+      "src/app.ts": "export function app() { return 1; }\n",
+    });
+    cleanupTargets.push({ dispose: repo.cleanup });
+
+    const dbDir = await mkdtemp(join(tmpdir(), "kiri-db-no-tokens-"));
+    const dbPath = join(dbDir, "index.duckdb");
+    cleanupTargets.push({ dispose: async () => await rm(dbDir, { recursive: true, force: true }) });
+
+    await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+    const db = await DuckDBClient.connect({ databasePath: dbPath });
+    cleanupTargets.push({ dispose: async () => await db.close() });
+
+    const repoId = await resolveRepoId(db, repo.path);
+    const context: ServerContext = { db, repoId, warningManager: new WarningManager() };
+
+    const bundle = await contextBundle(context, {
+      goal: "investigate app",
+      limit: 3,
+    });
+
+    expect(bundle.tokens_estimate).toBeUndefined();
+    expect(bundle.context.length).toBeGreaterThan(0);
+  });
 
   it("rejects empty goals", async () => {
     const repo = await createTempRepo({
@@ -793,4 +821,109 @@ This Lambda function handles canvas-agent operations.
     );
     expect(pageAgentRank).toBeLessThan(3);
   }, 15000);
+
+  describe("WarningManager request isolation", () => {
+    it("clears warnings between requests to prevent cross-contamination", async () => {
+      const repo = await createTempRepo({
+        "src/app.ts": "export function app() { return 1; }\n",
+      });
+      cleanupTargets.push({ dispose: repo.cleanup });
+
+      const dbDir = await mkdtemp(join(tmpdir(), "kiri-db-warnings-"));
+      const dbPath = join(dbDir, "index.duckdb");
+      cleanupTargets.push({
+        dispose: async () => await rm(dbDir, { recursive: true, force: true }),
+      });
+
+      await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+      const db = await DuckDBClient.connect({ databasePath: dbPath });
+      cleanupTargets.push({ dispose: async () => await db.close() });
+
+      const repoId = await resolveRepoId(db, repo.path);
+      const manager = new WarningManager();
+      const context: ServerContext = { db, repoId, warningManager: manager };
+
+      // First request triggers warning (large non-compact without token estimate)
+      manager.startRequest();
+      const bundle1 = await contextBundle(context, {
+        goal: "investigate app",
+        limit: 15, // Large limit
+        compact: false, // Non-compact
+        // No includeTokensEstimate - triggers warning
+      });
+      expect(bundle1.warnings).toBeDefined();
+      expect(bundle1.warnings!.length).toBeGreaterThan(0);
+      const firstWarnings = bundle1.warnings!;
+
+      // Second request should have clean slate (different params, no warning expected)
+      manager.startRequest();
+      const bundle2 = await contextBundle(context, {
+        goal: "investigate app again",
+        limit: 5, // Small limit
+      });
+      // Second request should not inherit warnings from first request
+      if (bundle2.warnings) {
+        expect(bundle2.warnings.length).toBe(0);
+      }
+
+      // Verify first warning is about large_non_compact
+      expect(firstWarnings.some((w) => w.includes("large_non_compact"))).toBe(true);
+    });
+
+    it("deduplicates warnings within single request (DoS protection)", async () => {
+      const manager = new WarningManager();
+
+      // Simulate a single request context
+      manager.startRequest();
+
+      // Attempt to add same warning multiple times
+      manager.warnForRequest("test_key", "Test warning message");
+      manager.warnForRequest("test_key", "Test warning message");
+      manager.warnForRequest("test_key", "Test warning message");
+
+      const warnings = manager.responseWarnings;
+      // Should only appear once due to deduplication
+      expect(warnings.filter((w) => w.startsWith("[test_key]")).length).toBe(1);
+    });
+
+    it("allows different warning keys in same request", async () => {
+      const manager = new WarningManager();
+
+      manager.startRequest();
+
+      manager.warnForRequest("key1", "First warning");
+      manager.warnForRequest("key2", "Second warning");
+      manager.warnForRequest("key3", "Third warning");
+
+      const warnings = manager.responseWarnings;
+      expect(warnings.length).toBe(3);
+      expect(warnings[0]).toContain("[key1]");
+      expect(warnings[1]).toContain("[key2]");
+      expect(warnings[2]).toContain("[key3]");
+    });
+
+    it("ensures warnings do not persist across multiple requests", async () => {
+      const manager = new WarningManager();
+
+      // First request
+      manager.startRequest();
+      manager.warnForRequest("request1", "Warning from request 1");
+      const warnings1 = manager.responseWarnings;
+      expect(warnings1.length).toBe(1);
+
+      // Second request
+      manager.startRequest();
+      manager.warnForRequest("request2", "Warning from request 2");
+      const warnings2 = manager.responseWarnings;
+      expect(warnings2.length).toBe(1);
+      expect(warnings2[0]).toContain("[request2]");
+      expect(warnings2[0]).not.toContain("[request1]");
+
+      // Third request with no warnings
+      manager.startRequest();
+      const warnings3 = manager.responseWarnings;
+      expect(warnings3.length).toBe(0);
+    });
+  });
 });

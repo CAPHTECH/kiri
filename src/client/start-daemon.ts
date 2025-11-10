@@ -10,6 +10,8 @@ import * as net from "net";
 import * as path from "path";
 import { fileURLToPath } from "url";
 
+import { getSocketPath } from "../shared/utils/socket.js";
+
 /**
  * デーモン起動オプション
  */
@@ -31,7 +33,7 @@ export interface StartDaemonOptions {
  */
 export async function isDaemonRunning(databasePath: string): Promise<boolean> {
   const pidFilePath = `${databasePath}.daemon.pid`;
-  const socketPath = `${databasePath}.sock`;
+  const socketPath = getSocketPath(databasePath);
 
   try {
     // PIDファイルが存在するかチェック

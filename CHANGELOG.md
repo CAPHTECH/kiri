@@ -5,6 +5,95 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Java language support with tree-sitter-java**
+  - Symbol extraction for classes, interfaces, enums, annotations, methods, constructors, and fields
+  - Javadoc comment parsing
+- Import dependency resolution with wildcard and static import support
+- Full test coverage with 23 test cases
+
+## [0.9.8] - 2025-11-10
+
+### Fixed
+
+- `ensureDatabaseIndexed` now invokes `runIndexer` with `skipLocking: true`, so first-time bootstrap no longer deadlocks on its own DuckDB lock file and `kiri`/`kiri-server` can index fresh repositories without manual intervention.
+
+### Added
+
+- Added `tests/server/indexBootstrap.spec.ts` to exercise the bootstrap path (first run + consecutive run) and prevent regressions around lock release.
+
+## [0.9.7] - 2025-11-10
+
+### Added
+
+- Introduced a per-database `p-queue` pipeline plus path normalization helpers so the indexer, watcher, and bootstrap scripts all serialize DuckDB writes and share consistent lock files across symlinked paths.
+- Added comprehensive regression coverage: FTS lifecycle E2E tests, schema migration specs, legacy repo path normalization tests, watcher lock specs, and a new FTS status cache unit test to prevent future regressions.
+
+### Changed
+
+- Server runtime now reuses the new normalization utilities, persists FTS metadata (`fts_dirty`, `fts_status`, `fts_generation`), and automatically downgrades to ILIKE whenever any repo reports a dirty index; once clean it reloads FTS without restarting.
+- `scripts/test/verify-all.ts` gained configurable timeouts (coverage-aware) and MCP tool/watch/eval phases now run as part of release verification.
+
+### Fixed
+
+- `files_search` and related handlers invalidate cached FTS status as soon as `fts_dirty` / `fts_status='rebuilding'` is observed, preventing stale or crashing BM25 queries during rebuilds.
+- Resolved duckdb path/lock mismatches that previously caused repo rows inserted via symlinks to be duplicated or skipped when resolving repositories on the server.
+
+## [0.9.6] - 2025-11-07
+
+### Added
+
+- Introduced `compact` and `includeLineNumbers` options to `snippets_get`; compact mode now returns only metadata while line numbering adds aligned prefixes such as `  1375→export ...` for easier quoting.
+- Added `compact` support to `files_search` plus an integration test so callers can omit previews during exploratory passes.
+
+### Changed
+
+- `context_bundle` now caps the `why` array at the top 10 reasons, rounds `score` values to three decimals, and only computes `tokens_estimate` when `includeTokensEstimate: true` is provided (default skips the costly calculation).
+- Updated MCP tool descriptors, docs, and warning text to reflect the new optional fields and token-saving workflow.
+
+## [0.9.5] - 2025-11-06
+
+### Changed
+
+- Clarified `context_bundle` guidance by documenting that goals should enumerate files/symptoms instead of leading with imperatives, and updated examples accordingly.
+
+## [0.9.4] - 2025-11-06
+
+### Fixed
+
+- **Removed non-standard `outputSchema` and `annotations` from MCP tool descriptors**
+  - **Issue**: v0.9.3 introduced `outputSchema` and `annotations` fields which are not part of the MCP 2024-11-05 specification
+  - **Impact**: MCP clients performing strict schema validation rejected tools with these unknown fields
+  - **Solution**: Removed `outputSchema` and `annotations` from `ToolDescriptor` interface and all tool definitions
+  - **Result**: Full compliance with MCP 2024-11-05 protocol specification, restoring compatibility with MCP clients
+  - **Note**: Output format information remains documented in tool `description` fields
+
+## [0.9.3] - 2025-11-06
+
+### Changed
+
+- Aligned the default `security.lock` location with the DuckDB database path and extended the `kiri security verify` CLI to accept `--db` / `--security-lock` overrides for reproducible deployments.
+- Clarified MCP tool descriptors by documenting output schemas, read-only annotations, and degrade-mode behaviour for `files_search`.
+
+### Fixed
+
+- Ensured `files_search` returns the documented array shape even when DuckDB is unavailable and the server is running in degrade mode, preventing schema mismatches in MCP clients.
+- Added integration coverage that verifies degrade-mode compatibility for MCP `tools/call` responses.
+
+## [0.9.2] - 2025-11-06
+
+### Changed
+
+- Documented how `artifacts.editing_path` anchors related files in `context_bundle` responses (English/Japanese API guide) for more discoverable workflows.
+- Added tool descriptor guidance highlighting `artifacts.editing_path` usage within the MCP server metadata.
+
+### Fixed
+
+- Forced Vitest to run with a single fork in config and npm scripts to eliminate tree-sitter/DuckDB worker crashes during CI.
+
 ## [0.9.0] - 2025-11-05
 
 ### Fixed

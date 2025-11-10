@@ -4,7 +4,7 @@
 
 1. `/metrics` を確認し、`kiri_http_requests_total` の伸びと 503 レスポンスが増えていないかを確認する。
 2. 監査ログ (`var/audit/*.json`) を開き、直近の `degrade` イベントと対象リポジトリを確認する。
-3. `pnpm exec tsx src/client/cli.ts security verify` を実行し、セキュリティロックに改ざんがないことを確認する。
+3. `pnpm exec tsx src/client/cli.ts security verify --db <path/to/index.duckdb>` を実行し、セキュリティロックに改ざんがないことを確認する。
 4. DuckDB/VSS プロセスのヘルスチェックを行い、必要であれば再起動する。
 5. 復旧が完了したらサーバーを `--allow-degrade` なしで再起動する。復旧完了後に `/metrics` のレスポンスから `degrade: true`
    が含まれないことを確認する。

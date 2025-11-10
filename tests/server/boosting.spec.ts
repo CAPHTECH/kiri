@@ -6,8 +6,8 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { runIndexer } from "../../src/indexer/cli.js";
 import { ServerContext } from "../../src/server/context.js";
-import { WarningManager } from "../../src/server/rpc.js";
 import { contextBundle, filesSearch, resolveRepoId } from "../../src/server/handlers.js";
+import { WarningManager } from "../../src/server/rpc.js";
 import { DuckDBClient } from "../../src/shared/duckdb.js";
 import { createTempRepo } from "../helpers/test-repo.js";
 

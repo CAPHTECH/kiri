@@ -30,3 +30,12 @@ export async function getDefaultBranch(repoRoot: string): Promise<string | null>
     return null;
   }
 }
+
+export async function gitDiffNameOnly(repoRoot: string, sinceRef: string): Promise<string[]> {
+  const args = ["diff", "--name-only", "-z", "--diff-filter=ACDMRTUXB", sinceRef, "HEAD"];
+  const { stdout } = await execFileAsync("git", args, { cwd: repoRoot });
+  return stdout
+    .split("\0")
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+}

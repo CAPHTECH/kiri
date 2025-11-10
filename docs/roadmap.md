@@ -12,7 +12,8 @@
 
 1. **セキュリティ境界と設定の固定化**
    - `config/security.yml` を追加し、エージェント実行時の権限、アクセス可能なパス、ネットワーク出口の有無を明示する。
-   - `src/server/bootstrap.ts` に起動時バリデーションを実装し、設定の署名ハッシュを `var/security.lock` と比較して改ざんを検知する。
+   - `src/server/bootstrap.ts` に起動時バリデーションを実装し、設定の署名ハッシュを DuckDB と同じディレクトリにある
+     `security.lock` と比較して改ざんを検知する。
    - CLI (`src/client/cli.ts`) からは `security.verify` サブコマンドで現在の適用状況と差分をレポート可能にする。
 
 2. **denylist の二重適用とテスト**

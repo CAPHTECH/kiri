@@ -1,10 +1,12 @@
 import path from "node:path";
 
+import { checkFTSSchemaExists } from "../indexer/schema.js";
 import { DuckDBClient } from "../shared/duckdb.js";
 import { generateEmbedding, structuralSimilarity } from "../shared/embedding.js";
 import { encode as encodeGPT, tokenizeText } from "../shared/tokenizer.js";
+import { getRepoPathCandidates, normalizeRepoPath } from "../shared/utils/path.js";
 
-import { ServerContext } from "./context.js";
+import { FtsStatusCache, ServerContext } from "./context.js";
 import { coerceProfileName, loadScoringProfile, type ScoringWeights } from "./scoring.js";
 
 // Configuration file patterns (v0.8.0+: consolidated to avoid duplication)
@@ -152,6 +154,82 @@ const CONFIG_PATTERNS = [
   ".github/workflows",
 ] as const;
 
+const FTS_STATUS_CACHE_TTL_MS = 10_000;
+
+async function hasDirtyRepos(db: DuckDBClient): Promise<boolean> {
+  const statusCheck = await db.all<{ count: number }>(
+    `SELECT COUNT(*) as count FROM repo
+       WHERE fts_dirty = true OR fts_status IN ('dirty', 'rebuilding')`
+  );
+  return (statusCheck[0]?.count ?? 0) > 0;
+}
+
+async function refreshFtsStatus(context: ServerContext): Promise<FtsStatusCache> {
+  const previousReady = context.features?.fts ?? false;
+  const cache: FtsStatusCache = {
+    ready: false,
+    schemaExists: false,
+    anyDirty: false,
+    lastChecked: Date.now(),
+  };
+
+  try {
+    cache.schemaExists = await checkFTSSchemaExists(context.db);
+    if (!cache.schemaExists) {
+      context.warningManager.warnForRequest(
+        "fts-schema-missing",
+        "FTS schema not found, falling back to ILIKE"
+      );
+    } else {
+      cache.anyDirty = await hasDirtyRepos(context.db);
+      if (cache.anyDirty) {
+        context.warningManager.warnForRequest(
+          "fts-stale",
+          "FTS index is stale or rebuilding, using ILIKE fallback. Run indexer to update FTS."
+        );
+      } else {
+        await context.db.run("LOAD fts;");
+        cache.ready = true;
+      }
+    }
+  } catch (error) {
+    cache.ready = false;
+    cache.schemaExists = false;
+    context.warningManager.warnForRequest(
+      "fts-check-failed",
+      `FTS availability check failed: ${error}`
+    );
+  }
+
+  if (!context.features) {
+    context.features = {};
+  }
+  context.features.fts = cache.ready;
+  context.ftsStatusCache = cache;
+
+  if (cache.ready && !previousReady) {
+    console.info("✅ FTS recovered and enabled");
+  } else if (!cache.ready && previousReady) {
+    console.warn("⚠️  FTS became unavailable; falling back to ILIKE");
+  }
+
+  return cache;
+}
+
+async function getFreshFtsStatus(context: ServerContext): Promise<FtsStatusCache> {
+  const cache = context.ftsStatusCache;
+  if (cache && Date.now() - cache.lastChecked < FTS_STATUS_CACHE_TTL_MS) {
+    if (cache.ready) {
+      const dirtyNow = await hasDirtyRepos(context.db);
+      if (dirtyNow) {
+        return refreshFtsStatus(context);
+      }
+    }
+    return cache;
+  }
+  return refreshFtsStatus(context);
+}
+
 /**
  * Check if a file path represents a configuration file
  * Supports multiple languages: JS/TS, Python, Ruby, Go, PHP, Java, Rust, C/C++, Docker, CI/CD
@@ -190,11 +268,12 @@ export interface FilesSearchParams {
   path_prefix?: string;
   limit?: number;
   boost_profile?: "default" | "docs" | "none";
+  compact?: boolean; // If true, omit preview to reduce token usage
 }
 
 export interface FilesSearchResult {
   path: string;
-  preview: string;
+  preview?: string;
   matchLine: number;
   lang: string | null;
   ext: string | null;
@@ -205,13 +284,15 @@ export interface SnippetsGetParams {
   path: string;
   start_line?: number;
   end_line?: number;
+  compact?: boolean; // If true, omit content payload entirely
+  includeLineNumbers?: boolean; // If true, prefix content lines with line numbers
 }
 
 export interface SnippetResult {
   path: string;
   startLine: number;
   endLine: number;
-  content: string;
+  content?: string;
   totalLines: number;
   symbolName: string | null;
   symbolKind: string | null;
@@ -230,6 +311,7 @@ export interface ContextBundleParams {
   profile?: string;
   boost_profile?: "default" | "docs" | "none";
   compact?: boolean; // If true, omit preview field to reduce token usage
+  includeTokensEstimate?: boolean; // If true, compute tokens_estimate (slower)
 }
 
 export interface ContextBundleItem {
@@ -242,7 +324,7 @@ export interface ContextBundleItem {
 
 export interface ContextBundleResult {
   context: ContextBundleItem[];
-  tokens_estimate: number;
+  tokens_estimate?: number;
   warnings?: string[]; // Client-visible warnings (e.g., breaking changes, deprecations)
 }
 
@@ -280,6 +362,106 @@ const MAX_DEPENDENCY_SEEDS_QUERY_LIMIT = 100; // SQL injection防御用の上限
 const NEARBY_LIMIT = 6;
 const FALLBACK_SNIPPET_WINDOW = 40; // Reduced from 120 to optimize token usage
 const MAX_RERANK_LIMIT = 50;
+const MAX_WHY_TAGS = 10;
+
+// 項目3: whyタグの優先度マップ（低い数値ほど高優先度）
+// All actual tag prefixes used in the codebase
+const WHY_TAG_PRIORITY: Record<string, number> = {
+  artifact: 1, // User-provided hints (editing_path, failing_tests)
+  phrase: 2, // Multi-word literal matches (strongest signal)
+  text: 3, // Single keyword matches
+  "path-phrase": 4, // Path contains multi-word phrase
+  structural: 5, // Semantic similarity
+  "path-segment": 6, // Path component matches
+  "path-keyword": 7, // Path keyword match
+  dep: 8, // Dependency relationship
+  near: 9, // Proximity to editing file
+  boost: 10, // File type boost
+  recent: 11, // Recently changed
+  symbol: 12, // Symbol match
+  penalty: 13, // Penalty explanations (keep for transparency)
+  keyword: 14, // Generic keyword (deprecated, kept for compatibility)
+};
+
+// Reserve at least one slot for important structural tags
+const RESERVED_WHY_SLOTS: Record<string, number> = {
+  dep: 1, // Dependency relationships are critical
+  symbol: 1, // Symbol boundaries help understand context
+  near: 1, // Proximity explains file selection
+};
+
+/**
+ * Parse output formatting options from request parameters
+ *
+ * Provides a consistent way to determine what content should be included in responses.
+ * Used by both normal and degraded mode to ensure consistent behavior.
+ */
+interface OutputOptions {
+  includePreview: boolean;
+  includeLineNumbers: boolean;
+}
+
+function parseOutputOptions(params: {
+  compact?: boolean;
+  includeLineNumbers?: boolean;
+}): OutputOptions {
+  return {
+    includePreview: params.compact !== true,
+    includeLineNumbers: params.includeLineNumbers === true && params.compact !== true,
+  };
+}
+
+/**
+ * Select the most informative why tags while ensuring diversity
+ *
+ * Guarantees at least one tag from reserved categories (dep, symbol, near) if they exist,
+ * then fills remaining slots by priority. This prevents keyword matches from crowding out
+ * structural context that explains "why this file?"
+ *
+ * DoS protection: Limits processing to first 1000 reasons to prevent CPU exhaustion.
+ */
+function selectWhyTags(reasons: Set<string>): string[] {
+  // Protect against DoS: limit reasons processed
+  if (reasons.size > 1000) {
+    reasons = new Set(Array.from(reasons).slice(0, 1000));
+  }
+
+  const selected = new Set<string>();
+  const byCategory = new Map<string, string[]>();
+
+  for (const reason of reasons) {
+    const prefix = reason.split(":")[0] ?? "";
+    if (!byCategory.has(prefix)) {
+      byCategory.set(prefix, []);
+    }
+    byCategory.get(prefix)!.push(reason);
+  }
+
+  // Step 1: Fill reserved slots
+  for (const [category, minCount] of Object.entries(RESERVED_WHY_SLOTS)) {
+    const items = byCategory.get(category) ?? [];
+    for (let i = 0; i < minCount && i < items.length; i++) {
+      selected.add(items[i]!); // Safe: i < items.length guarantees existence
+    }
+  }
+
+  // Step 2: Fill remaining slots by priority
+  const allReasons = Array.from(reasons).sort((a, b) => {
+    const aPrefix = a.split(":")[0] ?? "";
+    const bPrefix = b.split(":")[0] ?? "";
+    const aPrio = WHY_TAG_PRIORITY[aPrefix] ?? 99;
+    const bPrio = WHY_TAG_PRIORITY[bPrefix] ?? 99;
+    if (aPrio !== bPrio) return aPrio - bPrio;
+    return a.localeCompare(b);
+  });
+
+  for (const reason of allReasons) {
+    if (selected.size >= MAX_WHY_TAGS) break;
+    selected.add(reason); // Set automatically deduplicates
+  }
+
+  return Array.from(selected);
+}
 
 const STOP_WORDS = new Set([
   "the",
@@ -400,6 +582,23 @@ function buildPreview(content: string, query: string): { preview: string; line: 
   const preview = content.slice(snippetStart, snippetEnd);
 
   return { preview, line: matchLine };
+}
+
+/**
+ * Lightweight function to find the line number of the first match without generating a preview.
+ * Used in compact mode to minimize CPU/memory overhead.
+ */
+function findFirstMatchLine(content: string, query: string): number {
+  const lowerContent = content.toLowerCase();
+  const lowerQuery = query.toLowerCase();
+  const index = lowerContent.indexOf(lowerQuery);
+  if (index === -1) {
+    return 1;
+  }
+
+  const prefix = content.slice(0, index);
+  const prefixLines = prefix.split(/\r?\n/);
+  return prefix.length === 0 ? 1 : prefixLines.length;
 }
 
 interface CandidateInfo {
@@ -755,6 +954,19 @@ function buildSnippetPreview(content: string, startLine: number, endLine: number
   return `${snippet.slice(0, 239)}…`;
 }
 
+function prependLineNumbers(snippet: string, startLine: number): string {
+  const lines = snippet.split(/\r?\n/);
+  if (lines.length === 0) {
+    return snippet;
+  }
+  // Calculate required width from the last line number (dynamic sizing)
+  const endLine = startLine + lines.length - 1;
+  const width = String(endLine).length;
+  return lines
+    .map((line, index) => `${String(startLine + index).padStart(width, " ")}→${line}`)
+    .join("\n");
+}
+
 /**
  * トークン数を推定（コンテンツベース）
  * 実際のGPTトークナイザーを使用して正確にカウント
@@ -817,8 +1029,14 @@ function applyFileTypeBoost(
     ".git/",
     "node_modules/",
   ];
-  if (blacklistedDirs.some((dir) => path.startsWith(dir))) {
-    return -100; // Effectively remove it
+  for (const dir of blacklistedDirs) {
+    if (path.startsWith(dir)) {
+      // FIX: boost_profile="docs" の場合は docs/ ブラックリストをスキップ
+      if (profile === "docs" && dir === "docs/") {
+        continue;
+      }
+      return -100; // Effectively remove it
+    }
   }
 
   if (profile === "none") {
@@ -1154,7 +1372,9 @@ export async function filesSearch(
   }
 
   const limit = normalizeLimit(params.limit);
-  const hasFTS = context.features?.fts ?? false;
+
+  const ftsStatus = await getFreshFtsStatus(context);
+  const hasFTS = ftsStatus.ready;
 
   let sql: string;
   let values: unknown[];
@@ -1243,20 +1463,39 @@ export async function filesSearch(
   // Note: filesSearch doesn't have a separate profile parameter, uses default weights
   const weights = loadScoringProfile(null);
 
+  const options = parseOutputOptions(params);
+
   return rows
     .map((row) => {
-      const { preview, line } = buildPreview(row.content ?? "", query);
+      let preview: string | undefined;
+      let matchLine: number;
+
+      if (options.includePreview) {
+        // Full preview generation for non-compact mode
+        const previewData = buildPreview(row.content ?? "", query);
+        preview = previewData.preview;
+        matchLine = previewData.line;
+      } else {
+        // Lightweight: extract only line number without preview
+        matchLine = findFirstMatchLine(row.content ?? "", query);
+      }
+
       const baseScore = row.score ?? 1.0; // FTS時はBM25スコア、ILIKE時は1.0
       const boostedScore = applyFileTypeBoost(row.path, baseScore, boostProfile, weights);
 
-      return {
+      const result: FilesSearchResult = {
         path: row.path,
-        preview,
-        matchLine: line,
+        matchLine,
         lang: row.lang,
         ext: row.ext,
         score: boostedScore,
       };
+
+      if (preview !== undefined) {
+        result.preview = preview;
+      }
+
+      return result;
     })
     .sort((a, b) => b.score - a.score); // スコアの高い順に再ソート
 }
@@ -1359,13 +1598,20 @@ export async function snippetsGet(
     endLine = Math.max(startLine, Math.min(totalLines, requestedEnd));
   }
 
-  const snippetContent = lines.slice(startLine - 1, endLine).join("\n");
+  const isCompact = params.compact === true;
+  const addLineNumbers = params.includeLineNumbers === true && !isCompact;
+
+  let content: string | undefined;
+  if (!isCompact) {
+    const snippetContent = lines.slice(startLine - 1, endLine).join("\n");
+    content = addLineNumbers ? prependLineNumbers(snippetContent, startLine) : snippetContent;
+  }
 
   return {
     path: row.path,
     startLine,
     endLine,
-    content: snippetContent,
+    ...(content !== undefined && { content }),
     totalLines,
     symbolName,
     symbolKind,
@@ -1376,6 +1622,8 @@ export async function contextBundle(
   context: ServerContext,
   params: ContextBundleParams
 ): Promise<ContextBundleResult> {
+  context.warningManager.startRequest();
+
   const { db, repoId } = context;
   const goal = params.goal?.trim() ?? "";
   if (goal.length === 0) {
@@ -1386,6 +1634,19 @@ export async function contextBundle(
 
   const limit = normalizeBundleLimit(params.limit);
   const artifacts = params.artifacts ?? {};
+  const includeTokensEstimate = params.includeTokensEstimate === true;
+  const isCompact = params.compact === true;
+
+  // 項目2: トークンバジェット保護警告
+  // 大量データ+非コンパクトモード+トークン推定なしの場合に警告
+  // リクエストごとに警告（warnForRequestを使用）
+  if (!includeTokensEstimate && !isCompact && limit > 10) {
+    context.warningManager.warnForRequest(
+      "context_bundle:large_non_compact",
+      "Large non-compact response without token estimation may exceed LLM limits. " +
+        "Consider setting compact: true or includeTokensEstimate: true."
+    );
+  }
 
   // スコアリング重みをロード（将来的には設定ファイルや引数から）
   const profileName = coerceProfileName(params.profile ?? null);
@@ -1690,7 +1951,7 @@ export async function contextBundle(
     const warnings = [...context.warningManager.responseWarnings];
     return {
       context: [],
-      tokens_estimate: 0,
+      ...(includeTokensEstimate && { tokens_estimate: 0 }),
       ...(warnings.length > 0 && { warnings }),
     };
   }
@@ -1764,11 +2025,16 @@ export async function contextBundle(
 
     const normalizedScore = maxScore > 0 ? candidate.score / maxScore : 0;
 
+    const roundedScore = Number.isFinite(normalizedScore) ? Number(normalizedScore.toFixed(3)) : 0;
+
+    // Select why tags with diversity guarantee (reserves slots for dep/symbol/near)
+    const why = selectWhyTags(reasons);
+
     const item: ContextBundleItem = {
       path: candidate.path,
       range: [startLine, endLine],
-      why: Array.from(reasons).sort(),
-      score: Number.isFinite(normalizedScore) ? normalizedScore : 0,
+      why,
+      score: roundedScore,
     };
 
     // Add preview only if not in compact mode
@@ -1780,24 +2046,30 @@ export async function contextBundle(
   }
 
   // コンテンツベースのトークン推定を使用（より正確）
-  const tokensEstimate = results.reduce((acc, item) => {
-    const candidate = sortedCandidates.find((c) => c.path === item.path);
-    if (candidate && candidate.content) {
-      return acc + estimateTokensFromContent(candidate.content, item.range[0], item.range[1]);
-    }
-    // フォールバック: 行ベース推定（コンテンツが利用不可の場合）
-    const lineCount = Math.max(1, item.range[1] - item.range[0] + 1);
-    return acc + lineCount * 4;
-  }, 0);
+  let tokensEstimate: number | undefined;
+  if (includeTokensEstimate) {
+    tokensEstimate = results.reduce((acc, item) => {
+      const candidate = sortedCandidates.find((c) => c.path === item.path);
+      if (candidate && candidate.content) {
+        return acc + estimateTokensFromContent(candidate.content, item.range[0], item.range[1]);
+      }
+      // フォールバック: 行ベース推定（コンテンツが利用不可の場合）
+      const lineCount = Math.max(1, item.range[1] - item.range[0] + 1);
+      return acc + lineCount * 4;
+    }, 0);
+  }
 
   // Get warnings from WarningManager (includes breaking change notification if applicable)
   const warnings = [...context.warningManager.responseWarnings];
 
-  return {
+  const payload: ContextBundleResult = {
     context: results,
-    tokens_estimate: tokensEstimate,
     ...(warnings.length > 0 && { warnings }),
   };
+  if (tokensEstimate !== undefined) {
+    payload.tokens_estimate = tokensEstimate;
+  }
+  return payload;
 }
 
 export async function semanticRerank(
@@ -2042,8 +2314,22 @@ export async function depsClosure(
 
 export async function resolveRepoId(db: DuckDBClient, repoRoot: string): Promise<number> {
   try {
-    const rows = await db.all<{ id: number }>("SELECT id FROM repo WHERE root = ?", [repoRoot]);
+    const candidates = getRepoPathCandidates(repoRoot);
+    const normalized = candidates[0];
+    const placeholders = candidates.map(() => "?").join(", ");
+    const rows = await db.all<{ id: number; root: string }>(
+      `SELECT id, root FROM repo WHERE root IN (${placeholders}) LIMIT 1`,
+      candidates
+    );
+
     if (rows.length === 0) {
+      const existingRows = await db.all<{ id: number; root: string }>("SELECT id, root FROM repo");
+      for (const candidate of existingRows) {
+        if (normalizeRepoPath(candidate.root) === normalized) {
+          await db.run("UPDATE repo SET root = ? WHERE id = ?", [normalized, candidate.id]);
+          return candidate.id;
+        }
+      }
       throw new Error(
         "Target repository is missing from DuckDB. Run the indexer before starting the server."
       );
@@ -2051,6 +2337,9 @@ export async function resolveRepoId(db: DuckDBClient, repoRoot: string): Promise
     const row = rows[0];
     if (!row) {
       throw new Error("Failed to retrieve repository record. Database returned empty result.");
+    }
+    if (row.root !== normalized) {
+      await db.run("UPDATE repo SET root = ? WHERE id = ?", [normalized, row.id]);
     }
     return row.id;
   } catch (error) {
