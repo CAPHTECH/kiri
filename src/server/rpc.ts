@@ -3,6 +3,7 @@ import { maskValue } from "../shared/security/masker.js";
 
 const RESPONSE_MASK_SKIP_KEYS = ["path"];
 
+import { isValidBoostProfile } from "./boost-profiles.js";
 import { ServerContext } from "./context.js";
 import { DegradeController } from "./fallbacks/degradeController.js";
 import {
@@ -206,7 +207,13 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
       "- Keep generic errors or narration minimal; if you need them, append short suffixes or parentheses after the identifiers.\n" +
       "- Attach conditions or context as concise trailing phrases (e.g., 'conditional hook calls').\n\n" +
       "Before: 'Find where pagination breaks in React hooks error'\n" +
-      "After: 'useOrdersPagination src/orders/pagination.ts offByOne (React hooks error)'.",
+      "After: 'useOrdersPagination src/orders/pagination.ts offByOne (React hooks error)'.\n\n" +
+      "boost_profile options:\n" +
+      "- 'default': Prioritizes implementation files (src/app/, src/components/) over docs\n" +
+      "- 'docs': Prioritizes documentation (.md, .yaml) over implementation  \n" +
+      "- 'balanced': Equal weight for both docs and implementation\n" +
+      "- 'none': No file type boosting, pure BM25/keyword scoring\n\n" +
+      "Example: context_bundle({goal: 'state management design', boost_profile: 'balanced'})",
     inputSchema: {
       type: "object",
       required: ["goal"],
@@ -244,9 +251,9 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
         },
         boost_profile: {
           type: "string",
-          enum: ["default", "docs", "none"],
+          enum: ["default", "docs", "balanced", "none"],
           description:
-            'File type boosting mode: "default" prioritizes implementation files (src/app/, src/components/), "docs" prioritizes documentation (*.md), "none" disables boosting. Default is "default".',
+            'File type boosting mode: "default" prioritizes implementation files (src/app/, src/components/), "docs" prioritizes documentation (*.md), "balanced" applies equal weight to both docs and implementation, "none" disables boosting. Default is "default".',
         },
         artifacts: {
           type: "object",
@@ -341,9 +348,9 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
         },
         boost_profile: {
           type: "string",
-          enum: ["default", "docs", "none"],
+          enum: ["default", "docs", "balanced", "none"],
           description:
-            'File type boosting mode: "default" prioritizes implementation files (src/app/, src/components/), "docs" prioritizes documentation (*.md), "none" disables boosting. Default is "default".',
+            'File type boosting mode: "default" prioritizes implementation files (src/app/, src/components/), "docs" prioritizes documentation (*.md), "balanced" applies equal weight to both docs and implementation, "none" disables boosting. Default is "default".',
         },
         compact: {
           type: "boolean",
@@ -454,8 +461,15 @@ function parseFilesSearchParams(input: unknown): FilesSearchParams {
 
   // Parse boost_profile parameter
   const boostProfile = record.boost_profile;
-  if (boostProfile === "default" || boostProfile === "docs" || boostProfile === "none") {
-    params.boost_profile = boostProfile;
+  if (typeof boostProfile === "string") {
+    if (isValidBoostProfile(boostProfile)) {
+      params.boost_profile = boostProfile;
+    } else {
+      throw new Error(
+        `Invalid boost_profile: "${boostProfile}". ` +
+          `Valid profiles are: default, docs, none, balanced`
+      );
+    }
   }
 
   if (typeof record.compact === "boolean") {
@@ -583,8 +597,15 @@ function parseContextBundleParams(input: unknown, context: ServerContext): Conte
 
   // Parse boost_profile parameter
   const boostProfile = record.boost_profile;
-  if (boostProfile === "default" || boostProfile === "docs" || boostProfile === "none") {
-    params.boost_profile = boostProfile;
+  if (typeof boostProfile === "string") {
+    if (isValidBoostProfile(boostProfile)) {
+      params.boost_profile = boostProfile;
+    } else {
+      throw new Error(
+        `Invalid boost_profile: "${boostProfile}". ` +
+          `Valid profiles are: default, docs, none, balanced`
+      );
+    }
   }
 
   // Parse compact parameter (default: true for token efficiency)

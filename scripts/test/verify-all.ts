@@ -225,6 +225,7 @@ async function runMCPToolsTests(_options: VerificationOptions): Promise<TestResu
     execSync('git config user.email "test@example.com"', { cwd: testRepoPath });
     execSync('git config user.name "Test User"', { cwd: testRepoPath });
     mkdirSync(join(testRepoPath, "src"), { recursive: true });
+    mkdirSync(join(testRepoPath, "docs"), { recursive: true });
     writeFileSync(
       join(testRepoPath, "src", "index.ts"),
       ["export function hello(name: string) {", "  return `hello ${name}`;", "}", ""].join("\n")
@@ -232,6 +233,10 @@ async function runMCPToolsTests(_options: VerificationOptions): Promise<TestResu
     writeFileSync(
       join(testRepoPath, "README.md"),
       "# Sample Repo\n\nUsed for MCP verification tests.\n"
+    );
+    writeFileSync(
+      join(testRepoPath, "docs", "guide.md"),
+      "# Hello Guide\n\nThis guide explains the hello function.\n"
     );
     execSync("git add .", { cwd: testRepoPath });
     execSync('git commit -m "Initial commit"', { cwd: testRepoPath });
@@ -279,6 +284,16 @@ async function runMCPToolsTests(_options: VerificationOptions): Promise<TestResu
           method: "deps_closure",
           params: { path: "src/index.ts", direction: "outbound" },
         },
+        {
+          name: "files_search (balanced)",
+          method: "files_search",
+          params: { query: "guide", boost_profile: "balanced" },
+        },
+        {
+          name: "context_bundle (balanced)",
+          method: "context_bundle",
+          params: { goal: "hello guide function", boost_profile: "balanced" },
+        },
       ];
 
       async function requestWithRetry(payload: unknown, attempts = 5): Promise<unknown> {
@@ -306,7 +321,7 @@ async function runMCPToolsTests(_options: VerificationOptions): Promise<TestResu
           id: 1,
           method: tool.method,
           params: tool.params,
-        })) as { error?: { message: string } };
+        })) as { error?: { message: string }; result?: { context?: unknown[] } | unknown[] };
 
         if (result?.error) {
           throw new Error(
@@ -314,7 +329,39 @@ async function runMCPToolsTests(_options: VerificationOptions): Promise<TestResu
           );
         }
 
-        log(`    ✓ ${tool.name} returned valid response`, "green");
+        // Verify balanced profile returns docs/ files
+        if (tool.name.includes("balanced")) {
+          const items = Array.isArray(result.result)
+            ? result.result
+            : (result.result as { context?: unknown[] })?.context;
+
+          // ✅ Strict validation: Ensure items is defined and is an array
+          if (!items || !Array.isArray(items)) {
+            throw new Error(
+              `${tool.name} returned invalid structure (expected array of items)\n` +
+                `Result structure: ${JSON.stringify(result.result)}\n` +
+                `Server logs:\n${serverLogs}`
+            );
+          }
+
+          const paths = items.map((item: unknown) => (item as { path?: string })?.path);
+          const hasDocsFile = items.some((item: unknown) => {
+            const path = (item as { path?: string })?.path;
+            return typeof path === "string" && path.startsWith("docs/");
+          });
+
+          if (!hasDocsFile) {
+            log(`    Returned paths: ${JSON.stringify(paths)}`, "yellow");
+            throw new Error(
+              `${tool.name} with balanced profile did not return docs/ files\n` +
+                `Paths returned: ${JSON.stringify(paths)}\n` +
+                `Server logs:\n${serverLogs}`
+            );
+          }
+          log(`    ✓ ${tool.name} includes docs/ files`, "green");
+        } else {
+          log(`    ✓ ${tool.name} returned valid response`, "green");
+        }
       }
 
       serverProc.kill();

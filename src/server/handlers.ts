@@ -6,6 +6,11 @@ import { generateEmbedding, structuralSimilarity } from "../shared/embedding.js"
 import { encode as encodeGPT, tokenizeText } from "../shared/tokenizer.js";
 import { getRepoPathCandidates, normalizeRepoPath } from "../shared/utils/path.js";
 
+import {
+  type BoostProfileName,
+  type BoostProfileConfig,
+  getBoostProfile,
+} from "./boost-profiles.js";
 import { FtsStatusCache, ServerContext } from "./context.js";
 import { coerceProfileName, loadScoringProfile, type ScoringWeights } from "./scoring.js";
 
@@ -267,7 +272,7 @@ export interface FilesSearchParams {
   ext?: string;
   path_prefix?: string;
   limit?: number;
-  boost_profile?: "default" | "docs" | "none";
+  boost_profile?: BoostProfileName;
   compact?: boolean; // If true, omit preview to reduce token usage
 }
 
@@ -309,7 +314,7 @@ export interface ContextBundleParams {
   artifacts?: ContextBundleArtifacts;
   limit?: number;
   profile?: string;
-  boost_profile?: "default" | "docs" | "none";
+  boost_profile?: BoostProfileName;
   compact?: boolean; // If true, omit preview field to reduce token usage
   includeTokensEstimate?: boolean; // If true, compute tokens_estimate (slower)
 }
@@ -1005,6 +1010,25 @@ function splitQueryWords(query: string): string[] {
 }
 
 /**
+ * パス固有のマルチプライヤーを取得（最長プレフィックスマッチ）
+ * 配列の順序に依存せず、常に最長一致のプレフィックスを選択
+ * @param filePath - ファイルパス
+ * @param profileConfig - ブーストプロファイル設定
+ * @returns パス固有のマルチプライヤー（マッチなしの場合は1.0）
+ */
+function getPathMultiplier(filePath: string, profileConfig: BoostProfileConfig): number {
+  let bestMatch = { prefix: "", multiplier: 1.0 };
+
+  for (const { prefix, multiplier } of profileConfig.pathMultipliers) {
+    if (filePath.startsWith(prefix) && prefix.length > bestMatch.prefix.length) {
+      bestMatch = { prefix, multiplier };
+    }
+  }
+
+  return bestMatch.multiplier;
+}
+
+/**
  * files_search専用のファイルタイプブースト適用（v0.7.0+: 設定可能な乗算的ペナルティ）
  * context_bundleと同じ乗算的ペナルティロジックを使用
  * @param path - ファイルパス
@@ -1016,8 +1040,8 @@ function splitQueryWords(query: string): string[] {
 function applyFileTypeBoost(
   path: string,
   baseScore: number,
-  profile: "default" | "docs" | "none" = "default",
-  weights: ScoringWeights
+  profileConfig: BoostProfileConfig,
+  _weights: ScoringWeights
 ): number {
   // Blacklisted directories that are almost always irrelevant for code context
   const blacklistedDirs = [
@@ -1029,66 +1053,48 @@ function applyFileTypeBoost(
     ".git/",
     "node_modules/",
   ];
+
   for (const dir of blacklistedDirs) {
     if (path.startsWith(dir)) {
-      // FIX: boost_profile="docs" の場合は docs/ ブラックリストをスキップ
-      if (profile === "docs" && dir === "docs/") {
+      // ✅ Decoupled: Check denylist overrides from profile config
+      if (profileConfig.denylistOverrides.includes(dir)) {
         continue;
       }
       return -100; // Effectively remove it
     }
   }
 
-  if (profile === "none") {
-    return baseScore;
-  }
-
-  // Extract file extension for type detection
-  const ext = path.includes(".") ? path.substring(path.lastIndexOf(".")) : null;
-
-  // ✅ UNIFIED LOGIC: Use same multiplicative penalties as context_bundle
-  if (profile === "docs") {
-    // Boost documentation files
-    if (path.endsWith(".md") || path.endsWith(".yaml") || path.endsWith(".yml")) {
-      return baseScore * 1.5; // 50% boost (same as context_bundle)
-    }
-    // Penalty for implementation files in docs mode
-    if (
-      path.startsWith("src/") &&
-      (path.endsWith(".ts") || path.endsWith(".js") || path.endsWith(".tsx"))
-    ) {
-      return baseScore * 0.5; // 50% penalty
-    }
-    return baseScore;
-  }
-
-  // Default profile: Use configurable multiplicative penalties
-  let multiplier = 1.0;
   const fileName = path.split("/").pop() ?? "";
+  const ext = path.includes(".") ? path.substring(path.lastIndexOf(".")) : null;
+  let multiplier = 1.0;
 
-  // ✅ Step 1: Config files get strongest penalty (95% reduction)
+  // ✅ Step 1: Config files
   if (isConfigFile(path, fileName)) {
-    multiplier *= weights.configPenaltyMultiplier; // 0.05 = 95% reduction
+    multiplier *= profileConfig.fileTypeMultipliers.config;
     return baseScore * multiplier;
   }
 
-  // ✅ Step 2: Documentation files get moderate penalty (50% reduction)
+  // ✅ Step 2: Documentation files
   const docExtensions = [".md", ".yaml", ".yml", ".mdc"];
   if (docExtensions.some((docExt) => path.endsWith(docExt))) {
-    multiplier *= weights.docPenaltyMultiplier; // 0.5 = 50% reduction
+    multiplier *= profileConfig.fileTypeMultipliers.doc;
     return baseScore * multiplier;
   }
 
-  // ✅ Step 3: Implementation file boosts
-  if (path.startsWith("src/app/")) {
-    multiplier *= weights.implBoostMultiplier * 1.4; // Extra boost for app files
-  } else if (path.startsWith("src/components/")) {
-    multiplier *= weights.implBoostMultiplier * 1.3;
-  } else if (path.startsWith("src/lib/")) {
-    multiplier *= weights.implBoostMultiplier * 1.2;
-  } else if (path.startsWith("src/")) {
+  // ✅ Step 3: Implementation files with path-specific boosts
+  const implMultiplier = profileConfig.fileTypeMultipliers.impl;
+
+  // ✅ Use longest-prefix-match logic (order-independent)
+  const pathBoost = getPathMultiplier(path, profileConfig);
+  if (pathBoost !== 1.0) {
+    multiplier *= implMultiplier * pathBoost;
+    return baseScore * multiplier;
+  }
+
+  // Fallback for other src/ files
+  if (path.startsWith("src/")) {
     if (ext === ".ts" || ext === ".tsx" || ext === ".js") {
-      multiplier *= weights.implBoostMultiplier; // Base impl boost
+      multiplier *= implMultiplier;
     }
   }
 
@@ -1154,7 +1160,7 @@ function applyAdditiveFilePenalties(
   path: string,
   lowerPath: string,
   fileName: string,
-  profile: "default" | "docs" | "none"
+  profileConfig: BoostProfileConfig
 ): boolean {
   // Blacklisted directories - effectively remove
   const blacklistedDirs = [
@@ -1179,12 +1185,12 @@ function applyAdditiveFilePenalties(
     "tmp/",
     "temp/",
   ];
+
   for (const dir of blacklistedDirs) {
     if (path.startsWith(dir)) {
-      // ✅ FIX (v0.9.0): boost_profile="docs"の場合はdocs/ブラックリストをスキップ
-      // これによりドキュメント検索が正しく機能する
-      if (profile === "docs" && dir === "docs/") {
-        continue; // このブラックリストエントリをスキップ
+      // ✅ Decoupled: Check denylist overrides from profile config
+      if (profileConfig.denylistOverrides.includes(dir)) {
+        continue; // Skip this blacklisted directory
       }
       candidate.score = -100;
       candidate.reasons.add("penalty:blacklisted-dir");
@@ -1216,7 +1222,7 @@ function applyAdditiveFilePenalties(
     return true;
   }
 
-  // Configuration files - strong penalty
+  // Configuration files - penalty handling depends on profile
   const configPatterns = [
     ".config.js",
     ".config.ts",
@@ -1239,6 +1245,12 @@ function applyAdditiveFilePenalties(
     fileName === "docker-compose.yml" ||
     fileName === "docker-compose.yaml"
   ) {
+    // ✅ Use explicit flag instead of magic number (0.3) to determine behavior
+    // This decouples profile detection from multiplier values
+    if (profileConfig.skipConfigAdditivePenalty) {
+      return false; // Continue to multiplicative penalty only
+    }
+    // For other profiles, apply strong additive penalty
     candidate.score -= 1.5;
     candidate.reasons.add("penalty:config-file");
     return true;
@@ -1263,58 +1275,56 @@ function applyFileTypeMultipliers(
   candidate: CandidateInfo,
   path: string,
   ext: string | null,
-  profile: "default" | "docs" | "none",
-  weights: ScoringWeights
+  profileConfig: BoostProfileConfig,
+  _weights: ScoringWeights
 ): void {
-  if (profile === "none") {
-    return;
+  const fileName = path.split("/").pop() ?? "";
+
+  // ✅ Step 1: Config files
+  if (isConfigFile(path, fileName)) {
+    candidate.scoreMultiplier *= profileConfig.fileTypeMultipliers.config;
+    candidate.reasons.add("penalty:config-file");
+    return; // Don't apply impl boosts to config files
   }
 
-  // ✅ CRITICAL SAFETY: profile="docs" mode boosts docs, skips penalties
-  if (profile === "docs") {
-    const docExtensions = [".md", ".yaml", ".yml", ".mdc"];
-    if (docExtensions.some((docExt) => path.endsWith(docExt))) {
-      candidate.scoreMultiplier *= 1.5; // 50% boost for docs
+  // ✅ Step 2: Documentation files
+  const docExtensions = [".md", ".yaml", ".yml", ".mdc"];
+  if (docExtensions.some((docExt) => path.endsWith(docExt))) {
+    const docMultiplier = profileConfig.fileTypeMultipliers.doc;
+    candidate.scoreMultiplier *= docMultiplier;
+
+    if (docMultiplier > 1.0) {
       candidate.reasons.add("boost:doc-file");
+    } else if (docMultiplier < 1.0) {
+      candidate.reasons.add("penalty:doc-file");
     }
-    // No penalty for implementation files in "docs" mode
-    return;
+    return; // Don't apply impl boosts to docs
   }
 
-  // DEFAULT PROFILE: Use MULTIPLICATIVE penalties for config/docs, MULTIPLICATIVE boosts for impl files
-  if (profile === "default") {
-    const fileName = path.split("/").pop() ?? "";
+  // ✅ Step 3: Implementation files with path-specific boosts
+  const implMultiplier = profileConfig.fileTypeMultipliers.impl;
 
-    // ✅ Step 1: Config files get strongest penalty (95% reduction)
-    if (isConfigFile(path, fileName)) {
-      candidate.scoreMultiplier *= weights.configPenaltyMultiplier; // 0.05 = 95% reduction
-      candidate.reasons.add("penalty:config-file");
-      return; // Don't apply impl boosts to config files
-    }
+  // ✅ Use longest-prefix-match logic (order-independent)
+  const pathBoost = getPathMultiplier(path, profileConfig);
+  if (pathBoost !== 1.0) {
+    candidate.scoreMultiplier *= implMultiplier * pathBoost;
 
-    // ✅ Step 2: Documentation files get moderate penalty (50% reduction)
-    const docExtensions = [".md", ".yaml", ".yml", ".mdc"];
-    if (docExtensions.some((docExt) => path.endsWith(docExt))) {
-      candidate.scoreMultiplier *= weights.docPenaltyMultiplier; // 0.5 = 50% reduction
-      candidate.reasons.add("penalty:doc-file");
-      return; // Don't apply impl boosts to docs
-    }
-
-    // ✅ Step 3: Implementation files get multiplicative boost
+    // Add specific reason based on matched path
     if (path.startsWith("src/app/")) {
-      candidate.scoreMultiplier *= weights.implBoostMultiplier * 1.4; // Extra boost for app files
       candidate.reasons.add("boost:app-file");
     } else if (path.startsWith("src/components/")) {
-      candidate.scoreMultiplier *= weights.implBoostMultiplier * 1.3;
       candidate.reasons.add("boost:component-file");
     } else if (path.startsWith("src/lib/")) {
-      candidate.scoreMultiplier *= weights.implBoostMultiplier * 1.2;
       candidate.reasons.add("boost:lib-file");
-    } else if (path.startsWith("src/")) {
-      if (ext === ".ts" || ext === ".tsx" || ext === ".js") {
-        candidate.scoreMultiplier *= weights.implBoostMultiplier;
-        candidate.reasons.add("boost:impl-file");
-      }
+    }
+    return;
+  }
+
+  // Fallback for other src/ files
+  if (path.startsWith("src/")) {
+    if (ext === ".ts" || ext === ".tsx" || ext === ".js") {
+      candidate.scoreMultiplier *= implMultiplier;
+      candidate.reasons.add("boost:impl-file");
     }
   }
 }
@@ -1334,14 +1344,10 @@ function applyFileTypeMultipliers(
 function applyBoostProfile(
   candidate: CandidateInfo,
   row: { path: string; ext: string | null },
-  profile: "default" | "docs" | "none",
+  profileConfig: BoostProfileConfig,
   weights: ScoringWeights,
   extractedTerms?: ExtractedTerms
 ): void {
-  if (profile === "none") {
-    return;
-  }
-
   const { path, ext } = row;
   const lowerPath = path.toLowerCase();
   const fileName = path.split("/").pop() ?? "";
@@ -1350,13 +1356,19 @@ function applyBoostProfile(
   applyPathBasedScoring(candidate, lowerPath, weights, extractedTerms);
 
   // Step 2: 加算的ペナルティ（ブラックリスト、テスト、lock、設定、マイグレーション）
-  const shouldStop = applyAdditiveFilePenalties(candidate, path, lowerPath, fileName, profile);
+  const shouldStop = applyAdditiveFilePenalties(
+    candidate,
+    path,
+    lowerPath,
+    fileName,
+    profileConfig
+  );
   if (shouldStop) {
     return; // ペナルティが適用された場合は処理終了
   }
 
   // Step 3: ファイルタイプ別の乗算的ペナルティ/ブースト
-  applyFileTypeMultipliers(candidate, path, ext, profile, weights);
+  applyFileTypeMultipliers(candidate, path, ext, profileConfig, weights);
 }
 
 export async function filesSearch(
@@ -1458,6 +1470,7 @@ export async function filesSearch(
   const rows = await db.all<FileRow>(sql, values);
 
   const boostProfile = params.boost_profile ?? "default";
+  const profileConfig = getBoostProfile(boostProfile);
 
   // ✅ v0.7.0+: Load configurable scoring weights for unified boosting logic
   // Note: filesSearch doesn't have a separate profile parameter, uses default weights
@@ -1481,7 +1494,10 @@ export async function filesSearch(
       }
 
       const baseScore = row.score ?? 1.0; // FTS時はBM25スコア、ILIKE時は1.0
-      const boostedScore = applyFileTypeBoost(row.path, baseScore, boostProfile, weights);
+      const boostedScore =
+        boostProfile === "none"
+          ? baseScore
+          : applyFileTypeBoost(row.path, baseScore, profileConfig, weights);
 
       const result: FilesSearchResult = {
         path: row.path,
@@ -1684,6 +1700,10 @@ export async function contextBundle(
   const stringMatchSeeds = new Set<string>();
   const fileCache = new Map<string, FileContentCacheEntry>();
 
+  // ✅ Cache boost profile config to avoid redundant lookups in hot path
+  const boostProfile = params.boost_profile ?? "default";
+  const profileConfig = getBoostProfile(boostProfile);
+
   // フレーズマッチング（高い重み: textMatch × 2）- 統合クエリでパフォーマンス改善
   if (extractedTerms.phrases.length > 0) {
     const phrasePlaceholders = extractedTerms.phrases
@@ -1705,8 +1725,6 @@ export async function contextBundle(
       `,
       [repoId, ...extractedTerms.phrases, MAX_MATCHES_PER_KEYWORD * extractedTerms.phrases.length]
     );
-
-    const boostProfile = params.boost_profile ?? "default";
 
     for (const row of rows) {
       if (row.content === null) {
@@ -1733,7 +1751,9 @@ export async function contextBundle(
       }
 
       // Apply boost profile once per file
-      applyBoostProfile(candidate, row, boostProfile, weights, extractedTerms);
+      if (boostProfile !== "none") {
+        applyBoostProfile(candidate, row, profileConfig, weights, extractedTerms);
+      }
 
       // Use first matched phrase for preview (guaranteed to exist due to length check above)
       const { line } = buildPreview(row.content, matchedPhrases[0]!);
@@ -1779,8 +1799,6 @@ export async function contextBundle(
       [repoId, ...extractedTerms.keywords, MAX_MATCHES_PER_KEYWORD * extractedTerms.keywords.length]
     );
 
-    const boostProfile = params.boost_profile ?? "default";
-
     for (const row of rows) {
       if (row.content === null) {
         continue;
@@ -1805,7 +1823,9 @@ export async function contextBundle(
       }
 
       // Apply boost profile once per file
-      applyBoostProfile(candidate, row, boostProfile, weights, extractedTerms);
+      if (boostProfile !== "none") {
+        applyBoostProfile(candidate, row, profileConfig, weights, extractedTerms);
+      }
 
       // Use first matched keyword for preview (guaranteed to exist due to length check above)
       const { line } = buildPreview(row.content, matchedKeywords[0]!);
