@@ -124,8 +124,6 @@ KIRI includes a golden set evaluation system for measuring search accuracy:
 
 See [tests/eval/goldens/README.md](tests/eval/goldens/README.md) for complete documentation.
 
-````
-
 ## DuckDB Schema Design
 
 The schema uses **blob/tree separation**:
@@ -163,7 +161,7 @@ try {
 } finally {
   await db.close();
 }
-````
+```
 
 ### Testing with DuckDB
 

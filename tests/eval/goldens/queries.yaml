@@ -63,10 +63,10 @@ queries:
     expected:
       paths:
         - "config/scoring-profiles.yml"
-        - "src/server/boosting.ts"
+        - "src/server/boost-profiles.ts"
       patterns:
         - "config/**/*.yml"
-        - "src/server/boosting*.ts"
+        - "src/server/boost*.ts"
     tags: ["config", "scoring"]
     notes: "Should use files_search to find config files"
 

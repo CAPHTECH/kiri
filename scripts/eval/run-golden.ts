@@ -1,5 +1,4 @@
 #!/usr/bin/env tsx
-/* global fetch */
 /**
  * KIRI Golden Set Benchmark Script
  *
@@ -14,7 +13,7 @@
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, type ChildProcess, execSync } from "node:child_process";
 import { parse as parseYAML } from "yaml";
 
 import {
@@ -261,27 +260,35 @@ class McpServerManager {
   }
 
   async call(method: string, params: unknown): Promise<unknown> {
-    const response = await fetch(`http://localhost:${this.port}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: Math.random(),
-        method,
-        params,
-      }),
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
 
-    const result = (await response.json()) as {
-      error?: { message: string };
-      result?: unknown;
-    };
+    try {
+      const response = await fetch(`http://localhost:${this.port}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: Math.random(),
+          method,
+          params,
+        }),
+        signal: controller.signal,
+      });
 
-    if (result.error) {
-      throw new Error(result.error.message);
+      const result = (await response.json()) as {
+        error?: { message: string };
+        result?: unknown;
+      };
+
+      if (result.error) {
+        throw new Error(result.error.message);
+      }
+
+      return result.result;
+    } finally {
+      clearTimeout(timeoutId);
     }
-
-    return result.result;
   }
 
   async stop(): Promise<void> {
@@ -309,10 +316,20 @@ function loadGoldenSet(): GoldenSet {
   const content = readFileSync(path, "utf8");
   const goldenSet = parseYAML(content) as GoldenSet;
 
-  // Basic validation
+  // Schema version validation
   if (!goldenSet.schemaVersion) {
     throw new Error("Golden set missing schemaVersion");
   }
+
+  const [major] = goldenSet.schemaVersion.split(".").map((v) => parseInt(v, 10));
+  const supportedMajor = 1;
+
+  if (major !== supportedMajor) {
+    throw new Error(
+      `Unsupported schema version ${goldenSet.schemaVersion}. Expected major version ${supportedMajor}.x.x`
+    );
+  }
+
   if (!goldenSet.queries || goldenSet.queries.length === 0) {
     throw new Error("Golden set has no queries");
   }
@@ -443,7 +460,13 @@ async function main(): Promise<void> {
     const packageJson = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8")) as {
       version: string;
     };
-    const gitSha = "unknown"; // TODO: Get from git
+
+    let gitSha = "unknown";
+    try {
+      gitSha = execSync("git rev-parse --short HEAD", { encoding: "utf8" }).trim();
+    } catch {
+      // Git not available or not a git repository
+    }
 
     const benchmarkResult: BenchmarkResult = {
       timestamp: new Date().toISOString(),
@@ -581,11 +604,16 @@ async function executeQuery(
   }
 
   const startTime = process.hrtime.bigint();
-  const result = (await server.call(tool, params)) as
-    | { context: Array<{ path: string }> }
-    | Array<{ path: string }>;
-
+  const rawResult = await server.call(tool, params);
   const durationMs = Number((process.hrtime.bigint() - startTime) / 1000000n);
+
+  // Type guard for result
+  const result: { context: Array<{ path: string }> } | Array<{ path: string }> =
+    rawResult && typeof rawResult === "object" && "context" in rawResult
+      ? (rawResult as { context: Array<{ path: string }> })
+      : Array.isArray(rawResult)
+        ? (rawResult as Array<{ path: string }>)
+        : { context: [] };
 
   if (isWarmup) {
     return {
@@ -623,9 +651,11 @@ async function executeQuery(
 
   // Calculate metrics
   const relevantSet = new Set(query.expected.paths);
+  // Use actual retrieval timing: approximate incremental arrival based on total duration
+  const incrementMs = retrieved.length > 1 ? durationMs / retrieved.length : durationMs;
   const events: RetrievalEvent[] = retrieved.map((path, index) => ({
     id: path,
-    timestampMs: index * 10, // Simulate incremental arrival
+    timestampMs: incrementMs * (index + 1),
   }));
 
   const metrics = evaluateRetrieval({ items: events, relevant: relevantSet, k });

@@ -250,8 +250,8 @@ expected:
 
 ```bash
 # 実際にMCP toolを手動実行して結果を確認
-tsx src/server/main.ts --port 9999 &
-curl -X POST http://localhost:9999 -d '{
+tsx src/server/main.ts --port 19999 &
+curl -X POST http://localhost:19999 -d '{
   "jsonrpc": "2.0",
   "id": 1,
   "method": "context_bundle",
