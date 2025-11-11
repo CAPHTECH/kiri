@@ -757,6 +757,37 @@ See [docs/architecture.md](docs/architecture.md) for detailed technical informat
 | **Precision @ 10**            | ≥ 0.7  | ✅ 0.75       |
 | **Token Reduction (compact)** | ≥ 90%  | ✅ 95% (v0.8) |
 
+### Evaluation & Quality Assurance
+
+KIRI includes a **Golden Set Evaluation System** for tracking search accuracy over time using representative queries.
+
+**Metrics:**
+
+- **P@10** (Precision at K=10): Fraction of relevant results in top 10 (target: ≥0.70)
+- **TFFU** (Time To First Useful): Time until first relevant result appears (target: ≤1000ms)
+
+**For Developers:**
+
+```bash
+# Run benchmark evaluation (local only)
+pnpm run eval:golden
+
+# Verbose output
+pnpm run eval:golden:verbose
+```
+
+The benchmark system evaluates 5+ representative queries across categories (bugfix, feature, refactor, infra, docs) and outputs:
+
+- JSON: Detailed per-query results (`var/eval/latest.json`)
+- Markdown: Summary table (`var/eval/latest.md`)
+
+**Documentation:**
+
+- [Golden Set Guide](tests/eval/goldens/README.md) - Query format, categories, adding queries
+- [Results Recording](tests/eval/results/README.md) - Tracking improvements over time
+
+See [docs/testing.md](docs/testing.md) for complete testing and evaluation guidelines.
+
 ### Community
 
 - [GitHub Issues](https://github.com/CAPHTECH/kiri/issues) - Bug reports and feature requests

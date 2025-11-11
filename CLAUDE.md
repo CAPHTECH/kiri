@@ -100,9 +100,29 @@ pnpm exec vitest run tests/server/handlers.spec.ts
 # Lint and test together
 pnpm run check
 
+# Run golden set evaluation (P@10/TFFU benchmark)
+pnpm run eval:golden
+
 # Unlink the package (if needed)
 npm unlink -g kiri-mcp-server
 ```
+
+## Evaluation System
+
+KIRI includes a golden set evaluation system for measuring search accuracy:
+
+- **Location**: `tests/eval/goldens/`
+- **Metrics**: P@10 (Precision at K=10), TFFU (Time To First Useful)
+- **Usage**: `pnpm run eval:golden` (local execution only, CI blocked)
+
+**Key Files:**
+
+- `tests/eval/goldens/queries.yaml` - Representative queries (20-50 queries)
+- `tests/eval/goldens/README.md` - Schema, categories, adding queries
+- `tests/eval/results/README.md` - Results recording workflow
+- `scripts/eval/run-golden.ts` - Benchmark execution script
+
+See [tests/eval/goldens/README.md](tests/eval/goldens/README.md) for complete documentation.
 
 ## DuckDB Schema Design
 

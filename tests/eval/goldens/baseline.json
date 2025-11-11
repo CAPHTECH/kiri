@@ -1,0 +1,47 @@
+{
+  "version": "0.9.10",
+  "gitSha": "a612f1b",
+  "date": "2025-11-11T00:00:00Z",
+  "datasetVersion": "v2025-11-11",
+  "description": "Initial baseline measurement for golden set evaluation",
+  "thresholds": {
+    "minP10": 0.7,
+    "maxTTFU": 1000,
+    "description": "Target metrics from docs/overview.md: P@10 ≥ 0.7, TTFU ≤ 1.0s"
+  },
+  "overall": {
+    "precisionAtK": null,
+    "avgTTFU": null,
+    "totalQueries": 0,
+    "successfulQueries": 0,
+    "failedQueries": 0
+  },
+  "byCategory": {
+    "bugfix": {
+      "precisionAtK": null,
+      "avgTTFU": null,
+      "count": 0
+    },
+    "feature": {
+      "precisionAtK": null,
+      "avgTTFU": null,
+      "count": 0
+    },
+    "refactor": {
+      "precisionAtK": null,
+      "avgTTFU": null,
+      "count": 0
+    },
+    "infra": {
+      "precisionAtK": null,
+      "avgTTFU": null,
+      "count": 0
+    },
+    "docs": {
+      "precisionAtK": null,
+      "avgTTFU": null,
+      "count": 0
+    }
+  },
+  "notes": "This is a template. Run 'pnpm run eval:golden' to populate with actual measurements."
+}

@@ -1,0 +1,87 @@
+schemaVersion: "1.0.0"
+datasetVersion: "v2025-11-11"
+description: "Representative queries for KIRI search accuracy evaluation"
+
+# デフォルト実行パラメータ
+defaultParams:
+  k: 10
+  tool: "context_bundle"
+  boostProfile: "default"
+  timeoutMs: 30000
+
+# クエリリスト
+queries:
+  # Bugfix Category
+  - id: bugfix-001
+    query: "database connection timeout error handling"
+    tool: "context_bundle"
+    intent: "Investigate database connection issues"
+    category: "bugfix"
+    expected:
+      paths:
+        - "src/shared/duckdb.ts"
+      patterns:
+        - "src/shared/**/*.ts"
+    tags: ["database", "error-handling"]
+    notes: "Should prioritize DuckDBClient implementation"
+
+  # Feature Category
+  - id: feature-001
+    query: "context_bundle ranking algorithm implementation"
+    tool: "context_bundle"
+    intent: "Understand context extraction and ranking logic"
+    category: "feature"
+    expected:
+      paths:
+        - "src/server/handlers.ts"
+        - "src/server/scoring.ts"
+      patterns:
+        - "src/server/**/*.ts"
+    tags: ["mcp", "search", "ranking"]
+    notes: "Should include scoring profile logic"
+
+  # Refactor Category
+  - id: refactor-001
+    query: "AST symbol extraction tree-sitter"
+    tool: "context_bundle"
+    intent: "Find symbol extraction logic for refactoring"
+    category: "refactor"
+    expected:
+      paths:
+        - "src/indexer/codeintel.ts"
+      patterns:
+        - "src/indexer/**/*.ts"
+    tags: ["indexer", "ast", "codeintel"]
+    notes: "Should locate tree-sitter integration points"
+
+  # Infra Category
+  - id: infra-001
+    query: "scoring profiles configuration boost"
+    tool: "files_search"
+    intent: "Find boost configuration files"
+    category: "infra"
+    expected:
+      paths:
+        - "config/scoring-profiles.yml"
+        - "src/server/boost-profiles.ts"
+      patterns:
+        - "config/**/*.yml"
+        - "src/server/boost*.ts"
+    tags: ["config", "scoring"]
+    notes: "Should use files_search to find config files"
+
+  # Docs Category
+  - id: docs-001
+    query: "search ranking BM25 algorithm documentation"
+    tool: "context_bundle"
+    intent: "Find documentation about search algorithms"
+    category: "docs"
+    params:
+      boostProfile: "balanced"
+    expected:
+      paths:
+        - "docs/search-ranking.md"
+      patterns:
+        - "docs/**/*.md"
+    tags: ["docs", "search", "ranking"]
+    notes: "Use balanced profile to include docs/ directory"
