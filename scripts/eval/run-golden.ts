@@ -23,6 +23,36 @@ import {
 } from "../../src/eval/metrics.js";
 
 // ============================================================================
+// Glob Pattern Matching
+// ============================================================================
+
+/**
+ * Simple glob matcher supporting ** and * wildcards
+ * Examples:
+ *   - "src/**\/*.ts" matches "src/server/handlers.ts", "src/shared/db.ts"
+ *   - "config/*.yml" matches "config/settings.yml" but not "config/sub/settings.yml"
+ */
+function matchesGlob(path: string, pattern: string): boolean {
+  // Normalize paths
+  const normalizedPath = path.replace(/^\.\//, "");
+  const normalizedPattern = pattern.replace(/^\.\//, "");
+
+  // Convert glob pattern to regex
+  // Escape special regex characters except * and /
+  let regexPattern = normalizedPattern
+    .replace(/[.+?^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*\*/g, "DOUBLESTAR")
+    .replace(/\*/g, "[^/]*")
+    .replace(/DOUBLESTAR/g, ".*");
+
+  // Ensure full match
+  regexPattern = `^${regexPattern}$`;
+
+  const regex = new RegExp(regexPattern);
+  return regex.test(normalizedPath);
+}
+
+// ============================================================================
 // CI Guard
 // ============================================================================
 
@@ -48,6 +78,7 @@ interface GoldenQuery {
   params?: {
     boostProfile?: string;
     k?: number;
+    timeoutMs?: number;
   };
   tags: string[];
   notes?: string;
@@ -259,9 +290,9 @@ class McpServerManager {
     );
   }
 
-  async call(method: string, params: unknown): Promise<unknown> {
+  async call(method: string, params: unknown, timeoutMs = 30000): Promise<unknown> {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
       const response = await fetch(`http://localhost:${this.port}`, {
@@ -422,10 +453,11 @@ async function main(): Promise<void> {
       process.exit(1);
     }
 
+    // Include failed queries as P@K=0 to reflect actual user experience
     const overallP10 =
-      successfulResults.reduce((sum, r) => sum + (r.precisionAtK ?? 0), 0) /
-      successfulResults.length;
+      queryResults.reduce((sum, r) => sum + (r.precisionAtK ?? 0), 0) / queryResults.length;
 
+    // TFFU: Only average over successful queries (failures don't have timing)
     const validTTFU = successfulResults.filter(
       (r) => r.timeToFirstUseful !== null && isFinite(r.timeToFirstUseful)
     );
@@ -435,22 +467,26 @@ async function main(): Promise<void> {
           1000
         : 0;
 
-    // By-category metrics
+    // By-category metrics (include failures as P@K=0)
     const categories = [...new Set(goldenSet.queries.map((q) => q.category))];
     const byCategory: Record<string, { precisionAtK: number; avgTTFU: number; count: number }> = {};
 
     for (const category of categories) {
-      const catResults = successfulResults.filter((r) => r.category === category);
+      const catResults = queryResults.filter((r) => r.category === category);
+      const catSuccessful = catResults.filter((r) => r.status === "success");
+
       if (catResults.length > 0) {
         byCategory[category] = {
           precisionAtK:
             catResults.reduce((sum, r) => sum + (r.precisionAtK ?? 0), 0) / catResults.length,
           avgTTFU:
-            (catResults
-              .filter((r) => r.timeToFirstUseful !== null && isFinite(r.timeToFirstUseful))
-              .reduce((sum, r) => sum + (r.timeToFirstUseful ?? 0), 0) /
-              catResults.length) *
-            1000,
+            catSuccessful.length > 0
+              ? (catSuccessful
+                  .filter((r) => r.timeToFirstUseful !== null && isFinite(r.timeToFirstUseful))
+                  .reduce((sum, r) => sum + (r.timeToFirstUseful ?? 0), 0) /
+                  catSuccessful.length) *
+                1000
+              : 0,
           count: catResults.length,
         };
       }
@@ -572,7 +608,11 @@ async function executeQueryWithRetry(
           durationMs: 0,
         };
       }
-      await new Promise((resolve) => setTimeout(resolve, 1000 * (attempt + 1)));
+      // Exponential backoff with jitter
+      const baseDelayMs = 1000;
+      const jitter = Math.random() * 500; // 0-500ms jitter
+      const delayMs = baseDelayMs * 2 ** attempt + jitter;
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
   }
 
@@ -589,6 +629,7 @@ async function executeQuery(
   const tool = query.tool || defaultParams.tool;
   const k = query.params?.k || options.k;
   const boostProfile = query.params?.boostProfile || defaultParams.boostProfile;
+  const timeoutMs = query.params?.timeoutMs || defaultParams.timeoutMs;
 
   const params: Record<string, unknown> = {
     limit: k,
@@ -604,7 +645,7 @@ async function executeQuery(
   }
 
   const startTime = process.hrtime.bigint();
-  const rawResult = await server.call(tool, params);
+  const rawResult = await server.call(tool, params, timeoutMs);
   const durationMs = Number((process.hrtime.bigint() - startTime) / 1000000n);
 
   // Type guard for result
@@ -650,7 +691,17 @@ async function executeQuery(
   }
 
   // Calculate metrics
-  const relevantSet = new Set(query.expected.paths);
+  // Build relevant set from exact paths and glob patterns
+  const patterns = query.expected.patterns ?? [];
+
+  // Relevant set includes:
+  // 1. Exact expected paths (even if not retrieved)
+  // 2. Retrieved paths matching glob patterns
+  const relevantSet = new Set<string>([
+    ...query.expected.paths,
+    ...retrieved.filter((path) => patterns.some((pattern) => matchesGlob(path, pattern))),
+  ]);
+
   // Use actual retrieval timing: approximate incremental arrival based on total duration
   const incrementMs = retrieved.length > 1 ? durationMs / retrieved.length : durationMs;
   const events: RetrievalEvent[] = retrieved.map((path, index) => ({

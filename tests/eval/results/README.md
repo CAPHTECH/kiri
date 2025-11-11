@@ -24,13 +24,13 @@ This directory contains historical benchmark results for tracking KIRI search ac
 # Run the golden set evaluation
 pnpm run eval:golden
 
-# Optionally save output to specific file
-pnpm run eval:golden --out var/eval/2025-11-11-feature-x.json
+# Optionally specify output directory
+pnpm run eval:golden --out var/eval/2025-11-11-feature-x
 ```
 
 ### 2. Review Generated Output
 
-The benchmark script generates two files in `var/eval/`:
+The benchmark script generates two files in the output directory (default: `var/eval/`):
 
 - `latest.json`: Detailed per-query results
 - `latest.md`: Summary table (copy-paste ready)
@@ -277,14 +277,14 @@ Always run benchmark before making scoring/ranking changes:
 ```bash
 # Before implementing feature
 git checkout -b feature/semantic-rerank
-pnpm run eval:golden --out var/eval/before-semantic.json
+pnpm run eval:golden --out var/eval/before-semantic
 
 # After implementation
 pnpm run build
-pnpm run eval:golden --out var/eval/after-semantic.json
+pnpm run eval:golden --out var/eval/after-semantic
 
 # Compare
-diff var/eval/before-semantic.json var/eval/after-semantic.json
+diff var/eval/before-semantic/latest.json var/eval/after-semantic/latest.json
 ```
 
 ### 2. Document Context
