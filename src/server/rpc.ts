@@ -211,7 +211,7 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
       "boost_profile options:\n" +
       "- 'default': Prioritizes implementation files (src/app/, src/components/) over docs\n" +
       "- 'docs': Prioritizes documentation (.md, .yaml) over implementation  \n" +
-      "- 'balanced': Equal weight for both docs and implementation (NEW in v0.9.10)\n" +
+      "- 'balanced': Equal weight for both docs and implementation\n" +
       "- 'none': No file type boosting, pure BM25/keyword scoring\n\n" +
       "Example: context_bundle({goal: 'state management design', boost_profile: 'balanced'})",
     inputSchema: {
@@ -253,7 +253,7 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
           type: "string",
           enum: ["default", "docs", "balanced", "none"],
           description:
-            'File type boosting mode: "default" prioritizes implementation files (src/app/, src/components/), "docs" prioritizes documentation (*.md), "balanced" applies equal weight to both docs and implementation (NEW in v0.9.10), "none" disables boosting. Default is "default".',
+            'File type boosting mode: "default" prioritizes implementation files (src/app/, src/components/), "docs" prioritizes documentation (*.md), "balanced" applies equal weight to both docs and implementation, "none" disables boosting. Default is "default".',
         },
         artifacts: {
           type: "object",
@@ -350,7 +350,7 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
           type: "string",
           enum: ["default", "docs", "balanced", "none"],
           description:
-            'File type boosting mode: "default" prioritizes implementation files (src/app/, src/components/), "docs" prioritizes documentation (*.md), "balanced" applies equal weight to both docs and implementation (NEW in v0.9.10), "none" disables boosting. Default is "default".',
+            'File type boosting mode: "default" prioritizes implementation files (src/app/, src/components/), "docs" prioritizes documentation (*.md), "balanced" applies equal weight to both docs and implementation, "none" disables boosting. Default is "default".',
         },
         compact: {
           type: "boolean",
