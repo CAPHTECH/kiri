@@ -29,8 +29,9 @@ import {
 /**
  * Simple glob matcher supporting ** and * wildcards
  * Examples:
- *   - "src/**\/*.ts" matches "src/server/handlers.ts", "src/shared/db.ts"
+ *   - "src/**\/*.ts" matches "src/handlers.ts", "src/server/handlers.ts", "src/a/b/c.ts"
  *   - "config/*.yml" matches "config/settings.yml" but not "config/sub/settings.yml"
+ *   - "**\/test.ts" matches "test.ts", "src/test.ts", "src/sub/test.ts"
  */
 function matchesGlob(path: string, pattern: string): boolean {
   // Normalize paths
@@ -41,9 +42,16 @@ function matchesGlob(path: string, pattern: string): boolean {
   // Escape special regex characters except * and /
   let regexPattern = normalizedPattern
     .replace(/[.+?^${}()|[\]\\]/g, "\\$&")
-    .replace(/\*\*/g, "DOUBLESTAR")
+    // Handle ** patterns (must be done before single * replacement)
+    .replace(/\*\*\//g, "DOUBLESTAR_SLASH") // **/ → zero or more dirs
+    .replace(/\/\*\*/g, "SLASH_DOUBLESTAR") // /** → optional path
+    .replace(/\*\*/g, "DOUBLESTAR") // ** at start/end
+    // Handle single * (matches filename segment)
     .replace(/\*/g, "[^/]*")
-    .replace(/DOUBLESTAR/g, ".*");
+    // Convert placeholders to regex
+    .replace(/DOUBLESTAR_SLASH/g, "(?:.*/)?") // **/ allows zero dirs: a/**/b matches a/b
+    .replace(/SLASH_DOUBLESTAR/g, "(?:/.*)?") // /** optional suffix
+    .replace(/DOUBLESTAR/g, ".*"); // ** alone matches anything
 
   // Ensure full match
   regexPattern = `^${regexPattern}$`;
@@ -476,15 +484,18 @@ async function main(): Promise<void> {
       const catSuccessful = catResults.filter((r) => r.status === "success");
 
       if (catResults.length > 0) {
+        // Filter for finite TFFU values in this category
+        const catValidTTFU = catSuccessful.filter(
+          (r) => r.timeToFirstUseful !== null && isFinite(r.timeToFirstUseful)
+        );
+
         byCategory[category] = {
           precisionAtK:
             catResults.reduce((sum, r) => sum + (r.precisionAtK ?? 0), 0) / catResults.length,
           avgTTFU:
-            catSuccessful.length > 0
-              ? (catSuccessful
-                  .filter((r) => r.timeToFirstUseful !== null && isFinite(r.timeToFirstUseful))
-                  .reduce((sum, r) => sum + (r.timeToFirstUseful ?? 0), 0) /
-                  catSuccessful.length) *
+            catValidTTFU.length > 0
+              ? (catValidTTFU.reduce((sum, r) => sum + (r.timeToFirstUseful ?? 0), 0) /
+                  catValidTTFU.length) *
                 1000
               : 0,
           count: catResults.length,
