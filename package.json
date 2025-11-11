@@ -63,6 +63,8 @@
     "verify:tools": "tsx scripts/test/verify-all.ts --category tools",
     "verify:watch": "tsx scripts/test/verify-all.ts --category watch",
     "verify:eval": "tsx scripts/test/verify-all.ts --category eval",
+    "eval:golden": "tsx scripts/eval/run-golden.ts",
+    "eval:golden:verbose": "tsx scripts/eval/run-golden.ts --verbose",
     "check": "pnpm run lint && pnpm run test",
     "prepublishOnly": "pnpm run build"
   },
