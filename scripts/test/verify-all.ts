@@ -335,21 +335,30 @@ async function runMCPToolsTests(_options: VerificationOptions): Promise<TestResu
             ? result.result
             : (result.result as { context?: unknown[] })?.context;
 
-          if (items && Array.isArray(items)) {
-            const paths = items.map((item: unknown) => (item as { path?: string })?.path);
-            const hasDocsFile = items.some((item: unknown) => {
-              const path = (item as { path?: string })?.path;
-              return typeof path === "string" && path.startsWith("docs/");
-            });
-
-            if (!hasDocsFile) {
-              log(`    Returned paths: ${JSON.stringify(paths)}`, "yellow");
-              throw new Error(
-                `${tool.name} with balanced profile did not return docs/ files\nPaths returned: ${JSON.stringify(paths)}\nServer logs:\n${serverLogs}`
-              );
-            }
-            log(`    ✓ ${tool.name} includes docs/ files`, "green");
+          // ✅ Strict validation: Ensure items is defined and is an array
+          if (!items || !Array.isArray(items)) {
+            throw new Error(
+              `${tool.name} returned invalid structure (expected array of items)\n` +
+                `Result structure: ${JSON.stringify(result.result)}\n` +
+                `Server logs:\n${serverLogs}`
+            );
           }
+
+          const paths = items.map((item: unknown) => (item as { path?: string })?.path);
+          const hasDocsFile = items.some((item: unknown) => {
+            const path = (item as { path?: string })?.path;
+            return typeof path === "string" && path.startsWith("docs/");
+          });
+
+          if (!hasDocsFile) {
+            log(`    Returned paths: ${JSON.stringify(paths)}`, "yellow");
+            throw new Error(
+              `${tool.name} with balanced profile did not return docs/ files\n` +
+                `Paths returned: ${JSON.stringify(paths)}\n` +
+                `Server logs:\n${serverLogs}`
+            );
+          }
+          log(`    ✓ ${tool.name} includes docs/ files`, "green");
         } else {
           log(`    ✓ ${tool.name} returned valid response`, "green");
         }

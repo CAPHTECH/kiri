@@ -32,6 +32,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added `isValidBoostProfile()` type guard for runtime validation
 - Updated `boost_profile` parameter validation in RPC handlers to use centralized validation
 
+### Deprecated
+
+- **`config/scoring-profiles.yml` user configuration is now ignored**
+  - The table-driven design uses fixed multipliers from `BOOST_PROFILES` constant
+  - User-configured `docPenaltyMultiplier`, `configPenaltyMultiplier`, and `implBoostMultiplier` no longer have effect
+  - This trade-off was made to improve maintainability and consistency across profiles
+  - Future versions may re-introduce profile customization via a different mechanism
+
 ## [0.9.9] - 2025-11-10
 
 ### Added

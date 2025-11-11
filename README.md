@@ -223,12 +223,12 @@ Tip: Avoid leading command words like `find` or `show`; instead list concrete mo
 
 **Parameters:**
 
-| Parameter       | Type    | Required | Description                                                                                                                                                  |
-| --------------- | ------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `goal`          | string  | Yes      | Task description or question about the code                                                                                                                  |
-| `limit`         | number  | No       | Max snippets to return (default: 12, max: 20)                                                                                                                |
-| `compact`       | boolean | No       | Return only metadata without preview (default: **true** in v0.8.0+, false in v0.7)                                                                           |
-| `boost_profile` | string  | No       | File type boosting: `"default"` (prioritizes src/, blacklists docs/), `"docs"` **(prioritizes .md/.yaml, includes docs/ directory)**, `"none"` (no boosting) |
+| Parameter       | Type    | Required | Description                                                                                                                                                                                                             |
+| --------------- | ------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `goal`          | string  | Yes      | Task description or question about the code                                                                                                                                                                             |
+| `limit`         | number  | No       | Max snippets to return (default: 12, max: 20)                                                                                                                                                                           |
+| `compact`       | boolean | No       | Return only metadata without preview (default: **true** in v0.8.0+, false in v0.7)                                                                                                                                      |
+| `boost_profile` | string  | No       | File type boosting: `"default"` (prioritizes src/, blacklists docs/), `"docs"` (prioritizes .md/.yaml, includes docs/ directory), `"balanced"` (equal weight for docs and impl, NEW in v0.9.10), `"none"` (no boosting) |
 
 ### 2. files_search
 

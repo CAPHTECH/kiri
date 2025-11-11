@@ -109,7 +109,7 @@ contextBundle({ goal: "lambda/page-agent/handler request processing error handli
 
 ### ファイルタイプブースト
 
-`boost_profile` パラメータで3つのモードを選択可能:
+`boost_profile` パラメータで4つのモードを選択可能:
 
 #### boost_profile: "default" (デフォルト)
 
@@ -140,6 +140,24 @@ contextBundle({ goal: "lambda/page-agent/handler request processing error handli
 - `*.md`, `*.yaml`, `*.yml`: スコア +0.5（ドキュメントに追加ボーナス）
 - `src/*.ts`: スコア -0.2（実装ファイルに軽度ペナルティ）
 
+#### boost_profile: "balanced" (NEW in v0.9.10)
+
+ドキュメントと実装ファイルに等しい重みを適用
+
+**files_search & context_bundle:**
+
+- `src/*.ts`, `src/*.js`: スコア ×1.0（ブースト/ペナルティなし）
+- `*.md`, `*.yaml`, `*.yml`: スコア ×1.0（ブースト/ペナルティなし）
+- `docs/` ディレクトリ: ✅ **ブラックリストから除外**（検索可能）
+- `tsconfig.json`, `package.json` などの設定ファイル: スコア ×0.3（緩やかなペナルティ、defaultの0.05より緩い）
+- パス固有のブースト（`src/app/` × 1.4など）: **無効化**
+
+**使用ケース:**
+
+- ドキュメントとコードの両方を等しく検索したい場合
+- プロジェクト全体のナレッジベース検索
+- APIドキュメントと実装を同時に参照する場合
+
 #### boost_profile: "none"
 
 ファイルタイプによるブースト無効、純粋なBM25スコアのみ
@@ -155,6 +173,10 @@ filesSearch({ query: "tryCreateFTSIndex" });
 filesSearch({ query: "setup instructions", boost_profile: "docs" });
 // → *.md が上位に
 
+// ドキュメントとコードを同等に扱う（NEW in v0.9.10）
+contextBundle({ goal: "authentication design docs/auth/README.md", boost_profile: "balanced" });
+// → docs/*.md と src/*.ts が等しい重みでランク付け
+
 // 純粋なBM25スコア
 filesSearch({ query: "authentication", boost_profile: "none" });
 // → ファイルタイプ関係なく、BM25スコアのみ
@@ -164,19 +186,19 @@ filesSearch({ query: "authentication", boost_profile: "none" });
 
 以下のディレクトリはデフォルトプロファイルで強いペナルティ（score = -100）が適用されます:
 
-| ディレクトリ        | デフォルトプロファイル | `boost_profile: "docs"` | 説明                                     |
-| ------------------- | ---------------------- | ----------------------- | ---------------------------------------- |
-| `docs/`             | ❌ score = -100        | ✅ **除外可能**         | ドキュメント専用ディレクトリ             |
-| `tests/`, `test/`   | ❌ score = -100        | ❌ score = -100         | テストファイル（常にペナルティ）         |
-| `node_modules/`     | ❌ score = -100        | ❌ score = -100         | 依存関係（常にペナルティ）               |
-| `.git/`, `.cursor/` | ❌ score = -100        | ❌ score = -100         | メタデータディレクトリ（常にペナルティ） |
-| `dist/`, `build/`   | ❌ score = -100        | ❌ score = -100         | ビルド成果物（常にペナルティ）           |
-| `coverage/`, `tmp/` | ❌ score = -100        | ❌ score = -100         | 一時ファイル（常にペナルティ）           |
+| ディレクトリ        | `"default"` プロファイル | `"docs"` プロファイル | `"balanced"` プロファイル (v0.9.10+) | 説明                                     |
+| ------------------- | ------------------------ | --------------------- | ------------------------------------ | ---------------------------------------- |
+| `docs/`             | ❌ score = -100          | ✅ **除外可能**       | ✅ **除外可能**                      | ドキュメント専用ディレクトリ             |
+| `tests/`, `test/`   | ❌ score = -100          | ❌ score = -100       | ❌ score = -100                      | テストファイル（常にペナルティ）         |
+| `node_modules/`     | ❌ score = -100          | ❌ score = -100       | ❌ score = -100                      | 依存関係（常にペナルティ）               |
+| `.git/`, `.cursor/` | ❌ score = -100          | ❌ score = -100       | ❌ score = -100                      | メタデータディレクトリ（常にペナルティ） |
+| `dist/`, `build/`   | ❌ score = -100          | ❌ score = -100       | ❌ score = -100                      | ビルド成果物（常にペナルティ）           |
+| `coverage/`, `tmp/` | ❌ score = -100          | ❌ score = -100       | ❌ score = -100                      | 一時ファイル（常にペナルティ）           |
 
-**重要な動作変更（v0.9.0）:**
+**重要な動作変更:**
 
-- ✅ **`boost_profile: "docs"` を指定すると `docs/` ディレクトリのブラックリストが解除される**
-- これにより、ドキュメント検索が正しく機能するようになりました（v0.7.0で主張された動作が実際に動作するように修正）
+- ✅ **v0.9.0**: `boost_profile: "docs"` を指定すると `docs/` ディレクトリのブラックリストが解除される
+- ✅ **v0.9.10**: `boost_profile: "balanced"` でも `docs/` ディレクトリが検索可能になる
 - 他のブラックリストディレクトリ（`tests/`、`node_modules/` など）は常にペナルティが適用されます
 
 **使用例:**
