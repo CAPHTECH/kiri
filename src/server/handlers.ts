@@ -6,7 +6,11 @@ import { generateEmbedding, structuralSimilarity } from "../shared/embedding.js"
 import { encode as encodeGPT, tokenizeText } from "../shared/tokenizer.js";
 import { getRepoPathCandidates, normalizeRepoPath } from "../shared/utils/path.js";
 
-import { type BoostProfileName, getBoostProfile } from "./boost-profiles.js";
+import {
+  type BoostProfileName,
+  type BoostProfileConfig,
+  getBoostProfile,
+} from "./boost-profiles.js";
 import { FtsStatusCache, ServerContext } from "./context.js";
 import { coerceProfileName, loadScoringProfile, type ScoringWeights } from "./scoring.js";
 
@@ -1017,11 +1021,9 @@ function splitQueryWords(query: string): string[] {
 function applyFileTypeBoost(
   path: string,
   baseScore: number,
-  profile: BoostProfileName = "default",
+  profileConfig: BoostProfileConfig,
   _weights: ScoringWeights
 ): number {
-  const profileConfig = getBoostProfile(profile);
-
   // Blacklisted directories that are almost always irrelevant for code context
   const blacklistedDirs = [
     ".cursor/",
@@ -1041,10 +1043,6 @@ function applyFileTypeBoost(
       }
       return -100; // Effectively remove it
     }
-  }
-
-  if (profile === "none") {
-    return baseScore;
   }
 
   const fileName = path.split("/").pop() ?? "";
@@ -1144,10 +1142,8 @@ function applyAdditiveFilePenalties(
   path: string,
   lowerPath: string,
   fileName: string,
-  profile: BoostProfileName
+  profileConfig: BoostProfileConfig
 ): boolean {
-  const profileConfig = getBoostProfile(profile);
-
   // Blacklisted directories - effectively remove
   const blacklistedDirs = [
     ".cursor/",
@@ -1231,9 +1227,9 @@ function applyAdditiveFilePenalties(
     fileName === "docker-compose.yml" ||
     fileName === "docker-compose.yaml"
   ) {
-    // For balanced profile, skip additive penalty and let multiplicative penalty be applied
+    // For balanced profile (config multiplier = 0.3), skip additive penalty and let multiplicative penalty be applied
     // This ensures 0.3x multiplier is applied in applyFileTypeMultipliers
-    if (profile === "balanced") {
+    if (profileConfig.fileTypeMultipliers.config === 0.3) {
       return false; // Continue to multiplicative penalty
     }
     // For other profiles, apply strong additive penalty
@@ -1261,14 +1257,9 @@ function applyFileTypeMultipliers(
   candidate: CandidateInfo,
   path: string,
   ext: string | null,
-  profile: BoostProfileName,
+  profileConfig: BoostProfileConfig,
   _weights: ScoringWeights
 ): void {
-  if (profile === "none") {
-    return;
-  }
-
-  const profileConfig = getBoostProfile(profile);
   const fileName = path.split("/").pop() ?? "";
 
   // ✅ Step 1: Config files
@@ -1336,14 +1327,10 @@ function applyFileTypeMultipliers(
 function applyBoostProfile(
   candidate: CandidateInfo,
   row: { path: string; ext: string | null },
-  profile: BoostProfileName,
+  profileConfig: BoostProfileConfig,
   weights: ScoringWeights,
   extractedTerms?: ExtractedTerms
 ): void {
-  if (profile === "none") {
-    return;
-  }
-
   const { path, ext } = row;
   const lowerPath = path.toLowerCase();
   const fileName = path.split("/").pop() ?? "";
@@ -1352,13 +1339,19 @@ function applyBoostProfile(
   applyPathBasedScoring(candidate, lowerPath, weights, extractedTerms);
 
   // Step 2: 加算的ペナルティ（ブラックリスト、テスト、lock、設定、マイグレーション）
-  const shouldStop = applyAdditiveFilePenalties(candidate, path, lowerPath, fileName, profile);
+  const shouldStop = applyAdditiveFilePenalties(
+    candidate,
+    path,
+    lowerPath,
+    fileName,
+    profileConfig
+  );
   if (shouldStop) {
     return; // ペナルティが適用された場合は処理終了
   }
 
   // Step 3: ファイルタイプ別の乗算的ペナルティ/ブースト
-  applyFileTypeMultipliers(candidate, path, ext, profile, weights);
+  applyFileTypeMultipliers(candidate, path, ext, profileConfig, weights);
 }
 
 export async function filesSearch(
@@ -1460,6 +1453,7 @@ export async function filesSearch(
   const rows = await db.all<FileRow>(sql, values);
 
   const boostProfile = params.boost_profile ?? "default";
+  const profileConfig = getBoostProfile(boostProfile);
 
   // ✅ v0.7.0+: Load configurable scoring weights for unified boosting logic
   // Note: filesSearch doesn't have a separate profile parameter, uses default weights
@@ -1483,7 +1477,10 @@ export async function filesSearch(
       }
 
       const baseScore = row.score ?? 1.0; // FTS時はBM25スコア、ILIKE時は1.0
-      const boostedScore = applyFileTypeBoost(row.path, baseScore, boostProfile, weights);
+      const boostedScore =
+        boostProfile === "none"
+          ? baseScore
+          : applyFileTypeBoost(row.path, baseScore, profileConfig, weights);
 
       const result: FilesSearchResult = {
         path: row.path,
@@ -1686,6 +1683,10 @@ export async function contextBundle(
   const stringMatchSeeds = new Set<string>();
   const fileCache = new Map<string, FileContentCacheEntry>();
 
+  // ✅ Cache boost profile config to avoid redundant lookups in hot path
+  const boostProfile = params.boost_profile ?? "default";
+  const profileConfig = getBoostProfile(boostProfile);
+
   // フレーズマッチング（高い重み: textMatch × 2）- 統合クエリでパフォーマンス改善
   if (extractedTerms.phrases.length > 0) {
     const phrasePlaceholders = extractedTerms.phrases
@@ -1707,8 +1708,6 @@ export async function contextBundle(
       `,
       [repoId, ...extractedTerms.phrases, MAX_MATCHES_PER_KEYWORD * extractedTerms.phrases.length]
     );
-
-    const boostProfile = params.boost_profile ?? "default";
 
     for (const row of rows) {
       if (row.content === null) {
@@ -1735,7 +1734,9 @@ export async function contextBundle(
       }
 
       // Apply boost profile once per file
-      applyBoostProfile(candidate, row, boostProfile, weights, extractedTerms);
+      if (boostProfile !== "none") {
+        applyBoostProfile(candidate, row, profileConfig, weights, extractedTerms);
+      }
 
       // Use first matched phrase for preview (guaranteed to exist due to length check above)
       const { line } = buildPreview(row.content, matchedPhrases[0]!);
@@ -1781,8 +1782,6 @@ export async function contextBundle(
       [repoId, ...extractedTerms.keywords, MAX_MATCHES_PER_KEYWORD * extractedTerms.keywords.length]
     );
 
-    const boostProfile = params.boost_profile ?? "default";
-
     for (const row of rows) {
       if (row.content === null) {
         continue;
@@ -1807,7 +1806,9 @@ export async function contextBundle(
       }
 
       // Apply boost profile once per file
-      applyBoostProfile(candidate, row, boostProfile, weights, extractedTerms);
+      if (boostProfile !== "none") {
+        applyBoostProfile(candidate, row, profileConfig, weights, extractedTerms);
+      }
 
       // Use first matched keyword for preview (guaranteed to exist due to length check above)
       const { line } = buildPreview(row.content, matchedKeywords[0]!);
