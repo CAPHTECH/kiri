@@ -8,6 +8,7 @@ import { pathToFileURL } from "node:url";
 import packageJson from "../../package.json" with { type: "json" };
 import { IndexWatcher } from "../indexer/watch.js";
 import { defineCli, type CliSpec } from "../shared/cli/args.js";
+import { parsePositiveInt } from "../shared/utils/validation.js";
 
 import { ensureDatabaseIndexed } from "./indexBootstrap.js";
 import { writeMetricsResponse } from "./observability/metrics.js";
@@ -270,8 +271,8 @@ async function startHttpOrStdio(): Promise<void> {
   const allowDegrade = (values["allow-degrade"] as boolean) || false;
   const forceReindex = (values.reindex as boolean) || false;
   const watch = (values.watch as boolean) || false;
-  const debounceMs = parseInt((values.debounce as string | undefined) ?? "500", 10);
-  const port = parseInt((values.port as string | undefined) ?? "8765", 10);
+  const debounceMs = parsePositiveInt(values.debounce as string | undefined, 500, "debounce delay");
+  const port = parsePositiveInt(values.port as string | undefined, 8765, "port number");
 
   // Ensure database is indexed before starting server
   await ensureDatabaseIndexed(repoRoot, databasePath, allowDegrade, forceReindex);

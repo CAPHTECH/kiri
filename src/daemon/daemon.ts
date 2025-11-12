@@ -15,6 +15,7 @@ import { createServerRuntime } from "../server/runtime.js";
 import type { ServerRuntime } from "../server/runtime.js";
 import { defineCli, type CliSpec } from "../shared/cli/args.js";
 import { getSocketPath } from "../shared/utils/socket.js";
+import { parsePositiveInt } from "../shared/utils/validation.js";
 
 import { DaemonLifecycle } from "./lifecycle.js";
 import { createSocketServer } from "./socket.js";
@@ -140,7 +141,11 @@ function parseDaemonArgs(): DaemonOptions {
     databasePath,
     socketPath,
     watchMode: (values.watch as boolean) || false,
-    idleTimeoutMinutes: parseInt((values["daemon-timeout"] as string | undefined) || "5", 10),
+    idleTimeoutMinutes: parsePositiveInt(
+      values["daemon-timeout"] as string | undefined,
+      5,
+      "daemon timeout (minutes)"
+    ),
     allowDegrade: (values["allow-degrade"] as boolean) || false,
     securityConfigPath: values["security-config"] as string | undefined,
     securityLockPath: values["security-lock"] as string | undefined,
