@@ -940,7 +940,9 @@ describe("Boosting Helper Functions (v0.7.0+)", () => {
         }
         if (migrationFile) {
           expect(controllerRank).toBeLessThan(bundle.context.indexOf(migrationFile));
-          expect(migrationFile.why.some((reason) => reason === "penalty:config-file")).toBe(true);
+          expect(migrationFile.why.some((reason) => reason === "penalty:migration-file")).toBe(
+            true
+          );
         }
         if (localeFile) {
           expect(controllerRank).toBeLessThan(bundle.context.indexOf(localeFile));

@@ -240,6 +240,7 @@ class McpServerManager {
       {
         stdio: ["ignore", "pipe", "pipe"],
         cwd: process.cwd(),
+        env: process.env, // Inherit environment variables (KIRI_* flags)
       }
     );
 
