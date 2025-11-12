@@ -53,9 +53,8 @@ const PROXY_CLI_SPEC: CliSpec = {
         {
           flag: "db",
           type: "string",
-          description: "Database file path",
+          description: "Database file path (default: var/index.duckdb relative to --repo)",
           placeholder: "<path>",
-          default: "var/index.duckdb",
         },
       ],
     },
