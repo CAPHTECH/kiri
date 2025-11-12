@@ -7,12 +7,13 @@
  */
 
 import * as path from "path";
-import { parseArgs } from "util";
 
+import packageJson from "../../package.json" with { type: "json" };
 import { ensureDatabaseIndexed } from "../server/indexBootstrap.js";
 import { createRpcHandler } from "../server/rpc.js";
 import { createServerRuntime } from "../server/runtime.js";
 import type { ServerRuntime } from "../server/runtime.js";
+import { defineCli, type CliSpec } from "../shared/cli/args.js";
 import { getSocketPath } from "../shared/utils/socket.js";
 
 import { DaemonLifecycle } from "./lifecycle.js";
@@ -33,37 +34,116 @@ interface DaemonOptions {
 }
 
 /**
+ * CLI specification for kiri-daemon
+ */
+const DAEMON_CLI_SPEC: CliSpec = {
+  commandName: "kiri-daemon",
+  description: "KIRI Daemon Process - Manages DuckDB connection and handles client requests",
+  version: packageJson.version,
+  usage: "kiri-daemon [options]",
+  sections: [
+    {
+      title: "Repository / Database",
+      options: [
+        {
+          flag: "repo",
+          type: "string",
+          description: "Repository root path",
+          placeholder: "<path>",
+          default: ".",
+        },
+        {
+          flag: "db",
+          type: "string",
+          description: "Database file path",
+          placeholder: "<path>",
+          default: "var/index.duckdb",
+        },
+      ],
+    },
+    {
+      title: "Daemon Lifecycle",
+      options: [
+        {
+          flag: "socket-path",
+          type: "string",
+          description: "Unix socket path for daemon connection",
+          placeholder: "<path>",
+        },
+        {
+          flag: "daemon-timeout",
+          type: "string",
+          description: "Idle timeout in minutes before daemon auto-shutdown",
+          placeholder: "<minutes>",
+          default: "5",
+        },
+      ],
+    },
+    {
+      title: "Watch Mode",
+      options: [
+        {
+          flag: "watch",
+          type: "boolean",
+          description: "Enable watch mode for automatic re-indexing",
+          default: false,
+        },
+      ],
+    },
+    {
+      title: "Security",
+      options: [
+        {
+          flag: "allow-degrade",
+          type: "boolean",
+          description: "Allow degraded mode without VSS/FTS extensions",
+          default: false,
+        },
+        {
+          flag: "security-config",
+          type: "string",
+          description: "Security configuration file path",
+          placeholder: "<path>",
+        },
+        {
+          flag: "security-lock",
+          type: "string",
+          description: "Security lock file path",
+          placeholder: "<path>",
+        },
+      ],
+    },
+  ],
+  examples: [
+    "kiri-daemon --repo /path/to/repo --db /path/to/index.duckdb",
+    "kiri-daemon --watch --daemon-timeout 10",
+    "kiri-daemon --socket-path /tmp/kiri.sock",
+  ],
+};
+
+/**
  * CLI引数をパース
  */
 function parseDaemonArgs(): DaemonOptions {
-  const { values } = parseArgs({
-    options: {
-      repo: { type: "string" },
-      db: { type: "string" },
-      "socket-path": { type: "string" },
-      watch: { type: "boolean", default: false },
-      "daemon-timeout": { type: "string", default: "5" },
-      "allow-degrade": { type: "boolean", default: false },
-      "security-config": { type: "string" },
-      "security-lock": { type: "string" },
-    },
-  });
+  const { values } = defineCli(DAEMON_CLI_SPEC);
 
-  const repoRoot = path.resolve(values.repo || process.cwd());
-  const databasePath = path.resolve(values.db || path.join(repoRoot, "var", "index.duckdb"));
+  const repoRoot = path.resolve((values.repo as string | undefined) || process.cwd());
+  const databasePath = path.resolve(
+    (values.db as string | undefined) || path.join(repoRoot, "var", "index.duckdb")
+  );
   const socketPath = values["socket-path"]
-    ? path.resolve(values["socket-path"])
+    ? path.resolve(values["socket-path"] as string)
     : getSocketPath(databasePath, { ensureDir: true });
 
   return {
     repoRoot,
     databasePath,
     socketPath,
-    watchMode: values.watch || false,
-    idleTimeoutMinutes: parseInt(values["daemon-timeout"] || "5", 10),
-    allowDegrade: values["allow-degrade"] || false,
-    securityConfigPath: values["security-config"],
-    securityLockPath: values["security-lock"],
+    watchMode: (values.watch as boolean) || false,
+    idleTimeoutMinutes: parseInt((values["daemon-timeout"] as string | undefined) || "5", 10),
+    allowDegrade: (values["allow-degrade"] as boolean) || false,
+    securityConfigPath: values["security-config"] as string | undefined,
+    securityLockPath: values["security-lock"] as string | undefined,
   };
 }
 

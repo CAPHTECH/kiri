@@ -9,9 +9,9 @@
 import * as net from "net";
 import * as path from "path";
 import * as readline from "readline";
-import { parseArgs } from "util";
 
 import packageJson from "../../package.json" with { type: "json" };
+import { defineCli, type CliSpec } from "../shared/cli/args.js";
 import { getSocketPath } from "../shared/utils/socket.js";
 
 import { startDaemon, isDaemonRunning, stopDaemon } from "./start-daemon.js";
@@ -32,37 +32,110 @@ interface ProxyOptions {
 }
 
 /**
+ * CLI specification for kiri proxy
+ */
+const PROXY_CLI_SPEC: CliSpec = {
+  commandName: "kiri",
+  description: "KIRI MCP Client Proxy - Bridges stdio (MCP client) ↔ Unix socket (daemon)",
+  version: packageJson.version,
+  usage: "kiri [options]",
+  sections: [
+    {
+      title: "Repository / Database",
+      options: [
+        {
+          flag: "repo",
+          type: "string",
+          description: "Repository root path",
+          placeholder: "<path>",
+          default: ".",
+        },
+        {
+          flag: "db",
+          type: "string",
+          description: "Database file path",
+          placeholder: "<path>",
+          default: "var/index.duckdb",
+        },
+      ],
+    },
+    {
+      title: "Daemon Connection",
+      options: [
+        {
+          flag: "socket-path",
+          type: "string",
+          description: "Unix socket path for daemon connection",
+          placeholder: "<path>",
+        },
+      ],
+    },
+    {
+      title: "Watch Mode",
+      options: [
+        {
+          flag: "watch",
+          type: "boolean",
+          description: "Enable watch mode for automatic re-indexing",
+          default: false,
+        },
+      ],
+    },
+    {
+      title: "Security",
+      options: [
+        {
+          flag: "allow-degrade",
+          type: "boolean",
+          description: "Allow degraded mode without VSS/FTS extensions",
+          default: false,
+        },
+        {
+          flag: "security-config",
+          type: "string",
+          description: "Security configuration file path",
+          placeholder: "<path>",
+        },
+        {
+          flag: "security-lock",
+          type: "string",
+          description: "Security lock file path",
+          placeholder: "<path>",
+        },
+      ],
+    },
+  ],
+  examples: [
+    "kiri --repo /path/to/repo --db /path/to/index.duckdb",
+    "kiri --watch --allow-degrade",
+    "kiri --security-config config/security.yaml",
+  ],
+};
+
+/**
  * CLI引数をパース
  */
 function parseProxyArgs(): ProxyOptions {
-  const { values } = parseArgs({
-    options: {
-      repo: { type: "string" },
-      db: { type: "string" },
-      "socket-path": { type: "string" },
-      watch: { type: "boolean", default: false },
-      "allow-degrade": { type: "boolean", default: false },
-      "security-config": { type: "string" },
-      "security-lock": { type: "string" },
-    },
-  });
+  const { values } = defineCli(PROXY_CLI_SPEC);
 
-  const repoRoot = path.resolve(values.repo || process.cwd());
-  const databasePath = path.resolve(values.db || path.join(repoRoot, "var", "index.duckdb"));
+  const repoRoot = path.resolve((values.repo as string | undefined) || process.cwd());
+  const databasePath = path.resolve(
+    (values.db as string | undefined) || path.join(repoRoot, "var", "index.duckdb")
+  );
   const socketPath = values["socket-path"]
-    ? path.resolve(values["socket-path"])
+    ? path.resolve(values["socket-path"] as string)
     : getSocketPath(databasePath);
 
   return {
     repoRoot,
     databasePath,
     socketPath,
-    watchMode: values.watch || false,
+    watchMode: (values.watch as boolean) || false,
     maxRetries: 3,
     retryDelayMs: 1000,
-    allowDegrade: values["allow-degrade"] || false,
-    securityConfigPath: values["security-config"],
-    securityLockPath: values["security-lock"],
+    allowDegrade: (values["allow-degrade"] as boolean) || false,
+    securityConfigPath: values["security-config"] as string | undefined,
+    securityLockPath: values["security-lock"] as string | undefined,
   };
 }
 

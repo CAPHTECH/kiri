@@ -5,7 +5,9 @@ import { performance } from "node:perf_hooks";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
 
+import packageJson from "../../package.json" with { type: "json" };
 import { IndexWatcher } from "../indexer/watch.js";
+import { defineCli, type CliSpec } from "../shared/cli/args.js";
 
 import { ensureDatabaseIndexed } from "./indexBootstrap.js";
 import { writeMetricsResponse } from "./observability/metrics.js";
@@ -159,38 +161,117 @@ export async function startServer(options: ServerOptions): Promise<Server> {
   }
 }
 
-function parseArg(flag: string): string | undefined {
-  const index = process.argv.indexOf(flag);
-  if (index >= 0) {
-    return process.argv[index + 1];
-  }
-  return undefined;
-}
-
-function hasFlag(flag: string): boolean {
-  return process.argv.includes(flag);
-}
-
-function parsePort(argv: string[]): number {
-  const index = argv.indexOf("--port");
-  if (index >= 0 && argv[index + 1]) {
-    const parsed = Number(argv[index + 1]);
-    if (!Number.isNaN(parsed)) {
-      return parsed;
-    }
-  }
-  return 8765;
-}
+/**
+ * CLI specification for kiri-server
+ */
+const SERVER_CLI_SPEC: CliSpec = {
+  commandName: "kiri-server",
+  description: "KIRI MCP Server - Serves MCP tools via HTTP or stdio",
+  version: packageJson.version,
+  usage: "kiri-server [options]",
+  sections: [
+    {
+      title: "Repository / Database",
+      options: [
+        {
+          flag: "repo",
+          type: "string",
+          description: "Repository root path",
+          placeholder: "<path>",
+          default: ".",
+        },
+        {
+          flag: "db",
+          type: "string",
+          description: "Database file path",
+          placeholder: "<path>",
+          default: "var/index.duckdb",
+        },
+      ],
+    },
+    {
+      title: "Server Mode",
+      options: [
+        {
+          flag: "port",
+          type: "string",
+          description: "HTTP server port (default: 8765; omit for stdio mode)",
+          placeholder: "<port>",
+        },
+      ],
+    },
+    {
+      title: "Indexing",
+      options: [
+        {
+          flag: "reindex",
+          type: "boolean",
+          description: "Force full re-indexing on startup",
+          default: false,
+        },
+        {
+          flag: "allow-degrade",
+          type: "boolean",
+          description: "Allow degraded mode without VSS/FTS extensions",
+          default: false,
+        },
+      ],
+    },
+    {
+      title: "Watch Mode",
+      options: [
+        {
+          flag: "watch",
+          type: "boolean",
+          description: "Enable watch mode for automatic re-indexing",
+          default: false,
+        },
+        {
+          flag: "debounce",
+          type: "string",
+          description: "Debounce delay in milliseconds for watch mode",
+          placeholder: "<ms>",
+          default: "500",
+        },
+      ],
+    },
+    {
+      title: "Security",
+      options: [
+        {
+          flag: "security-config",
+          type: "string",
+          description: "Security configuration file path",
+          placeholder: "<path>",
+        },
+        {
+          flag: "security-lock",
+          type: "string",
+          description: "Security lock file path",
+          placeholder: "<path>",
+        },
+      ],
+    },
+  ],
+  examples: [
+    "kiri-server --port 8765 --repo /path/to/repo",
+    "kiri-server --watch --debounce 1000",
+    "kiri-server --reindex --allow-degrade",
+  ],
+};
 
 async function startHttpOrStdio(): Promise<void> {
-  const repoRoot = parseArg("--repo") ?? ".";
-  const databasePath = parseArg("--db") ?? "var/index.duckdb";
-  const securityConfigPath = parseArg("--security-config");
-  const securityLockPath = parseArg("--security-lock");
-  const allowDegrade = hasFlag("--allow-degrade");
-  const forceReindex = hasFlag("--reindex");
-  const watch = hasFlag("--watch");
-  const debounceMs = parseInt(parseArg("--debounce") ?? "500", 10);
+  const { values } = defineCli(SERVER_CLI_SPEC);
+
+  const repoRoot = (values.repo as string | undefined) ?? ".";
+  const databasePath = (values.db as string | undefined) ?? "var/index.duckdb";
+  const securityConfigPath = values["security-config"] as string | undefined;
+  const securityLockPath = values["security-lock"] as string | undefined;
+  const allowDegrade = (values["allow-degrade"] as boolean) || false;
+  const forceReindex = (values.reindex as boolean) || false;
+  const watch = (values.watch as boolean) || false;
+  const debounceMs = parseInt((values.debounce as string | undefined) ?? "500", 10);
+  const port = parseInt((values.port as string | undefined) ?? "8765", 10);
 
   // Ensure database is indexed before starting server
   await ensureDatabaseIndexed(repoRoot, databasePath, allowDegrade, forceReindex);
@@ -218,8 +299,7 @@ async function startHttpOrStdio(): Promise<void> {
     await watcher.start();
   }
 
-  if (hasFlag("--port")) {
-    const port = parsePort(process.argv);
+  if (values.port) {
     const options: ServerOptions = {
       port,
       repoRoot,
