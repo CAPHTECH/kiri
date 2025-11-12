@@ -367,6 +367,10 @@ const MAX_DEPENDENCY_SEEDS_QUERY_LIMIT = 100; // SQL injection防御用の上限
 const NEARBY_LIMIT = 6;
 const FALLBACK_SNIPPET_WINDOW = 40; // Reduced from 120 to optimize token usage
 const MAX_RERANK_LIMIT = 50;
+
+// Issue #68: Path/Large File Penalty configuration (環境変数で上書き可能)
+const PATH_MISS_DELTA = parseFloat(process.env.KIRI_PATH_MISS_DELTA || "-0.5");
+const LARGE_FILE_DELTA = parseFloat(process.env.KIRI_LARGE_FILE_DELTA || "-0.8");
 const MAX_WHY_TAGS = 10;
 
 // 項目3: whyタグの優先度マップ（低い数値ほど高優先度）
@@ -606,6 +610,31 @@ function findFirstMatchLine(content: string, query: string): number {
   return prefix.length === 0 ? 1 : prefixLines.length;
 }
 
+/**
+ * ペナルティ影響の記録（Issue #68: Path/Large File Penalties）
+ */
+interface PenaltyImpact {
+  kind: "path-miss" | "large-file";
+  delta: number; // Always negative
+  details?: Record<string, unknown>;
+}
+
+/**
+ * ペナルティ機能フラグ（Issue #68）
+ */
+interface PenaltyFlags {
+  pathPenalty: boolean; // KIRI_PATH_PENALTY
+  largeFilePenalty: boolean; // KIRI_LARGE_FILE_PENALTY
+}
+
+/**
+ * クエリ統計（Issue #68: Path Miss Penalty判定用）
+ */
+interface QueryStats {
+  wordCount: number;
+  avgWordLength: number;
+}
+
 interface CandidateInfo {
   path: string;
   score: number;
@@ -618,6 +647,8 @@ interface CandidateInfo {
   ext: string | null;
   embedding: number[] | null;
   semanticSimilarity: number | null;
+  pathMatchHits: number; // Track path match count for path-miss penalty (Issue #68)
+  penalties: PenaltyImpact[]; // Penalty log for telemetry (Issue #68)
 }
 
 interface FileContentCacheEntry {
@@ -811,6 +842,8 @@ function ensureCandidate(map: Map<string, CandidateInfo>, filePath: string): Can
       ext: null,
       embedding: null,
       semanticSimilarity: null,
+      pathMatchHits: 0, // Issue #68: Track path match count
+      penalties: [], // Issue #68: Penalty log for telemetry
     };
     map.set(filePath, candidate);
   }
@@ -1125,6 +1158,7 @@ function applyPathBasedScoring(
     if (lowerPath.includes(phrase)) {
       candidate.score += weights.pathMatch * 1.5; // 1.5倍のブースト
       candidate.reasons.add(`path-phrase:${phrase}`);
+      candidate.pathMatchHits++; // Issue #68: Track path match for penalty calculation
       return; // 最初のマッチのみ適用
     }
   }
@@ -1135,6 +1169,7 @@ function applyPathBasedScoring(
     if (pathParts.includes(segment)) {
       candidate.score += weights.pathMatch;
       candidate.reasons.add(`path-segment:${segment}`);
+      candidate.pathMatchHits++; // Issue #68: Track path match for penalty calculation
       return; // 最初のマッチのみ適用
     }
   }
@@ -1144,6 +1179,7 @@ function applyPathBasedScoring(
     if (lowerPath.includes(keyword)) {
       candidate.score += weights.pathMatch * 0.5; // 0.5倍のブースト
       candidate.reasons.add(`path-keyword:${keyword}`);
+      candidate.pathMatchHits++; // Issue #68: Track path match for penalty calculation
       return; // 最初のマッチのみ適用
     }
   }
@@ -1634,6 +1670,78 @@ export async function snippetsGet(
   };
 }
 
+// ============================================================================
+// Issue #68: Path/Large File Penalty Helper Functions
+// ============================================================================
+
+/**
+ * 環境変数からペナルティ機能フラグを読み取る
+ */
+function readPenaltyFlags(): PenaltyFlags {
+  return {
+    pathPenalty: process.env.KIRI_PATH_PENALTY === "1",
+    largeFilePenalty: process.env.KIRI_LARGE_FILE_PENALTY === "1",
+  };
+}
+
+/**
+ * クエリ統計を計算（単語数と平均単語長）
+ */
+function computeQueryStats(goal: string): QueryStats {
+  const words = goal
+    .trim()
+    .split(/\s+/)
+    .filter((w) => w.length > 0);
+  const totalLength = words.reduce((sum, w) => sum + w.length, 0);
+  return {
+    wordCount: words.length,
+    avgWordLength: words.length > 0 ? totalLength / words.length : 0,
+  };
+}
+
+/**
+ * Path Miss Penaltyをcandidateに適用
+ * 条件: wordCount >= 2 AND avgWordLength >= 4 AND pathMatchHits === 0
+ */
+function applyPathMissPenalty(candidate: CandidateInfo, queryStats: QueryStats): void {
+  if (queryStats.wordCount >= 2 && queryStats.avgWordLength >= 4 && candidate.pathMatchHits === 0) {
+    candidate.score += PATH_MISS_DELTA; // -0.5
+    recordPenaltyEvent(candidate, "path-miss", PATH_MISS_DELTA, {
+      wordCount: queryStats.wordCount,
+      avgWordLength: queryStats.avgWordLength,
+    });
+  }
+}
+
+/**
+ * Large File Penaltyをcandidateに適用
+ * 条件: totalLines > 500 AND matchLine > 120
+ * TODO(Issue #68): Add "no symbol at match location" check after selectSnippet integration
+ */
+function applyLargeFilePenalty(candidate: CandidateInfo): void {
+  const { totalLines, matchLine } = candidate;
+  if (totalLines !== null && totalLines > 500 && matchLine !== null && matchLine > 120) {
+    candidate.score += LARGE_FILE_DELTA; // -0.8
+    recordPenaltyEvent(candidate, "large-file", LARGE_FILE_DELTA, {
+      totalLines,
+      matchLine,
+    });
+  }
+}
+
+/**
+ * ペナルティイベントを記録（テレメトリ用）
+ */
+function recordPenaltyEvent(
+  candidate: CandidateInfo,
+  kind: "path-miss" | "large-file",
+  delta: number,
+  details: Record<string, unknown>
+): void {
+  candidate.penalties.push({ kind, delta, details });
+  candidate.reasons.add(`penalty:${kind}`);
+}
+
 export async function contextBundle(
   context: ServerContext,
   params: ContextBundleParams
@@ -1983,6 +2091,22 @@ export async function contextBundle(
   for (const candidate of materializedCandidates) {
     if (candidate.scoreMultiplier !== 1.0 && candidate.score > 0) {
       candidate.score *= candidate.scoreMultiplier;
+    }
+  }
+
+  // Issue #68: Apply Path Miss Penalty (after multipliers, before sorting)
+  const penaltyFlags = readPenaltyFlags();
+  if (penaltyFlags.pathPenalty) {
+    const queryStats = computeQueryStats(goal);
+    for (const candidate of materializedCandidates) {
+      applyPathMissPenalty(candidate, queryStats);
+    }
+  }
+
+  // Issue #68: Apply Large File Penalty (after multipliers, before sorting)
+  if (penaltyFlags.largeFilePenalty) {
+    for (const candidate of materializedCandidates) {
+      applyLargeFilePenalty(candidate);
     }
   }
 
