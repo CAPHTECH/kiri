@@ -85,3 +85,195 @@ queries:
         - "docs/**/*.md"
     tags: ["docs", "search", "ranking"]
     notes: "Use balanced profile to include docs/ directory"
+
+  # === Expanded Query Set (13 additional queries) ===
+  # 追加方針:
+  # 1. カテゴリ: bugfix 3 / feature 4 / refactor 2 / docs 2 / infra 2 でバランス
+  # 2. パターン: content-only・mixed（path+keyword）・path-only を網羅
+  # 3. カバレッジ: src/*, tests/*, docs/*, scripts/*, config/* を跨ぐ
+
+  - id: bugfix-002
+    query: "resolveRepoId symlink cache invalidation"
+    tool: "context_bundle"
+    intent: "シンボリックリンク経由で repo ID 解決が化けたケースの原因箇所を特定する"
+    category: "bugfix"
+    expected:
+      paths:
+        - "src/server/handlers.ts"
+        - "src/server/runtime.ts"
+        - "tests/server/resolve-repo.spec.ts"
+    tags: ["repo-id", "symlink", "duckdb"]
+    rationale: "repo ID キャッシュがずれて検索不能になる障害を再現するため、実装・起動経路・検証を同時に引ける必要がある。"
+    notes: "Content-only 複合キーワードで handler 層と runtime 層を横断検索。"
+
+  - id: bugfix-003
+    query: "degrade controller fts throttle"
+    tool: "context_bundle"
+    intent: "FTS 障害時に degradeController がどうスロットルするかを追跡する"
+    category: "bugfix"
+    expected:
+      paths:
+        - "src/server/fallbacks/degradeController.ts"
+        - "src/server/runtime.ts"
+        - "tests/server/degrade.spec.ts"
+    tags: ["fts", "fallback", "throttle"]
+    rationale: "FTS 拡張が落ちたときの制御を検証する回数が多く、サーバー本体と統合テストの組み合わせが欠かせない。"
+    notes: "Content-only クエリで degrade 制御のホットパスを押さえる。"
+
+  - id: bugfix-004
+    query: "stale lockfile removal acquireLock"
+    tool: "context_bundle"
+    intent: "クラッシュ後に残るロックファイルの除去手順を調べる"
+    category: "bugfix"
+    expected:
+      paths:
+        - "src/shared/utils/lockfile.ts"
+        - "src/indexer/watch.ts"
+        - "tests/indexer/watch.spec.ts"
+    tags: ["lockfile", "watcher", "concurrency"]
+    rationale: "並列インデクサ問題の再発率が高いため、低レイヤーのユーティリティとそれを使うウォッチャー/テストを同時に確認できることが重要。"
+    notes: "Content-only クエリで共有ユーティリティと利用箇所を同時に引き当てる。"
+
+  - id: feature-002
+    query: "WarningManager breaking change notification"
+    tool: "context_bundle"
+    intent: "WarningManager がブレイキングチェンジ警告をどう配信するか理解する"
+    category: "feature"
+    expected:
+      paths:
+        - "src/server/rpc.ts"
+        - "src/server/handlers.ts"
+        - "tests/server/context.bundle.spec.ts"
+    tags: ["warnings", "rpc", "ux"]
+    rationale: "警告配信を改善する際に RPC 層・ハンドラ・テストの流れを把握できる必要がある。"
+    notes: "Content-only クエリで WarningManager 実装と利用テストを網羅。"
+
+  - id: feature-003
+    query: "deps.closure rpc contract"
+    tool: "context_bundle"
+    intent: "deps.closure RPC の戻り値や契約を把握する"
+    category: "feature"
+    expected:
+      paths:
+        - "src/server/handlers.ts"
+        - "tests/server/deps.closure.spec.ts"
+        - "docs/api-and-client.md"
+    tags: ["deps", "rpc", "api"]
+    rationale: "依存グラフ API の互換性を確認する際に、実装・仕様・テストの 3 点セットを同時に参照したい。"
+    notes: "Mixed（API 名 + 概念）で仕様書とコードをまとめてヒットさせる。"
+
+  - id: feature-004
+    query: "indexBootstrap warm start locking"
+    tool: "context_bundle"
+    intent: "indexBootstrap がウォームスタート時にどうロックを扱うか把握する"
+    category: "feature"
+    expected:
+      paths:
+        - "src/server/indexBootstrap.ts"
+        - "src/server/runtime.ts"
+        - "tests/server/indexBootstrap.spec.ts"
+    tags: ["bootstrap", "locking", "server-startup"]
+    rationale: "インデックス再利用時のロック回りを改善する議論で頻出する組み合わせ。"
+    notes: "Content-only だが CamelCase を含み、関数名検索の精度を確認。"
+
+  - id: feature-005
+    query: "client proxy handshake streams"
+    tool: "context_bundle"
+    intent: "CLI と Proxy 間のストリーム/ハンドシェイク処理を調査する"
+    category: "feature"
+    expected:
+      paths:
+        - "src/client/cli.ts"
+        - "src/client/proxy.ts"
+        - "docs/api-and-client.md"
+    tags: ["cli", "proxy", "handshake"]
+    rationale: "クライアント周りの UX を改善する際に CLI 実装とプロキシ層を同時にトレースしたい。"
+    notes: "Content-only 複合語で client ディレクトリの網羅性を評価。"
+
+  - id: refactor-002
+    query: "normalizeDbPath symlink safe locking"
+    tool: "context_bundle"
+    intent: "DB パス正規化とロック設計を見直すための実装を探す"
+    category: "refactor"
+    expected:
+      paths:
+        - "src/shared/utils/path.ts"
+        - "src/indexer/cli.ts"
+        - "tests/indexer/path-normalization.spec.ts"
+    tags: ["path", "locking", "normalization"]
+    rationale: "クロスプラットフォーム対応リファクタではユーティリティ・CLI・テストの整合性が鍵。"
+    notes: "Content-only でユーティリティとその利用箇所をまとめて取得。"
+
+  - id: refactor-003
+    query: "src/indexer/watch.ts drainBatch backpressure"
+    tool: "context_bundle"
+    intent: "watcher の drainBatch/backpressure 実装を整理する"
+    category: "refactor"
+    expected:
+      paths:
+        - "src/indexer/queue.ts"
+        - "src/indexer/watch.ts"
+        - "tests/indexer/batch-processing.spec.ts"
+    tags: ["queue", "backpressure", "watcher"]
+    rationale: "Queue/Watcher の結合部はリファクタ対象になりやすく、混在クエリでパス検索能力を検証したい。"
+    notes: "Mixed（ファイルパス + キーワード）で path 断片検索を評価。"
+
+  - id: docs-002
+    query: "daemon incident response runbook"
+    tool: "context_bundle"
+    intent: "デーモン障害時の緊急手順書を素早く開く"
+    category: "docs"
+    params:
+      boostProfile: "balanced"
+    expected:
+      paths:
+        - "docs/runbook.md"
+        - "docs/operations.md"
+        - "docs/testing.md"
+    tags: ["runbook", "daemon", "ops"]
+    rationale: "運用手順の確認頻度が高いため、複数ドキュメントを 1 クエリで拾えるようにする。"
+    notes: "Content-only 複合語を Balanced プロファイルで評価。"
+
+  - id: docs-003
+    query: "docs/security.md zero trust checklist"
+    tool: "context_bundle"
+    intent: "セキュリティ基準と設定テンプレートを見比べる"
+    category: "docs"
+    params:
+      boostProfile: "balanced"
+    expected:
+      paths:
+        - "docs/security.md"
+        - "docs/processes/security-review.md"
+        - "config/security.yml"
+    tags: ["security", "policy", "config"]
+    rationale: "ドキュメントと実際の設定ファイルを同時に参照するレビューが多い。"
+    notes: "Mixed（ファイル名 + コンセプト）で docs/config の横断検索を評価。"
+
+  - id: infra-002
+    query: "scripts/update-deps.ts provenance verification"
+    tool: "context_bundle"
+    intent: "依存更新スクリプトの署名検証フローを追う"
+    category: "infra"
+    expected:
+      paths:
+        - "scripts/update-deps.ts"
+        - "scripts/diag.ts"
+        - "config/default.example.yml"
+    tags: ["deps", "scripts", "supply-chain"]
+    rationale: "依存アップデート時のセキュリティ確認を高速に行うため、関連スクリプトと設定を即時に引きたい。"
+    notes: "Content-only クエリで scripts 配下と config を同時に取得。"
+
+  - id: infra-003
+    query: "scripts/audit/export-log.ts"
+    tool: "files_search"
+    intent: "監査ログエクスポートスクリプトをパス指定で即開く"
+    category: "infra"
+    expected:
+      paths:
+        - "scripts/audit/export-log.ts"
+        - "tests/server/audit.spec.ts"
+        - "docs/operations.md"
+    tags: ["audit", "logging", "ops"]
+    rationale: "ログエクスポートの改修ではスクリプト・テスト・運用ドキュメントを一度にチェックしたい。"
+    notes: "Path-only クエリで files_search の精度とフォールバック挙動を確認。"

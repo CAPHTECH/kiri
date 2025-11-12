@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 
 import { checkFTSSchemaExists } from "../indexer/schema.js";
@@ -6,6 +7,7 @@ import { generateEmbedding, structuralSimilarity } from "../shared/embedding.js"
 import { encode as encodeGPT, tokenizeText } from "../shared/tokenizer.js";
 import { getRepoPathCandidates, normalizeRepoPath } from "../shared/utils/path.js";
 
+import { expandAbbreviations } from "./abbreviations.js";
 import {
   type BoostProfileName,
   type BoostProfileConfig,
@@ -367,6 +369,10 @@ const MAX_DEPENDENCY_SEEDS_QUERY_LIMIT = 100; // SQL injection防御用の上限
 const NEARBY_LIMIT = 6;
 const FALLBACK_SNIPPET_WINDOW = 40; // Reduced from 120 to optimize token usage
 const MAX_RERANK_LIMIT = 50;
+
+// Issue #68: Path/Large File Penalty configuration (環境変数で上書き可能)
+const PATH_MISS_DELTA = parseFloat(process.env.KIRI_PATH_MISS_DELTA || "-0.5");
+const LARGE_FILE_DELTA = parseFloat(process.env.KIRI_LARGE_FILE_DELTA || "-0.8");
 const MAX_WHY_TAGS = 10;
 
 // 項目3: whyタグの優先度マップ（低い数値ほど高優先度）
@@ -606,6 +612,85 @@ function findFirstMatchLine(content: string, query: string): number {
   return prefix.length === 0 ? 1 : prefixLines.length;
 }
 
+/**
+ * ペナルティ影響の記録（Issue #68: Path/Large File Penalties）
+ */
+interface PenaltyImpact {
+  kind: "path-miss" | "large-file";
+  delta: number; // Always negative
+  details?: Record<string, unknown>;
+}
+
+/**
+ * ペナルティ機能フラグ（Issue #68）
+ */
+interface PenaltyFlags {
+  pathPenalty: boolean; // KIRI_PATH_PENALTY
+  largeFilePenalty: boolean; // KIRI_LARGE_FILE_PENALTY
+}
+
+/**
+ * クエリ統計（Issue #68: Path Miss Penalty判定用）
+ */
+interface QueryStats {
+  wordCount: number;
+  avgWordLength: number;
+}
+
+/**
+ * pathMatchHits分布の型（Issue #68: Telemetry）
+ * LDE: 型駆動設計でデータ構造を明示
+ */
+interface PathMatchDistribution {
+  readonly zero: number; // pathMatchHits === 0 の候補数
+  readonly one: number; // pathMatchHits === 1 の候補数
+  readonly two: number; // pathMatchHits === 2 の候補数
+  readonly three: number; // pathMatchHits === 3 の候補数
+  readonly fourPlus: number; // pathMatchHits >= 4 の候補数
+  readonly total: number; // 全候補数
+}
+
+/**
+ * ペナルティ適用テレメトリー（Issue #68: Telemetry）
+ * LDE: イミュータブルなデータ構造
+ */
+interface PenaltyTelemetry {
+  readonly pathMissPenalties: number; // Path miss penalty適用数
+  readonly largeFilePenalties: number; // Large file penalty適用数
+  readonly totalCandidates: number; // 全候補数
+  readonly pathMatchDistribution: PathMatchDistribution; // pathMatchHits分布
+  readonly scoreStats: {
+    // スコア統計
+    readonly min: number;
+    readonly max: number;
+    readonly mean: number;
+    readonly median: number;
+  };
+}
+
+/**
+ * 段階的ペナルティの設定（Issue #68: Graduated Penalty）
+ * LDE: 型駆動設計で不変条件を保証
+ *
+ * ADR 002: Graduated Penalty System
+ * - tier0Delta: pathMatchHits === 0 (no path evidence)
+ * - tier1Delta: pathMatchHits === 1 (weak path evidence)
+ * - tier2Delta: pathMatchHits === 2 (moderate path evidence)
+ * - pathMatchHits >= 3: no penalty (strong path evidence)
+ *
+ * Invariants:
+ * - All delta values must be <= 0 (non-positive)
+ * - tier0Delta < tier1Delta < tier2Delta <= 0 (monotonicity)
+ */
+interface GraduatedPenaltyConfig {
+  readonly enabled: boolean; // KIRI_GRADUATED_PENALTY=1
+  readonly minWordCount: number; // Default: 2
+  readonly minAvgWordLength: number; // Default: 4.0
+  readonly tier0Delta: number; // pathMatchHits === 0, default: -0.8
+  readonly tier1Delta: number; // pathMatchHits === 1, default: -0.4
+  readonly tier2Delta: number; // pathMatchHits === 2, default: -0.2
+}
+
 interface CandidateInfo {
   path: string;
   score: number;
@@ -618,6 +703,8 @@ interface CandidateInfo {
   ext: string | null;
   embedding: number[] | null;
   semanticSimilarity: number | null;
+  pathMatchHits: number; // Track path match count for path-miss penalty (Issue #68)
+  penalties: PenaltyImpact[]; // Penalty log for telemetry (Issue #68)
 }
 
 interface FileContentCacheEntry {
@@ -811,6 +898,8 @@ function ensureCandidate(map: Map<string, CandidateInfo>, filePath: string): Can
       ext: null,
       embedding: null,
       semanticSimilarity: null,
+      pathMatchHits: 0, // Issue #68: Track path match count
+      penalties: [], // Issue #68: Penalty log for telemetry
     };
     map.set(filePath, candidate);
   }
@@ -1120,12 +1209,18 @@ function applyPathBasedScoring(
     return;
   }
 
+  // hasAddedScore gates additive boosts; pathMatchHits/reasons still track every hit for penalties/debugging.
+  let hasAddedScore = false;
+
   // フレーズがパスに完全一致する場合（最高の重み）
   for (const phrase of extractedTerms.phrases) {
     if (lowerPath.includes(phrase)) {
-      candidate.score += weights.pathMatch * 1.5; // 1.5倍のブースト
+      if (!hasAddedScore) {
+        candidate.score += weights.pathMatch * 1.5; // 1.5倍のブースト
+        hasAddedScore = true;
+      }
       candidate.reasons.add(`path-phrase:${phrase}`);
-      return; // 最初のマッチのみ適用
+      candidate.pathMatchHits++; // Issue #68: Track path match for penalty calculation
     }
   }
 
@@ -1133,18 +1228,83 @@ function applyPathBasedScoring(
   const pathParts = lowerPath.split("/");
   for (const segment of extractedTerms.pathSegments) {
     if (pathParts.includes(segment)) {
-      candidate.score += weights.pathMatch;
+      if (!hasAddedScore) {
+        candidate.score += weights.pathMatch;
+        hasAddedScore = true;
+      }
       candidate.reasons.add(`path-segment:${segment}`);
-      return; // 最初のマッチのみ適用
+      candidate.pathMatchHits++; // Issue #68: Track path match for penalty calculation
     }
   }
 
   // 通常のキーワードがパスに含まれる場合（低い重み）
+  const matchedKeywords = new Set<string>();
+
   for (const keyword of extractedTerms.keywords) {
     if (lowerPath.includes(keyword)) {
-      candidate.score += weights.pathMatch * 0.5; // 0.5倍のブースト
+      if (!hasAddedScore) {
+        candidate.score += weights.pathMatch * 0.5; // 0.5倍のブースト
+        hasAddedScore = true;
+      }
       candidate.reasons.add(`path-keyword:${keyword}`);
-      return; // 最初のマッチのみ適用
+      candidate.pathMatchHits++; // Issue #68: Track path match for penalty calculation
+      matchedKeywords.add(keyword); // Track for abbreviation expansion
+    }
+  }
+
+  // ADR 003: Abbreviation expansion for keywords with zero exact matches
+  // Avoid double-counting by only expanding keywords that didn't match exactly
+  // Skip abbreviation expansion for files that will be heavily penalized (test/config/lock files)
+  const fileName = lowerPath.split("/").pop() ?? "";
+  const testPatterns = [".spec.ts", ".spec.js", ".test.ts", ".test.js", ".spec.tsx", ".test.tsx"];
+  const lockFiles = [
+    "package-lock.json",
+    "pnpm-lock.yaml",
+    "yarn.lock",
+    "bun.lockb",
+    "gemfile.lock",
+    "cargo.lock",
+    "poetry.lock",
+  ];
+  const configPatterns = [
+    "tsconfig.json",
+    "vite.config",
+    "vitest.config",
+    "eslint.config",
+    "prettier.config",
+    "package.json",
+    ".env",
+    "dockerfile",
+  ];
+
+  const shouldSkipAbbreviation =
+    testPatterns.some((pattern) => lowerPath.endsWith(pattern)) ||
+    lockFiles.some((lock) => fileName === lock) ||
+    configPatterns.some((cfg) => fileName.includes(cfg));
+
+  if (!shouldSkipAbbreviation) {
+    for (const keyword of extractedTerms.keywords) {
+      if (matchedKeywords.has(keyword)) {
+        continue; // Skip keywords that already matched exactly
+      }
+
+      const expandedTerms = expandAbbreviations(keyword);
+
+      // Try each expanded variant (except the original keyword itself)
+      for (const term of expandedTerms) {
+        if (term === keyword) continue; // Skip original to avoid duplicate check
+
+        if (lowerPath.includes(term)) {
+          // Lower weight (0.4x) for abbreviation-expanded matches
+          if (!hasAddedScore) {
+            candidate.score += weights.pathMatch * 0.4;
+            hasAddedScore = true;
+          }
+          candidate.reasons.add(`abbr-path:${keyword}→${term}`);
+          candidate.pathMatchHits++; // Count for penalty calculation
+          break; // Only count first match per keyword to avoid over-boosting
+        }
+      }
     }
   }
 }
@@ -1634,6 +1794,299 @@ export async function snippetsGet(
   };
 }
 
+// ============================================================================
+// Issue #68: Path/Large File Penalty Helper Functions
+// ============================================================================
+
+/**
+ * 環境変数からペナルティ機能フラグを読み取る
+ */
+function readPenaltyFlags(): PenaltyFlags {
+  return {
+    pathPenalty: process.env.KIRI_PATH_PENALTY === "1",
+    largeFilePenalty: process.env.KIRI_LARGE_FILE_PENALTY === "1",
+  };
+}
+
+/**
+ * クエリ統計を計算（単語数と平均単語長）
+ */
+function computeQueryStats(goal: string): QueryStats {
+  const words = goal
+    .trim()
+    .split(/\s+/)
+    .filter((w) => w.length > 0);
+  const totalLength = words.reduce((sum, w) => sum + w.length, 0);
+  return {
+    wordCount: words.length,
+    avgWordLength: words.length > 0 ? totalLength / words.length : 0,
+  };
+}
+
+/**
+ * Path Miss Penaltyをcandidateに適用（レガシー: Binary penalty）
+ * 条件: wordCount >= 2 AND avgWordLength >= 4 AND pathMatchHits === 0
+ *
+ * @deprecated Use applyGraduatedPenalty() instead (ADR 002)
+ */
+function applyPathMissPenalty(candidate: CandidateInfo, queryStats: QueryStats): void {
+  if (queryStats.wordCount >= 2 && queryStats.avgWordLength >= 4 && candidate.pathMatchHits === 0) {
+    candidate.score += PATH_MISS_DELTA; // -0.5
+    recordPenaltyEvent(candidate, "path-miss", PATH_MISS_DELTA, {
+      wordCount: queryStats.wordCount,
+      avgWordLength: queryStats.avgWordLength,
+      pathMatchHits: candidate.pathMatchHits,
+    });
+  }
+}
+
+/**
+ * 段階的ペナルティをcandidateに適用（Issue #68: Graduated Penalty）
+ * ADR 002: Graduated Penalty System
+ *
+ * @param candidate Candidate to apply penalty to
+ * @param queryStats Query statistics for eligibility check
+ * @param config Graduated penalty configuration
+ */
+function applyGraduatedPenalty(
+  candidate: CandidateInfo,
+  queryStats: QueryStats,
+  config: GraduatedPenaltyConfig
+): void {
+  const penalty = computeGraduatedPenalty(candidate.pathMatchHits, queryStats, config);
+
+  if (penalty !== 0) {
+    candidate.score += penalty;
+    recordPenaltyEvent(candidate, "path-miss", penalty, {
+      wordCount: queryStats.wordCount,
+      avgWordLength: queryStats.avgWordLength,
+      pathMatchHits: candidate.pathMatchHits,
+      tier:
+        candidate.pathMatchHits === 0
+          ? "tier0"
+          : candidate.pathMatchHits === 1
+            ? "tier1"
+            : candidate.pathMatchHits === 2
+              ? "tier2"
+              : "no-penalty",
+    });
+  }
+}
+
+/**
+ * Large File Penaltyをcandidateに適用
+ * 条件: totalLines > 500 AND matchLine > 120
+ * TODO(Issue #68): Add "no symbol at match location" check after selectSnippet integration
+ */
+function applyLargeFilePenalty(candidate: CandidateInfo): void {
+  const { totalLines, matchLine } = candidate;
+  if (totalLines !== null && totalLines > 500 && matchLine !== null && matchLine > 120) {
+    candidate.score += LARGE_FILE_DELTA; // -0.8
+    recordPenaltyEvent(candidate, "large-file", LARGE_FILE_DELTA, {
+      totalLines,
+      matchLine,
+    });
+  }
+}
+
+/**
+ * ペナルティイベントを記録（テレメトリ用）
+ */
+function recordPenaltyEvent(
+  candidate: CandidateInfo,
+  kind: "path-miss" | "large-file",
+  delta: number,
+  details: Record<string, unknown>
+): void {
+  candidate.penalties.push({ kind, delta, details });
+  candidate.reasons.add(`penalty:${kind}`);
+}
+
+/**
+ * pathMatchHits分布を計算（Issue #68: Telemetry）
+ * LDE: 純粋関数として実装（副作用なし、イミュータブル）
+ */
+function computePathMatchDistribution(candidates: readonly CandidateInfo[]): PathMatchDistribution {
+  let zero = 0;
+  let one = 0;
+  let two = 0;
+  let three = 0;
+  let fourPlus = 0;
+
+  for (const candidate of candidates) {
+    const hits = candidate.pathMatchHits;
+    if (hits === 0) zero++;
+    else if (hits === 1) one++;
+    else if (hits === 2) two++;
+    else if (hits === 3) three++;
+    else fourPlus++;
+  }
+
+  return {
+    zero,
+    one,
+    two,
+    three,
+    fourPlus,
+    total: candidates.length,
+  };
+}
+
+/**
+ * スコア統計を計算（Issue #68: Telemetry）
+ * LDE: 純粋関数として実装（副作用なし、イミュータブル）
+ */
+function computeScoreStats(candidates: readonly CandidateInfo[]): {
+  min: number;
+  max: number;
+  mean: number;
+  median: number;
+} {
+  if (candidates.length === 0) {
+    return { min: 0, max: 0, mean: 0, median: 0 };
+  }
+
+  const scores = candidates.map((c) => c.score).sort((a, b) => a - b);
+  const sum = scores.reduce((acc, s) => acc + s, 0);
+  const mean = sum / scores.length;
+  const median = scores[Math.floor(scores.length / 2)] ?? 0;
+
+  return {
+    min: scores[0] ?? 0,
+    max: scores[scores.length - 1] ?? 0,
+    mean,
+    median,
+  };
+}
+
+/**
+ * ペナルティ適用状況を計算（Issue #68: Telemetry）
+ * LDE: 純粋関数として実装（副作用なし、イミュータブル）
+ */
+function computePenaltyTelemetry(candidates: readonly CandidateInfo[]): PenaltyTelemetry {
+  let pathMissPenalties = 0;
+  let largeFilePenalties = 0;
+
+  for (const candidate of candidates) {
+    for (const penalty of candidate.penalties) {
+      if (penalty.kind === "path-miss") pathMissPenalties++;
+      if (penalty.kind === "large-file") largeFilePenalties++;
+    }
+  }
+
+  return {
+    pathMissPenalties,
+    largeFilePenalties,
+    totalCandidates: candidates.length,
+    pathMatchDistribution: computePathMatchDistribution(candidates),
+    scoreStats: computeScoreStats(candidates),
+  };
+}
+
+/**
+ * テレメトリーをファイル出力（Issue #68: Debug）
+ * LDE: 副作用を分離（I/O操作）
+ *
+ * JSON Lines形式で /tmp/kiri-penalty-telemetry.jsonl に追記
+ */
+function logPenaltyTelemetry(telemetry: PenaltyTelemetry, queryStats: QueryStats): void {
+  const dist = telemetry.pathMatchDistribution;
+  const scores = telemetry.scoreStats;
+
+  // JSON Lines形式でテレメトリーデータを記録
+  const telemetryRecord = {
+    timestamp: new Date().toISOString(),
+    query: {
+      wordCount: queryStats.wordCount,
+      avgWordLength: queryStats.avgWordLength,
+    },
+    totalCandidates: telemetry.totalCandidates,
+    pathMissPenalties: telemetry.pathMissPenalties,
+    largeFilePenalties: telemetry.largeFilePenalties,
+    pathMatchDistribution: {
+      zero: dist.zero,
+      one: dist.one,
+      two: dist.two,
+      three: dist.three,
+      fourPlus: dist.fourPlus,
+      total: dist.total,
+      percentages: {
+        zero: ((dist.zero / dist.total) * 100).toFixed(1),
+        one: ((dist.one / dist.total) * 100).toFixed(1),
+        two: ((dist.two / dist.total) * 100).toFixed(1),
+        three: ((dist.three / dist.total) * 100).toFixed(1),
+        fourPlus: ((dist.fourPlus / dist.total) * 100).toFixed(1),
+      },
+    },
+    scoreStats: {
+      min: scores.min.toFixed(2),
+      max: scores.max.toFixed(2),
+      mean: scores.mean.toFixed(2),
+      median: scores.median.toFixed(2),
+      // 最大ペナルティ(-0.8)との比率
+      penaltyRatio: ((0.8 / scores.mean) * 100).toFixed(1) + "%",
+    },
+  };
+
+  const telemetryFile = "/tmp/kiri-penalty-telemetry.jsonl";
+  fs.appendFileSync(telemetryFile, JSON.stringify(telemetryRecord) + "\n");
+}
+
+/**
+ * 環境変数から段階的ペナルティ設定を読み込む（Issue #68: Graduated Penalty）
+ * LDE: 純粋関数（I/O分離、テスト可能）
+ */
+function readGraduatedPenaltyConfig(): GraduatedPenaltyConfig {
+  return {
+    enabled: process.env.KIRI_GRADUATED_PENALTY === "1",
+    minWordCount: parseFloat(process.env.KIRI_PENALTY_MIN_WORD_COUNT || "2"),
+    minAvgWordLength: parseFloat(process.env.KIRI_PENALTY_MIN_AVG_WORD_LENGTH || "4.0"),
+    tier0Delta: parseFloat(process.env.KIRI_PENALTY_TIER_0 || "-0.8"),
+    tier1Delta: parseFloat(process.env.KIRI_PENALTY_TIER_1 || "-0.4"),
+    tier2Delta: parseFloat(process.env.KIRI_PENALTY_TIER_2 || "-0.2"),
+  };
+}
+
+/**
+ * 段階的ペナルティ値を計算（Issue #68: Graduated Penalty）
+ * LDE: 純粋関数（副作用なし、参照透明性）
+ *
+ * ADR 002: Graduated Penalty System
+ * - Tier 0 (pathMatchHits === 0): Strong penalty (no path evidence)
+ * - Tier 1 (pathMatchHits === 1): Medium penalty (weak path evidence)
+ * - Tier 2 (pathMatchHits === 2): Light penalty (moderate path evidence)
+ * - Tier 3+ (pathMatchHits >= 3): No penalty (strong path evidence)
+ *
+ * Invariants:
+ * - Result is always <= 0 (non-positive)
+ * - More path hits → less penalty (monotonicity)
+ * - Query must meet eligibility criteria
+ *
+ * @param pathMatchHits Number of path-based scoring matches
+ * @param queryStats Query word count and average word length
+ * @param config Graduated penalty configuration
+ * @returns Penalty delta (always <= 0)
+ */
+function computeGraduatedPenalty(
+  pathMatchHits: number,
+  queryStats: QueryStats,
+  config: GraduatedPenaltyConfig
+): number {
+  // Early return if query doesn't meet criteria
+  if (
+    queryStats.wordCount < config.minWordCount ||
+    queryStats.avgWordLength < config.minAvgWordLength
+  ) {
+    return 0;
+  }
+
+  // Graduated penalty tiers
+  if (pathMatchHits === 0) return config.tier0Delta;
+  if (pathMatchHits === 1) return config.tier1Delta;
+  if (pathMatchHits === 2) return config.tier2Delta;
+  return 0; // pathMatchHits >= 3: no penalty
+}
+
 export async function contextBundle(
   context: ServerContext,
   params: ContextBundleParams
@@ -1984,6 +2437,41 @@ export async function contextBundle(
     if (candidate.scoreMultiplier !== 1.0 && candidate.score > 0) {
       candidate.score *= candidate.scoreMultiplier;
     }
+  }
+
+  // Issue #68: Apply Path-Based Penalties (after multipliers, before sorting)
+  const penaltyFlags = readPenaltyFlags();
+  const queryStats = computeQueryStats(goal); // Always compute for telemetry
+  const graduatedConfig = readGraduatedPenaltyConfig();
+
+  // ADR 002: Use graduated penalty system if enabled, otherwise use legacy binary penalty
+  if (graduatedConfig.enabled && penaltyFlags.pathPenalty) {
+    for (const candidate of materializedCandidates) {
+      applyGraduatedPenalty(candidate, queryStats, graduatedConfig);
+    }
+  } else if (penaltyFlags.pathPenalty) {
+    // Legacy mode: Binary penalty (pathMatchHits === 0 only)
+    for (const candidate of materializedCandidates) {
+      applyPathMissPenalty(candidate, queryStats);
+    }
+  }
+
+  // Issue #68: Apply Large File Penalty (after multipliers, before sorting)
+  if (penaltyFlags.largeFilePenalty) {
+    for (const candidate of materializedCandidates) {
+      applyLargeFilePenalty(candidate);
+    }
+  }
+
+  // Issue #68: Telemetry（デバッグ用、環境変数で制御）
+  // LDE: 純粋関数（計算）と副作用（I/O）を分離
+  const enableTelemetry = process.env.KIRI_PENALTY_TELEMETRY === "1";
+  if (enableTelemetry) {
+    console.error(
+      `[DEBUG] Telemetry enabled. Flags: pathPenalty=${penaltyFlags.pathPenalty}, largeFilePenalty=${penaltyFlags.largeFilePenalty}`
+    );
+    const telemetry = computePenaltyTelemetry(materializedCandidates);
+    logPenaltyTelemetry(telemetry, queryStats);
   }
 
   const sortedCandidates = materializedCandidates
