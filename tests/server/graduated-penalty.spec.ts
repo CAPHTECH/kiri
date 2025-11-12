@@ -3,8 +3,8 @@
  * LDE: Property-based testing with fast-check
  */
 
-import { describe, it, expect } from "vitest";
 import fc from "fast-check";
+import { describe, it, expect } from "vitest";
 
 // Stub interfaces (will be imported from handlers.ts after implementation)
 interface QueryStats {

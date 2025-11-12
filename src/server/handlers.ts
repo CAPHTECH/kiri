@@ -1,13 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { expandAbbreviations } from "./abbreviations.js";
 import { checkFTSSchemaExists } from "../indexer/schema.js";
 import { DuckDBClient } from "../shared/duckdb.js";
 import { generateEmbedding, structuralSimilarity } from "../shared/embedding.js";
 import { encode as encodeGPT, tokenizeText } from "../shared/tokenizer.js";
 import { getRepoPathCandidates, normalizeRepoPath } from "../shared/utils/path.js";
 
+import { expandAbbreviations } from "./abbreviations.js";
 import {
   type BoostProfileName,
   type BoostProfileConfig,
