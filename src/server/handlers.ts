@@ -6,7 +6,6 @@ import { DuckDBClient } from "../shared/duckdb.js";
 import { generateEmbedding, structuralSimilarity } from "../shared/embedding.js";
 import { encode as encodeGPT, tokenizeText } from "../shared/tokenizer.js";
 import { getRepoPathCandidates, normalizeRepoPath } from "../shared/utils/path.js";
-import { RepoPathNormalizer } from "../shared/utils/repo-path-normalizer.js";
 
 import { expandAbbreviations } from "./abbreviations.js";
 import { RepoRepository } from "./services/repo-repository.js";
@@ -2696,9 +2695,8 @@ export async function depsClosure(
  * @throws Error リポジトリがインデックスされていない場合
  */
 export async function resolveRepoId(db: DuckDBClient, repoRoot: string): Promise<number> {
-  const normalizer = new RepoPathNormalizer();
   const repository = new RepoRepository(db);
-  const resolver = new RepoResolver(repository, normalizer);
+  const resolver = new RepoResolver(repository);
 
   return await resolver.resolveId(repoRoot);
 }

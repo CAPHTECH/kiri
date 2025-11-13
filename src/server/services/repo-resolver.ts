@@ -1,4 +1,4 @@
-import { RepoPathNormalizer } from "../../shared/utils/repo-path-normalizer.js";
+import { getRepoPathCandidates, normalizeRepoPath } from "../../shared/utils/path.js";
 import { RepoRepository } from "./repo-repository.js";
 
 /**
@@ -20,10 +20,7 @@ export class RepoNotFoundError extends Error {
  * パス正規化とDB検索を組み合わせ、エラー処理も担当する。
  */
 export class RepoResolver {
-  constructor(
-    private repository: RepoRepository,
-    private normalizer: RepoPathNormalizer
-  ) {}
+  constructor(private repository: RepoRepository) {}
 
   /**
    * リポジトリのrootパスをデータベースIDに解決する。
@@ -42,7 +39,7 @@ export class RepoResolver {
     }
 
     // パス候補と正規化パスを取得
-    const candidates = this.normalizer.getCandidates(repoRoot);
+    const candidates = getRepoPathCandidates(repoRoot);
     const normalized = candidates[0];
 
     // 高速パス: 直接検索を試みる
@@ -50,9 +47,7 @@ export class RepoResolver {
 
     // 低速パス: 正規化フォールバックを試みる
     if (!repo) {
-      repo = await this.repository.findByNormalizedPath(normalized, (path) =>
-        this.normalizer.normalize(path)
-      );
+      repo = await this.repository.findByNormalizedPath(normalized, normalizeRepoPath);
 
       if (!repo) {
         throw new RepoNotFoundError(
