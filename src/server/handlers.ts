@@ -5,9 +5,16 @@ import { checkFTSSchemaExists } from "../indexer/schema.js";
 import { DuckDBClient } from "../shared/duckdb.js";
 import { generateEmbedding, structuralSimilarity } from "../shared/embedding.js";
 import { encode as encodeGPT, tokenizeText } from "../shared/tokenizer.js";
-import { getRepoPathCandidates, normalizeRepoPath } from "../shared/utils/path.js";
 
 import { expandAbbreviations } from "./abbreviations.js";
+import { createServerServices, ServerServices } from "./services/index.js";
+
+// Re-export extracted handlers for backward compatibility
+export {
+  snippetsGet,
+  type SnippetsGetParams,
+  type SnippetResult,
+} from "./handlers/snippets-get.js";
 import {
   type BoostProfileName,
   type BoostProfileConfig,
@@ -287,23 +294,7 @@ export interface FilesSearchResult {
   score: number;
 }
 
-export interface SnippetsGetParams {
-  path: string;
-  start_line?: number;
-  end_line?: number;
-  compact?: boolean; // If true, omit content payload entirely
-  includeLineNumbers?: boolean; // If true, prefix content lines with line numbers
-}
-
-export interface SnippetResult {
-  path: string;
-  startLine: number;
-  endLine: number;
-  content?: string;
-  totalLines: number;
-  symbolName: string | null;
-  symbolKind: string | null;
-}
+// SnippetsGetParams and SnippetResult are now exported from ./handlers/snippets-get.js
 
 export interface ContextBundleArtifacts {
   editing_path?: string;
@@ -359,7 +350,6 @@ export interface SemanticRerankResult {
 }
 
 const DEFAULT_SEARCH_LIMIT = 50;
-const DEFAULT_SNIPPET_WINDOW = 150;
 const DEFAULT_BUNDLE_LIMIT = 7; // Reduced from 12 to optimize token usage
 const MAX_BUNDLE_LIMIT = 20;
 const MAX_KEYWORDS = 12;
@@ -1048,19 +1038,6 @@ function buildSnippetPreview(content: string, startLine: number, endLine: number
   return `${snippet.slice(0, 239)}…`;
 }
 
-function prependLineNumbers(snippet: string, startLine: number): string {
-  const lines = snippet.split(/\r?\n/);
-  if (lines.length === 0) {
-    return snippet;
-  }
-  // Calculate required width from the last line number (dynamic sizing)
-  const endLine = startLine + lines.length - 1;
-  const width = String(endLine).length;
-  return lines
-    .map((line, index) => `${String(startLine + index).padStart(width, " ")}→${line}`)
-    .join("\n");
-}
-
 /**
  * トークン数を推定（コンテンツベース）
  * 実際のGPTトークナイザーを使用して正確にカウント
@@ -1676,123 +1653,7 @@ export async function filesSearch(
     .sort((a, b) => b.score - a.score); // スコアの高い順に再ソート
 }
 
-export async function snippetsGet(
-  context: ServerContext,
-  params: SnippetsGetParams
-): Promise<SnippetResult> {
-  const { db, repoId } = context;
-  if (!params.path) {
-    throw new Error(
-      "snippets_get requires a file path. Specify a tracked text file path to continue."
-    );
-  }
-
-  const rows = await db.all<FileWithBinaryRow>(
-    `
-      SELECT f.path, f.lang, f.ext, f.is_binary, b.content
-      FROM file f
-      JOIN blob b ON b.hash = f.blob_hash
-      WHERE f.repo_id = ? AND f.path = ?
-      LIMIT 1
-    `,
-    [repoId, params.path]
-  );
-
-  if (rows.length === 0) {
-    throw new Error(
-      "Requested snippet file was not indexed. Re-run the indexer or choose another path."
-    );
-  }
-
-  const row = rows[0];
-  if (!row) {
-    throw new Error(
-      "Requested snippet file was not indexed. Re-run the indexer or choose another path."
-    );
-  }
-
-  if (row.is_binary) {
-    throw new Error(
-      "Binary snippets are not supported. Choose a text file to preview its content."
-    );
-  }
-
-  if (row.content === null) {
-    throw new Error("Snippet content is unavailable. Re-run the indexer to refresh DuckDB state.");
-  }
-
-  const lines = row.content.split(/\r?\n/);
-  const totalLines = lines.length;
-  const snippetRows = await db.all<SnippetRow>(
-    `
-      SELECT s.snippet_id, s.start_line, s.end_line, s.symbol_id, sym.name AS symbol_name, sym.kind AS symbol_kind
-      FROM snippet s
-      LEFT JOIN symbol sym
-        ON sym.repo_id = s.repo_id
-       AND sym.path = s.path
-       AND sym.symbol_id = s.symbol_id
-      WHERE s.repo_id = ? AND s.path = ?
-      ORDER BY s.start_line
-    `,
-    [repoId, params.path]
-  );
-
-  const requestedStart = params.start_line ?? 1;
-  const requestedEnd =
-    params.end_line ?? Math.min(totalLines, requestedStart + DEFAULT_SNIPPET_WINDOW - 1);
-
-  const useSymbolSnippets = snippetRows.length > 0 && params.end_line === undefined;
-
-  let snippetSelection: SnippetRow | null = null;
-  if (useSymbolSnippets) {
-    snippetSelection =
-      snippetRows.find(
-        (snippet) => requestedStart >= snippet.start_line && requestedStart <= snippet.end_line
-      ) ?? null;
-    if (!snippetSelection) {
-      const firstSnippet = snippetRows[0];
-      if (firstSnippet && requestedStart < firstSnippet.start_line) {
-        snippetSelection = firstSnippet;
-      } else {
-        snippetSelection = snippetRows[snippetRows.length - 1] ?? null;
-      }
-    }
-  }
-
-  let startLine: number;
-  let endLine: number;
-  let symbolName: string | null = null;
-  let symbolKind: string | null = null;
-
-  if (snippetSelection) {
-    startLine = snippetSelection.start_line;
-    endLine = snippetSelection.end_line;
-    symbolName = snippetSelection.symbol_name;
-    symbolKind = snippetSelection.symbol_kind;
-  } else {
-    startLine = Math.max(1, Math.min(totalLines, requestedStart));
-    endLine = Math.max(startLine, Math.min(totalLines, requestedEnd));
-  }
-
-  const isCompact = params.compact === true;
-  const addLineNumbers = params.includeLineNumbers === true && !isCompact;
-
-  let content: string | undefined;
-  if (!isCompact) {
-    const snippetContent = lines.slice(startLine - 1, endLine).join("\n");
-    content = addLineNumbers ? prependLineNumbers(snippetContent, startLine) : snippetContent;
-  }
-
-  return {
-    path: row.path,
-    startLine,
-    endLine,
-    ...(content !== undefined && { content }),
-    totalLines,
-    symbolName,
-    symbolKind,
-  };
-}
+// snippetsGet has been extracted to ./handlers/snippets-get.ts and re-exported above
 
 // ============================================================================
 // Issue #68: Path/Large File Penalty Helper Functions
@@ -2326,7 +2187,7 @@ export async function contextBundle(
   if (artifacts.editing_path) {
     if (!SAFE_PATH_PATTERN.test(artifacts.editing_path)) {
       throw new Error(
-        `Invalid editing_path format. Path must contain only alphanumeric characters, underscores, dots, hyphens, and forward slashes.`
+        `Invalid editing_path format: ${artifacts.editing_path}. Use only A-Z, 0-9, _, ., -, / characters.`
       );
     }
     dependencySeeds.add(artifacts.editing_path);
@@ -2345,7 +2206,9 @@ export async function contextBundle(
     // 防御的チェック: プレースホルダーが正しい形式であることを確認
     // 期待される形式: "?, ?, ..." (クエスチョンマーク、カンマ、スペースのみ)
     if (!/^(\?)(,\s*\?)*$/.test(placeholders)) {
-      throw new Error("Invalid placeholder generation detected. Operation aborted for safety.");
+      throw new Error(
+        "Invalid dependency placeholder sequence detected. Remove unsafe dependency seeds and retry the request."
+      );
     }
 
     const depRows = await db.all<DependencyRow>(
@@ -2820,42 +2683,22 @@ export async function depsClosure(
   };
 }
 
-export async function resolveRepoId(db: DuckDBClient, repoRoot: string): Promise<number> {
-  try {
-    const candidates = getRepoPathCandidates(repoRoot);
-    const normalized = candidates[0];
-    const placeholders = candidates.map(() => "?").join(", ");
-    const rows = await db.all<{ id: number; root: string }>(
-      `SELECT id, root FROM repo WHERE root IN (${placeholders}) LIMIT 1`,
-      candidates
-    );
-
-    if (rows.length === 0) {
-      const existingRows = await db.all<{ id: number; root: string }>("SELECT id, root FROM repo");
-      for (const candidate of existingRows) {
-        if (normalizeRepoPath(candidate.root) === normalized) {
-          await db.run("UPDATE repo SET root = ? WHERE id = ?", [normalized, candidate.id]);
-          return candidate.id;
-        }
-      }
-      throw new Error(
-        "Target repository is missing from DuckDB. Run the indexer before starting the server."
-      );
-    }
-    const row = rows[0];
-    if (!row) {
-      throw new Error("Failed to retrieve repository record. Database returned empty result.");
-    }
-    if (row.root !== normalized) {
-      await db.run("UPDATE repo SET root = ? WHERE id = ?", [normalized, row.id]);
-    }
-    return row.id;
-  } catch (error) {
-    if (error instanceof Error && error.message.includes("Table with name repo")) {
-      throw new Error(
-        "Target repository is missing from DuckDB. Run the indexer before starting the server."
-      );
-    }
-    throw error;
-  }
+/**
+ * リポジトリのrootパスをデータベースIDに解決する。
+ *
+ * この関数は下位互換性のために保持されているが、内部的には新しいRepoResolverを使用する。
+ *
+ * @param db - DuckDBクライアント
+ * @param repoRoot - リポジトリのrootパス
+ * @param services - オプショナルなServerServices（指定がなければ新規作成される）
+ * @returns リポジトリID
+ * @throws Error リポジトリがインデックスされていない場合
+ */
+export async function resolveRepoId(
+  db: DuckDBClient,
+  repoRoot: string,
+  services?: ServerServices
+): Promise<number> {
+  const svc = services ?? createServerServices(db);
+  return await svc.repoResolver.resolveId(repoRoot);
 }

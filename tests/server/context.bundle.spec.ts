@@ -9,6 +9,7 @@ import { ServerContext } from "../../src/server/context.js";
 import { contextBundle, resolveRepoId, semanticRerank } from "../../src/server/handlers.js";
 import { startServer } from "../../src/server/main.js";
 import { WarningManager } from "../../src/server/rpc.js";
+import { createServerServices } from "../../src/server/services/index.js";
 import { DuckDBClient } from "../../src/shared/duckdb.js";
 import { loadSecurityConfig, updateSecurityLock } from "../../src/shared/security/config.js";
 import { createTempRepo } from "../helpers/test-repo.js";
@@ -32,7 +33,7 @@ describe("startServer", () => {
         databasePath: dbPath,
         securityLockPath: lockPath,
       })
-    ).rejects.toThrow(/Target repository is missing/);
+    ).rejects.toThrow(/was not indexed/);
 
     await rm(tempDir, { recursive: true, force: true });
   });
@@ -65,7 +66,12 @@ describe("context_bundle", () => {
     cleanupTargets.push({ dispose: async () => await db.close() });
 
     const repoId = await resolveRepoId(db, repo.path);
-    const context: ServerContext = { db, repoId, warningManager: new WarningManager() };
+    const context: ServerContext = {
+      db,
+      repoId,
+      services: createServerServices(db),
+      warningManager: new WarningManager(),
+    };
 
     const bundle = await contextBundle(context, {
       goal: "Fix the token verifier expiration bug",
@@ -110,7 +116,12 @@ describe("context_bundle", () => {
     cleanupTargets.push({ dispose: async () => await db.close() });
 
     const repoId = await resolveRepoId(db, repo.path);
-    const context: ServerContext = { db, repoId, warningManager: new WarningManager() };
+    const context: ServerContext = {
+      db,
+      repoId,
+      services: createServerServices(db),
+      warningManager: new WarningManager(),
+    };
 
     const bundle = await contextBundle(context, {
       goal: "investigate app",
@@ -137,7 +148,12 @@ describe("context_bundle", () => {
     cleanupTargets.push({ dispose: async () => await db.close() });
 
     const repoId = await resolveRepoId(db, repo.path);
-    const serverContext: ServerContext = { db, repoId, warningManager: new WarningManager() };
+    const serverContext: ServerContext = {
+      db,
+      repoId,
+      services: createServerServices(db),
+      warningManager: new WarningManager(),
+    };
 
     await expect(contextBundle(serverContext, { goal: "" })).rejects.toThrow(/non-empty goal/);
   });
@@ -158,7 +174,12 @@ describe("context_bundle", () => {
     cleanupTargets.push({ dispose: async () => await db.close() });
 
     const repoId = await resolveRepoId(db, repo.path);
-    const context: ServerContext = { db, repoId, warningManager: new WarningManager() };
+    const context: ServerContext = {
+      db,
+      repoId,
+      services: createServerServices(db),
+      warningManager: new WarningManager(),
+    };
 
     // README.mdはマークダウンファイルなのでスニペットが生成されない可能性が高い
     const bundle = await contextBundle(context, {
@@ -192,7 +213,12 @@ describe("context_bundle", () => {
     cleanupTargets.push({ dispose: async () => await db.close() });
 
     const repoId = await resolveRepoId(db, repo.path);
-    const context: ServerContext = { db, repoId, warningManager: new WarningManager() };
+    const context: ServerContext = {
+      db,
+      repoId,
+      services: createServerServices(db),
+      warningManager: new WarningManager(),
+    };
 
     // CJK文字とemojiを含むゴールでも正常動作することを確認
     const bundle = await contextBundle(context, {
@@ -226,7 +252,12 @@ describe("context_bundle", () => {
     cleanupTargets.push({ dispose: async () => await db.close() });
 
     const repoId = await resolveRepoId(db, repo.path);
-    const context: ServerContext = { db, repoId, warningManager: new WarningManager() };
+    const context: ServerContext = {
+      db,
+      repoId,
+      services: createServerServices(db),
+      warningManager: new WarningManager(),
+    };
 
     // 多くのファイルにマッチするが、依存関係シードは内部で制限される
     const bundle = await contextBundle(context, {
@@ -256,7 +287,12 @@ describe("context_bundle", () => {
     cleanupTargets.push({ dispose: async () => await db.close() });
 
     const repoId = await resolveRepoId(db, repo.path);
-    const context: ServerContext = { db, repoId, warningManager: new WarningManager() };
+    const context: ServerContext = {
+      db,
+      repoId,
+      services: createServerServices(db),
+      warningManager: new WarningManager(),
+    };
 
     const reranked = await semanticRerank(context, {
       text: "investigate login authentication failure",
@@ -290,7 +326,12 @@ describe("context_bundle", () => {
     cleanupTargets.push({ dispose: async () => await db.close() });
 
     const repoId = await resolveRepoId(db, repo.path);
-    const context: ServerContext = { db, repoId, warningManager: new WarningManager() };
+    const context: ServerContext = {
+      db,
+      repoId,
+      services: createServerServices(db),
+      warningManager: new WarningManager(),
+    };
 
     await expect(
       semanticRerank(context, { text: "", candidates: [{ path: "src/sample.ts", score: 0.1 }] })
@@ -313,7 +354,12 @@ describe("context_bundle", () => {
     cleanupTargets.push({ dispose: async () => await db.close() });
 
     const repoId = await resolveRepoId(db, repo.path);
-    const context: ServerContext = { db, repoId, warningManager: new WarningManager() };
+    const context: ServerContext = {
+      db,
+      repoId,
+      services: createServerServices(db),
+      warningManager: new WarningManager(),
+    };
 
     // 悪意のあるパスを含むeditingPathをテスト
     await expect(
@@ -343,7 +389,12 @@ describe("context_bundle", () => {
     cleanupTargets.push({ dispose: async () => await db.close() });
 
     const repoId = await resolveRepoId(db, repo.path);
-    const context: ServerContext = { db, repoId, warningManager: new WarningManager() };
+    const context: ServerContext = {
+      db,
+      repoId,
+      services: createServerServices(db),
+      warningManager: new WarningManager(),
+    };
 
     const bundle = await contextBundle(context, {
       goal: "find code",
@@ -379,7 +430,12 @@ describe("context_bundle", () => {
     cleanupTargets.push({ dispose: async () => await db.close() });
 
     const repoId = await resolveRepoId(db, repo.path);
-    const context: ServerContext = { db, repoId, warningManager: new WarningManager() };
+    const context: ServerContext = {
+      db,
+      repoId,
+      services: createServerServices(db),
+      warningManager: new WarningManager(),
+    };
 
     const bundle = await contextBundle(context, {
       goal: "user authentication login implementation",
@@ -446,7 +502,12 @@ describe("context_bundle", () => {
     cleanupTargets.push({ dispose: async () => await db.close() });
 
     const repoId = await resolveRepoId(db, repo.path);
-    const context: ServerContext = { db, repoId, warningManager: new WarningManager() };
+    const context: ServerContext = {
+      db,
+      repoId,
+      services: createServerServices(db),
+      warningManager: new WarningManager(),
+    };
 
     const bundle = await contextBundle(context, {
       goal: "application main function settings config",
@@ -502,7 +563,12 @@ describe("context_bundle", () => {
     cleanupTargets.push({ dispose: async () => await db.close() });
 
     const repoId = await resolveRepoId(db, repo.path);
-    const context: ServerContext = { db, repoId, warningManager: new WarningManager() };
+    const context: ServerContext = {
+      db,
+      repoId,
+      services: createServerServices(db),
+      warningManager: new WarningManager(),
+    };
 
     const bundle = await contextBundle(context, {
       goal: "Canvas page routing, URL patterns, navigation methods",
@@ -552,7 +618,12 @@ describe("context_bundle", () => {
     cleanupTargets.push({ dispose: async () => await db.close() });
 
     const repoId = await resolveRepoId(db, repo.path);
-    const context: ServerContext = { db, repoId, warningManager: new WarningManager() };
+    const context: ServerContext = {
+      db,
+      repoId,
+      services: createServerServices(db),
+      warningManager: new WarningManager(),
+    };
 
     const bundle = await contextBundle(context, {
       goal: "page-agent Lambda handler implementation",
@@ -603,7 +674,12 @@ describe("context_bundle", () => {
     cleanupTargets.push({ dispose: async () => await db.close() });
 
     const repoId = await resolveRepoId(db, repo.path);
-    const context: ServerContext = { db, repoId, warningManager: new WarningManager() };
+    const context: ServerContext = {
+      db,
+      repoId,
+      services: createServerServices(db),
+      warningManager: new WarningManager(),
+    };
 
     // ハイフン区切り用語を使用（引用符なし）
     const bundle = await contextBundle(context, {
@@ -643,7 +719,12 @@ describe("context_bundle", () => {
     cleanupTargets.push({ dispose: async () => await db.close() });
 
     const repoId = await resolveRepoId(db, repo.path);
-    const context: ServerContext = { db, repoId, warningManager: new WarningManager() };
+    const context: ServerContext = {
+      db,
+      repoId,
+      services: createServerServices(db),
+      warningManager: new WarningManager(),
+    };
 
     const bundle = await contextBundle(context, {
       goal: "user-profile handler implementation",
@@ -693,7 +774,12 @@ describe("context_bundle", () => {
     cleanupTargets.push({ dispose: async () => await db.close() });
 
     const repoId = await resolveRepoId(db, repo.path);
-    const context: ServerContext = { db, repoId, warningManager: new WarningManager() };
+    const context: ServerContext = {
+      db,
+      repoId,
+      services: createServerServices(db),
+      warningManager: new WarningManager(),
+    };
 
     // "login-handler" を検索して、構造的に似ている "logout-handler" が
     // 誤ってマッチしないことを確認
@@ -768,7 +854,12 @@ This Lambda function handles canvas-agent operations.
     cleanupTargets.push({ dispose: async () => await db.close() });
 
     const repoId = await resolveRepoId(db, repo.path);
-    const context: ServerContext = { db, repoId, warningManager: new WarningManager() };
+    const context: ServerContext = {
+      db,
+      repoId,
+      services: createServerServices(db),
+      warningManager: new WarningManager(),
+    };
 
     // This is the exact query from the original problem report
     const bundle = await contextBundle(context, {
@@ -843,7 +934,12 @@ This Lambda function handles canvas-agent operations.
 
       const repoId = await resolveRepoId(db, repo.path);
       const manager = new WarningManager();
-      const context: ServerContext = { db, repoId, warningManager: manager };
+      const context: ServerContext = {
+        db,
+        repoId,
+        services: createServerServices(db),
+        warningManager: manager,
+      };
 
       // First request triggers warning (large non-compact without token estimate)
       manager.startRequest();

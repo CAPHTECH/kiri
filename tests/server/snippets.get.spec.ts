@@ -8,6 +8,7 @@ import { runIndexer } from "../../src/indexer/cli.js";
 import { ServerContext } from "../../src/server/context.js";
 import { resolveRepoId, snippetsGet } from "../../src/server/handlers.js";
 import { WarningManager } from "../../src/server/rpc.js";
+import { createServerServices } from "../../src/server/services/index.js";
 import { DuckDBClient } from "../../src/shared/duckdb.js";
 import { createTempRepo } from "../helpers/test-repo.js";
 
@@ -60,7 +61,12 @@ describe("snippets_get", () => {
     cleanupTargets.push({ dispose: async () => await db.close() });
 
     const repoId = await resolveRepoId(db, repo.path);
-    const context: ServerContext = { db, repoId, warningManager: new WarningManager() };
+    const context: ServerContext = {
+      db,
+      repoId,
+      services: createServerServices(db),
+      warningManager: new WarningManager(),
+    };
 
     const snippet = await snippetsGet(context, { path: "src/main.ts", start_line: 5 });
     expect(snippet.path).toBe("src/main.ts");
@@ -92,7 +98,12 @@ describe("snippets_get", () => {
     cleanupTargets.push({ dispose: async () => await db.close() });
 
     const repoId = await resolveRepoId(db, repo.path);
-    const context: ServerContext = { db, repoId, warningManager: new WarningManager() };
+    const context: ServerContext = {
+      db,
+      repoId,
+      services: createServerServices(db),
+      warningManager: new WarningManager(),
+    };
 
     const snippet = await snippetsGet(context, { path: "src/util.ts", start_line: 2, end_line: 3 });
     expect(snippet.startLine).toBe(2);
@@ -120,7 +131,12 @@ describe("snippets_get", () => {
     cleanupTargets.push({ dispose: async () => await db.close() });
 
     const repoId = await resolveRepoId(db, repo.path);
-    const context: ServerContext = { db, repoId, warningManager: new WarningManager() };
+    const context: ServerContext = {
+      db,
+      repoId,
+      services: createServerServices(db),
+      warningManager: new WarningManager(),
+    };
 
     const snippet = await snippetsGet(context, { path: "src/data.ts", compact: true });
     expect(snippet.content).toBeUndefined();
@@ -152,7 +168,12 @@ describe("snippets_get", () => {
     cleanupTargets.push({ dispose: async () => await db.close() });
 
     const repoId = await resolveRepoId(db, repo.path);
-    const context: ServerContext = { db, repoId, warningManager: new WarningManager() };
+    const context: ServerContext = {
+      db,
+      repoId,
+      services: createServerServices(db),
+      warningManager: new WarningManager(),
+    };
 
     const snippet = await snippetsGet(context, {
       path: "src/logic.ts",
@@ -166,5 +187,120 @@ describe("snippets_get", () => {
     expect(lines[0]).toMatch(/^\s*1→/);
     expect(lines[1]).toMatch(/^\s*2→/);
     expect(lines[2]).toMatch(/^\s*3→/);
+  });
+
+  it("throws error when blob content is NULL", async () => {
+    const repo = await createTempRepo({
+      "src/data.ts": "export const value = 42;\n",
+    });
+    cleanupTargets.push({ dispose: repo.cleanup });
+
+    const dbDir = await mkdtemp(join(tmpdir(), "kiri-db-null-content-"));
+    const dbPath = join(dbDir, "index.duckdb");
+    cleanupTargets.push({ dispose: async () => await rm(dbDir, { recursive: true, force: true }) });
+
+    await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+    const db = await DuckDBClient.connect({ databasePath: dbPath });
+    cleanupTargets.push({ dispose: async () => await db.close() });
+
+    // Force blob content to NULL to simulate error condition
+    await db.run(
+      "UPDATE blob SET content = NULL WHERE hash IN (SELECT blob_hash FROM file WHERE path = ?)",
+      ["src/data.ts"]
+    );
+
+    const repoId = await resolveRepoId(db, repo.path);
+    const context: ServerContext = {
+      db,
+      repoId,
+      services: createServerServices(db),
+      warningManager: new WarningManager(),
+    };
+
+    await expect(snippetsGet(context, { path: "src/data.ts" })).rejects.toThrow(
+      /Snippet content was NULL for src\/data\.ts/
+    );
+  });
+
+  it("selects first symbol when start_line is before all symbols", async () => {
+    const repo = await createTempRepo({
+      "src/header.ts": [
+        "// Header comment line 1",
+        "// Header comment line 2",
+        "// Header comment line 3",
+        "",
+        "export function firstFunc() {",
+        "  return 'first';",
+        "}",
+        "",
+        "export function secondFunc() {",
+        "  return 'second';",
+        "}",
+      ].join("\n"),
+    });
+    cleanupTargets.push({ dispose: repo.cleanup });
+
+    const dbDir = await mkdtemp(join(tmpdir(), "kiri-db-before-symbols-"));
+    const dbPath = join(dbDir, "index.duckdb");
+    cleanupTargets.push({ dispose: async () => await rm(dbDir, { recursive: true, force: true }) });
+
+    await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+    const db = await DuckDBClient.connect({ databasePath: dbPath });
+    cleanupTargets.push({ dispose: async () => await db.close() });
+
+    const repoId = await resolveRepoId(db, repo.path);
+    const context: ServerContext = {
+      db,
+      repoId,
+      services: createServerServices(db),
+      warningManager: new WarningManager(),
+    };
+
+    const snippet = await snippetsGet(context, { path: "src/header.ts", start_line: 1 });
+    expect(snippet.symbolName).toBe("firstFunc");
+    expect(snippet.symbolKind).toBe("function");
+    expect(snippet.startLine).toBeGreaterThanOrEqual(1);
+  });
+
+  it("selects last symbol when start_line is after all symbols", async () => {
+    const repo = await createTempRepo({
+      "src/footer.ts": [
+        "export function alpha() {",
+        "  return 'alpha';",
+        "}",
+        "",
+        "export function beta() {",
+        "  return 'beta';",
+        "}",
+        "",
+        "export function epsilon() {",
+        "  return 'epsilon';",
+        "}",
+      ].join("\n"),
+    });
+    cleanupTargets.push({ dispose: repo.cleanup });
+
+    const dbDir = await mkdtemp(join(tmpdir(), "kiri-db-after-symbols-"));
+    const dbPath = join(dbDir, "index.duckdb");
+    cleanupTargets.push({ dispose: async () => await rm(dbDir, { recursive: true, force: true }) });
+
+    await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+    const db = await DuckDBClient.connect({ databasePath: dbPath });
+    cleanupTargets.push({ dispose: async () => await db.close() });
+
+    const repoId = await resolveRepoId(db, repo.path);
+    const context: ServerContext = {
+      db,
+      repoId,
+      services: createServerServices(db),
+      warningManager: new WarningManager(),
+    };
+
+    const snippet = await snippetsGet(context, { path: "src/footer.ts", start_line: 999 });
+    expect(snippet.symbolName).toBe("epsilon");
+    expect(snippet.symbolKind).toBe("function");
   });
 });

@@ -5,11 +5,12 @@ import { DuckDBClient } from "../shared/duckdb.js";
 import { ensureDbParentDir, normalizeDbPath, getRepoPathCandidates } from "../shared/utils/path.js";
 
 import { bootstrapServer, type BootstrapOptions } from "./bootstrap.js";
-import { FtsStatusCache, ServerContext } from "./context.js";
+import { createServerContext, FtsStatusCache, ServerContext } from "./context.js";
 import { DegradeController } from "./fallbacks/degradeController.js";
 import { resolveRepoId } from "./handlers.js";
 import { MetricsRegistry } from "./observability/metrics.js";
 import { WarningManager } from "./rpc.js";
+import { createServerServices } from "./services/index.js";
 
 export interface CommonServerOptions {
   databasePath: string;
@@ -58,7 +59,10 @@ export async function createServerRuntime(options: CommonServerOptions): Promise
   let db: DuckDBClient | null = null;
   try {
     db = await DuckDBClient.connect({ databasePath, ensureDirectory: true });
-    const repoId = await resolveRepoId(db, options.repoRoot);
+
+    // Phase 1: Initialize server services (single instance for request sharing)
+    const services = createServerServices(db);
+    const repoId = await resolveRepoId(db, options.repoRoot, services);
 
     // Phase 2: FTS拡張の利用可否を確認（作成はしない）
     let hasFTS = await checkFTSAvailability(db);
@@ -98,15 +102,16 @@ export async function createServerRuntime(options: CommonServerOptions): Promise
 
     const warningManager = new WarningManager();
 
-    const context: ServerContext = {
+    const context = createServerContext({
       db,
       repoId,
+      services,
       features: {
         fts: hasFTS,
       },
       ftsStatusCache: ftsStatus,
       warningManager,
-    };
+    });
 
     const degrade = new DegradeController(repoRoot);
     const metrics = new MetricsRegistry();

@@ -8,6 +8,7 @@ import { ensureBaseSchema, ensureRepoMetaColumns } from "../../src/indexer/schem
 import { type ServerContext } from "../../src/server/context.js";
 import { filesSearch } from "../../src/server/handlers.js";
 import { WarningManager } from "../../src/server/rpc.js";
+import { createServerServices } from "../../src/server/services/index.js";
 import { DuckDBClient } from "../../src/shared/duckdb.js";
 
 describe("FTS status cache invalidation", () => {
@@ -35,6 +36,7 @@ describe("FTS status cache invalidation", () => {
       const context: ServerContext = {
         db,
         repoId: 1,
+        services: createServerServices(db),
         features: { fts: true },
         ftsStatusCache: {
           ready: true,

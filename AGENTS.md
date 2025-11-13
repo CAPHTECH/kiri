@@ -4,6 +4,8 @@
 
 本レポジトリの設計知は `docs/overview.md` を起点としたテーマ別ドキュメントに分割されています。TypeScript での実装を追加する際は `src/indexer/`（Git 走査と DuckDB 取り込み）、`src/server/`（MCP サーバー）、`src/client/`（CLI や Codex 用ユーティリティ）を基本フォルダとし、共通ロジックは `src/shared/` に集約してください。設定スキーマは `config/` に YAML で格納し、型定義を `types/` へ配置します。生成物や DuckDB のワークファイルは `var/` 以下にまとめ、テストは対象モジュールを鏡写しにした `tests/indexer/*.spec.ts` などへ置いてください。
 
+GitHub: CAPHTECH/kiri
+
 ## ビルド・テスト・開発コマンド
 
 Node.js 20 と pnpm を前提とします。主要コマンドは以下のとおりです。

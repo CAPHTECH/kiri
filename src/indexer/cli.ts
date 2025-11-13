@@ -7,13 +7,24 @@ import { pathToFileURL } from "node:url";
 import { DuckDBClient } from "../shared/duckdb.js";
 import { generateEmbedding } from "../shared/embedding.js";
 import { acquireLock, releaseLock, LockfileError, getLockOwner } from "../shared/utils/lockfile.js";
-import { normalizeDbPath, ensureDbParentDir, getRepoPathCandidates } from "../shared/utils/path.js";
+import {
+  normalizeDbPath,
+  normalizeRepoPath,
+  ensureDbParentDir,
+  getRepoPathCandidates,
+} from "../shared/utils/path.js";
 
 import { analyzeSource, buildFallbackSnippet } from "./codeintel.js";
 import { getDefaultBranch, getHeadCommit, gitLsFiles, gitDiffNameOnly } from "./git.js";
 import { detectLanguage } from "./language.js";
+import { mergeRepoRecords } from "./migrations/repo-merger.js";
 import { getIndexerQueue } from "./queue.js";
-import { ensureBaseSchema, ensureRepoMetaColumns, rebuildFTSIfNeeded } from "./schema.js";
+import {
+  ensureBaseSchema,
+  ensureNormalizedRootColumn,
+  ensureRepoMetaColumns,
+  rebuildFTSIfNeeded,
+} from "./schema.js";
 import { IndexWatcher } from "./watch.js";
 
 interface IndexerOptions {
@@ -137,44 +148,6 @@ function isBinaryBuffer(buffer: Buffer): boolean {
  * @param defaultBranch - Default branch name (e.g., "main", "master"), or null if unknown
  * @returns The repository ID (auto-generated on first insert, reused thereafter)
  */
-async function mergeLegacyRepoRows(
-  db: DuckDBClient,
-  canonicalRepoId: number,
-  legacyRepoIds: number[]
-): Promise<void> {
-  if (legacyRepoIds.length === 0) {
-    return;
-  }
-
-  const referencingTables = await db.all<{ table_name: string }>(
-    `SELECT DISTINCT c.table_name
-       FROM duckdb_columns() AS c
-       JOIN duckdb_tables() AS t
-         ON c.database_name = t.database_name
-        AND c.schema_name = t.schema_name
-        AND c.table_name = t.table_name
-      WHERE c.column_name = 'repo_id'
-        AND c.table_name <> 'repo'
-        AND t.table_type = 'BASE TABLE'`
-  );
-
-  const safeTables = referencingTables
-    .map((row) => row.table_name)
-    .filter((name) => /^[A-Za-z0-9_]+$/.test(name));
-
-  await db.transaction(async () => {
-    for (const legacyRepoId of legacyRepoIds) {
-      for (const tableName of safeTables) {
-        await db.run(`UPDATE ${tableName} SET repo_id = ? WHERE repo_id = ?`, [
-          canonicalRepoId,
-          legacyRepoId,
-        ]);
-      }
-      await db.run("DELETE FROM repo WHERE id = ?", [legacyRepoId]);
-    }
-  });
-}
-
 async function ensureRepo(
   db: DuckDBClient,
   repoRoot: string,
@@ -190,12 +163,14 @@ async function ensureRepo(
   );
 
   if (rows.length === 0) {
+    const normalized = normalizeRepoPath(repoRoot);
     await db.run(
-      `INSERT INTO repo (root, default_branch, indexed_at)
-       VALUES (?, ?, CURRENT_TIMESTAMP)
+      `INSERT INTO repo (root, normalized_root, default_branch, indexed_at)
+       VALUES (?, ?, ?, CURRENT_TIMESTAMP)
        ON CONFLICT(root) DO UPDATE SET
+         normalized_root = excluded.normalized_root,
          default_branch = COALESCE(excluded.default_branch, repo.default_branch)`,
-      [repoRoot, defaultBranch]
+      [repoRoot, normalized, defaultBranch]
     );
 
     rows = await db.all<{ id: number; root: string }>(
@@ -221,7 +196,7 @@ async function ensureRepo(
   }
 
   const legacyIds = rows.filter((row) => row.id !== canonicalRow.id).map((row) => row.id);
-  await mergeLegacyRepoRows(db, canonicalRow.id, legacyIds);
+  await mergeRepoRecords(db, canonicalRow.id, legacyIds);
 
   return canonicalRow.id;
 }
@@ -797,6 +772,8 @@ export async function runIndexer(options: IndexerOptions): Promise<void> {
       const dbClient = await DuckDBClient.connect({ databasePath, ensureDirectory: true });
       db = dbClient;
       await ensureBaseSchema(dbClient);
+      // Phase 1: Ensure normalized_root column exists (Critical #1)
+      await ensureNormalizedRootColumn(dbClient);
       // Phase 3: Ensure FTS metadata columns exist for existing DBs (migration)
       await ensureRepoMetaColumns(dbClient);
 
