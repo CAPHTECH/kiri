@@ -100,6 +100,55 @@ describe("context_bundle", () => {
     expect(nearby?.why.some((reason) => reason.startsWith("near:"))).toBe(true);
   }, 10000);
 
+  it("promotes files via artifact hints when the goal lacks concrete keywords", async () => {
+    const repo = await createTempRepo({
+      "src/stats/rank-biserial.ts": `export function rankBiserialEffect(sampleA: number[], sampleB: number[]): number {
+  const total = sampleA.reduce((acc, value) => acc + value, 0) - sampleB.reduce((acc, value) => acc + value, 0);
+  return total / Math.max(1, sampleA.length + sampleB.length);
+}
+`,
+    });
+    cleanupTargets.push({ dispose: repo.cleanup });
+
+    const dbDir = await mkdtemp(join(tmpdir(), "kiri-hints-"));
+    const dbPath = join(dbDir, "index.duckdb");
+    cleanupTargets.push({ dispose: async () => await rm(dbDir, { recursive: true, force: true }) });
+
+    await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+    const db = await DuckDBClient.connect({ databasePath: dbPath });
+    cleanupTargets.push({ dispose: async () => await db.close() });
+
+    const repoId = await resolveRepoId(db, repo.path);
+    const context: ServerContext = {
+      db,
+      repoId,
+      services: createServerServices(db),
+      warningManager: new WarningManager(),
+    };
+
+    const goal = "Investigate mann whitney u behavior";
+    const withoutHints = await contextBundle(context, {
+      goal,
+      limit: 5,
+    });
+    expect(
+      withoutHints.context.find((item) => item.path === "src/stats/rank-biserial.ts")
+    ).toBeUndefined();
+
+    const withHints = await contextBundle(context, {
+      goal,
+      limit: 5,
+      artifacts: {
+        hints: ["rankBiserialEffect", "src/stats/rank-biserial.ts"],
+      },
+    });
+
+    const hinted = withHints.context.find((item) => item.path === "src/stats/rank-biserial.ts");
+    expect(hinted).toBeDefined();
+    expect(hinted?.why).toContain("artifact:hint:src/stats/rank-biserial.ts");
+  }, 10000);
+
   it("skips tokens_estimate calculation unless requested", async () => {
     const repo = await createTempRepo({
       "src/app.ts": "export function app() { return 1; }\n",

@@ -1,0 +1,26 @@
+# Query hint dataset for Issue #76 - adds metadata.hints so abstract prompts get concrete anchors.
+schemaVersion: "1.0"
+datasetId: "kiri-ab"
+description: "Minimal AB test queries focusing on abstract statistical/orchestrator terminology."
+version: "2025-11-13"
+queries:
+  - id: "q-testfail"
+    text: "mann whitney u mannWhitneyU stats/tests.ts statistical analysis"
+    goal: "Recover Mann-Whitney U implementation for regression debugging"
+    metadata:
+      hints:
+        - "mannWhitneyU"
+        - "stats/tests.ts"
+        - "rank-biserial"
+    expected:
+      rationale: "Adds concrete function and file hints so search can find stats helpers."
+  - id: "q-performance"
+    text: "orchestrator orchestratorMain runtime/workerPool.ts scheduling latency"
+    goal: "Locate orchestrator bottleneck hot path for perf triage"
+    metadata:
+      hints:
+        - "orchestratorMain"
+        - "runtime/workerPool.ts"
+        - "pipeline scheduler"
+    expected:
+      rationale: "Hints call out orchestrator entrypoints and worker pools referenced in perf threads."

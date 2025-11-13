@@ -300,6 +300,7 @@ export interface ContextBundleArtifacts {
   editing_path?: string;
   failing_tests?: string[];
   last_diff?: string;
+  hints?: string[];
 }
 
 export interface ContextBundleParams {
@@ -324,6 +325,29 @@ export interface ContextBundleResult {
   context: ContextBundleItem[];
   tokens_estimate?: number;
   warnings?: string[]; // Client-visible warnings (e.g., breaking changes, deprecations)
+}
+
+function normalizeArtifactHints(hints?: string[]): string[] {
+  if (!Array.isArray(hints)) {
+    return [];
+  }
+  const normalized: string[] = [];
+  const seen = new Set<string>();
+  for (const rawHint of hints) {
+    if (typeof rawHint !== "string") {
+      continue;
+    }
+    const trimmed = rawHint.trim();
+    if (!trimmed || seen.has(trimmed)) {
+      continue;
+    }
+    normalized.push(trimmed);
+    seen.add(trimmed);
+    if (normalized.length >= MAX_ARTIFACT_HINTS) {
+      break;
+    }
+  }
+  return normalized;
 }
 
 export interface SemanticRerankCandidateInput {
@@ -359,6 +383,8 @@ const MAX_DEPENDENCY_SEEDS_QUERY_LIMIT = 100; // SQL injection防御用の上限
 const NEARBY_LIMIT = 6;
 const FALLBACK_SNIPPET_WINDOW = 40; // Reduced from 120 to optimize token usage
 const MAX_RERANK_LIMIT = 50;
+const MAX_ARTIFACT_HINTS = 8;
+const SAFE_PATH_PATTERN = /^[a-zA-Z0-9_.\-/]+$/;
 
 // Issue #68: Path/Large File Penalty configuration (環境変数で上書き可能)
 const PATH_MISS_DELTA = parseFloat(process.env.KIRI_PATH_MISS_DELTA || "-0.5");
@@ -368,7 +394,7 @@ const MAX_WHY_TAGS = 10;
 // 項目3: whyタグの優先度マップ（低い数値ほど高優先度）
 // All actual tag prefixes used in the codebase
 const WHY_TAG_PRIORITY: Record<string, number> = {
-  artifact: 1, // User-provided hints (editing_path, failing_tests)
+  artifact: 1, // User-provided hints (editing_path, failing_tests, hints)
   phrase: 2, // Multi-word literal matches (strongest signal)
   text: 3, // Single keyword matches
   "path-phrase": 4, // Path contains multi-word phrase
@@ -1964,6 +1990,10 @@ export async function contextBundle(
 
   const limit = normalizeBundleLimit(params.limit);
   const artifacts = params.artifacts ?? {};
+  const artifactHints = normalizeArtifactHints(artifacts.hints);
+  const pathHintTargets = artifactHints.filter(
+    (hint) => hint.includes("/") && SAFE_PATH_PATTERN.test(hint)
+  );
   const includeTokensEstimate = params.includeTokensEstimate === true;
   const isCompact = params.compact === true;
 
@@ -1991,6 +2021,9 @@ export async function contextBundle(
   }
   if (artifacts.editing_path) {
     keywordSources.push(artifacts.editing_path);
+  }
+  if (artifactHints.length > 0) {
+    keywordSources.push(artifactHints.join(" "));
   }
   const semanticSeed = keywordSources.join(" ");
   const queryEmbedding = generateEmbedding(semanticSeed)?.values ?? null;
@@ -2163,6 +2196,18 @@ export async function contextBundle(
     }
   }
 
+  if (pathHintTargets.length > 0) {
+    for (const hintPath of pathHintTargets) {
+      const candidate = ensureCandidate(candidates, hintPath);
+      const baseBoost = Math.max(weights.dependency, weights.textMatch * 0.5);
+      if (baseBoost > 0) {
+        candidate.score += baseBoost;
+      }
+      candidate.reasons.add(`artifact:hint:${hintPath}`);
+      candidate.matchLine ??= 1;
+    }
+  }
+
   if (artifacts.editing_path) {
     const editingCandidate = ensureCandidate(candidates, artifacts.editing_path);
     editingCandidate.score += weights.editingPath;
@@ -2171,8 +2216,6 @@ export async function contextBundle(
   }
 
   // SQL injection防御: ファイルパスの検証パターン
-  const SAFE_PATH_PATTERN = /^[a-zA-Z0-9_.\-/]+$/;
-
   const dependencySeeds = new Set<string>();
   for (const pathSeed of stringMatchSeeds) {
     if (!SAFE_PATH_PATTERN.test(pathSeed)) {
@@ -2191,6 +2234,10 @@ export async function contextBundle(
       );
     }
     dependencySeeds.add(artifacts.editing_path);
+  }
+
+  for (const hintPath of pathHintTargets) {
+    dependencySeeds.add(hintPath);
   }
 
   if (dependencySeeds.size > 0) {

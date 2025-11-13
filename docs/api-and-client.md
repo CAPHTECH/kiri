@@ -15,8 +15,9 @@ The server implements MCP standard endpoints `initialize` / `tools/list`, enabli
 - `semantic_rerank(candidates[], text, k=20)` - Semantic reranking (VSS only)
 - `context_bundle(goal, artifacts, includeTokensEstimate?)` ← **Most Important**
   - `goal`: Natural language description (e.g., "Fix failing test: test_verify_token in Auth")
-  - `artifacts`: {`editing_path`?, `failing_tests`?, `last_diff`?}
+  - `artifacts`: {`editing_path`?, `failing_tests`?, `last_diff`?, `hints`?[]}
     - Providing `editing_path` with the file you're touching strongly boosts that file and nearby dependencies, returning a cohesive set of related files.
+    - `hints`: Optional list of short function/file breadcrumbs. They are merged into the search query so abstract goals like "nonparametric test" can still surface concrete implementations.
   - Output: Fragment list (path, [start,end], why[], score, optional preview) and `tokens_estimate` **only** when `includeTokensEstimate: true`
 
 ## `context_bundle` Request/Response Example
@@ -27,11 +28,12 @@ The server implements MCP standard endpoints `initialize` / `tools/list`, enabli
   "method": "context_bundle",
   "params": {
     "goal": "fix failing test: JwtVerifier rejects expired tokens",
-    "artifacts": {
-      "editing_path": "src/auth/jwt.ts",
-      "failing_tests": ["AuthJwtSpec#rejectsExpired"],
-      "last_diff": "..."
-    },
+      "artifacts": {
+        "editing_path": "src/auth/jwt.ts",
+        "failing_tests": ["AuthJwtSpec#rejectsExpired"],
+        "last_diff": "...",
+        "hints": ["verifyToken", "src/auth/keys.ts"]
+      },
     "includeTokensEstimate": true
   }
 }
@@ -238,8 +240,9 @@ Watch mode (`--watch`) monitors repository file changes and automatically reinde
 - `semantic_rerank(candidates[], text, k=20)`（VSS 有効時のみ）
 - `context_bundle(goal, artifacts, includeTokensEstimate?)` ← **最重要**
   - `goal`: 自然文（例: "Auth の失敗テスト test_verify_token を修す"）
-  - `artifacts`: {`editing_path`?, `failing_tests`?, `last_diff`?}
+  - `artifacts`: {`editing_path`?, `failing_tests`?, `last_diff`?, `hints`?[]}
     - `editing_path` に作業中ファイルを渡すと、そのファイルと依存・近傍ファイルが優先的に返り、関連コンテキストをまとめて取得できます。
+    - `hints`: 関数名やファイルパスなど短いヒントの配列。抽象的な目的でも該当実装へ到達できるよう自動でクエリ展開されます。
   - 出力: 断片リスト（path, [start,end], why[], score, optional preview）と `tokens_estimate`（`includeTokensEstimate: true` のときのみ）
 
 ## `context_bundle` リクエスト/レスポンス例
@@ -253,7 +256,8 @@ Watch mode (`--watch`) monitors repository file changes and automatically reinde
     "artifacts": {
       "editing_path": "src/auth/jwt.ts",
       "failing_tests": ["AuthJwtSpec#rejectsExpired"],
-      "last_diff": "..."
+      "last_diff": "...",
+      "hints": ["verifyToken", "src/auth/keys.ts"]
     }
   }
 }

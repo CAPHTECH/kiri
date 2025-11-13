@@ -21,6 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Javadoc comment parsing
 - Import dependency resolution with wildcard and static import support
 - Full test coverage with 23 test cases
+- **Artifact hints for abstract query expansion ([#76](https://github.com/CAPHTECH/kiri/issues/76))**
+  - `context_bundle` now accepts `artifacts.hints` (string arrays) so callers can pass function names or file paths as concrete breadcrumbs.
+  - Hints are merged into keyword extraction, seeded as dependency candidates when path-like, and surface in `why` tags as `artifact:hint:*`.
+  - Documented the new field (English/Japanese API guides) and published `datasets/kiri-ab.yaml` containing the two failing evaluation queries from the issue for future A/B runs.
 
 ### Changed
 

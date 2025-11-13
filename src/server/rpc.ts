@@ -586,7 +586,20 @@ function parseContextBundleParams(input: unknown, context: ServerContext): Conte
     if (typeof artifactsRecord.last_diff === "string") {
       artifacts.last_diff = artifactsRecord.last_diff;
     }
-    if (artifacts.editing_path || artifacts.failing_tests || artifacts.last_diff) {
+    if (Array.isArray(artifactsRecord.hints)) {
+      const hints = artifactsRecord.hints
+        .map((value) => (typeof value === "string" ? value.trim() : ""))
+        .filter((value): value is string => value.length > 0);
+      if (hints.length > 0) {
+        artifacts.hints = hints;
+      }
+    }
+    if (
+      artifacts.editing_path ||
+      artifacts.failing_tests ||
+      artifacts.last_diff ||
+      (artifacts.hints && artifacts.hints.length > 0)
+    ) {
       params.artifacts = artifacts;
     }
   }
