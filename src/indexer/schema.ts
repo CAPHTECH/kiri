@@ -1,4 +1,5 @@
 import { DuckDBClient } from "../shared/duckdb.js";
+import { normalizeRepoPath } from "../shared/utils/path.js";
 
 export async function ensureBaseSchema(db: DuckDBClient): Promise<void> {
   await db.run(`
@@ -9,6 +10,7 @@ export async function ensureBaseSchema(db: DuckDBClient): Promise<void> {
     CREATE TABLE IF NOT EXISTS repo (
       id INTEGER PRIMARY KEY DEFAULT nextval('repo_id_seq'),
       root TEXT NOT NULL UNIQUE,
+      normalized_root TEXT,
       default_branch TEXT,
       indexed_at TIMESTAMP,
       fts_last_indexed_at TIMESTAMP,
@@ -173,6 +175,67 @@ export async function ensureRepoMetaColumns(db: DuckDBClient): Promise<void> {
         fts_status = 'dirty'
     WHERE fts_last_indexed_at IS NULL
   `);
+}
+
+/**
+ * repoテーブルにnormalized_root列とインデックスを追加（Phase 1: Critical #1）
+ * 既存DBとの互換性のため、列が存在しない場合のみ追加
+ *
+ * @param db - DuckDBクライアント
+ * @throws Error if migration fails (except when repo table doesn't exist yet)
+ */
+export async function ensureNormalizedRootColumn(db: DuckDBClient): Promise<void> {
+  // Check if repo table exists first
+  const tables = await db.all<{ table_name: string }>(
+    `SELECT table_name FROM duckdb_tables() WHERE table_name = 'repo'`
+  );
+
+  if (tables.length === 0) {
+    // repo table doesn't exist yet - will be created by ensureBaseSchema()
+    return;
+  }
+
+  // 列の存在確認
+  const columns = await db.all<{ column_name: string }>(
+    `SELECT column_name FROM duckdb_columns()
+     WHERE table_name = 'repo' AND column_name = 'normalized_root'`
+  );
+
+  const hasNormalizedRoot = columns.length > 0;
+
+  // normalized_rootの追加
+  if (!hasNormalizedRoot) {
+    await db.run(`ALTER TABLE repo ADD COLUMN normalized_root TEXT`);
+  }
+
+  // 既存レコードのbackfill（トランザクション内で実行）
+  await db.transaction(async () => {
+    const needsBackfill = await db.all<{ id: number; root: string }>(
+      `SELECT id, root FROM repo WHERE normalized_root IS NULL`
+    );
+
+    if (needsBackfill.length > 0) {
+      // バッチ更新で高速化
+      for (const row of needsBackfill) {
+        const normalized = normalizeRepoPath(row.root);
+        await db.run(`UPDATE repo SET normalized_root = ? WHERE id = ?`, [normalized, row.id]);
+      }
+    }
+  });
+
+  // インデックスの存在確認
+  const indexes = await db.all<{ index_name: string }>(
+    `SELECT index_name FROM duckdb_indexes() WHERE index_name = 'repo_normalized_root_idx'`
+  );
+
+  // UNIQUE インデックスの作成
+  if (indexes.length === 0) {
+    // NOTE: UNIQUE制約により、同じ正規化パスを持つ複数のrepoは登録不可
+    // 衝突時は既存のrepoを使用するか、mergeLegacyRepoRowsで統合する
+    await db.run(`
+      CREATE UNIQUE INDEX repo_normalized_root_idx ON repo(normalized_root)
+    `);
+  }
 }
 
 /**

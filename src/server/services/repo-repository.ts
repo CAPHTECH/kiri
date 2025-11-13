@@ -1,4 +1,5 @@
 import { DuckDBClient } from "../../shared/duckdb.js";
+import { normalizeRepoPath } from "../../shared/utils/path.js";
 
 /**
  * RepoRecord
@@ -21,6 +22,7 @@ export class RepoRepository {
 
   /**
    * 指定されたパス候補のいずれかに一致するリポジトリを検索する。
+   * Phase 1: normalized_root列を使用した高速検索をサポート。
    *
    * @param candidates - 検索するパス候補の配列
    * @returns 最初に見つかったリポジトリレコード、見つからない場合はnull
@@ -30,17 +32,34 @@ export class RepoRepository {
       return null;
     }
 
-    const placeholders = candidates.map(() => "?").join(", ");
-    const rows = await this.db.all<RepoRecord>(
-      `SELECT id, root FROM repo WHERE root IN (${placeholders}) LIMIT 1`,
+    // Step 1: Try direct root lookup first (legacy compatibility)
+    const rootPlaceholders = candidates.map(() => "?").join(", ");
+    let rows = await this.db.all<RepoRecord>(
+      `SELECT id, root FROM repo WHERE root IN (${rootPlaceholders}) LIMIT 1`,
       candidates
     );
+
+    if (rows.length > 0) {
+      return rows[0];
+    }
+
+    // Step 2: Try normalized_root lookup (fast path with index)
+    const normalizedCandidates = candidates.map((c) => normalizeRepoPath(c));
+    const normalizedPlaceholders = normalizedCandidates.map(() => "?").join(", ");
+    rows = await this.db.all<RepoRecord>(
+      `SELECT id, root FROM repo WHERE normalized_root IN (${normalizedPlaceholders}) LIMIT 1`,
+      normalizedCandidates
+    );
+
     return rows[0] || null;
   }
 
   /**
-   * 正規化されたパスに一致するリポジトリを検索する（フォールバック、遅い）。
-   * NOTE: この処理は O(n) である。normalized_root カラム + インデックスの追加を検討すべき。
+   * 正規化されたパスに一致するリポジトリを検索する（レガシーフォールバック）。
+   * Phase 1: normalized_root 列が存在する場合、このメソッドは使用されなくなります。
+   * マイグレーション期間中の安全性のため保持されています。
+   *
+   * NOTE: この処理は O(n) である。normalized_root カラム + インデックスが存在すれば不要。
    *
    * @param normalized - 正規化されたパス
    * @param normalizeFn - パスを正規化する関数
