@@ -17,6 +17,7 @@ import {
 import { analyzeSource, buildFallbackSnippet } from "./codeintel.js";
 import { getDefaultBranch, getHeadCommit, gitLsFiles, gitDiffNameOnly } from "./git.js";
 import { detectLanguage } from "./language.js";
+import { mergeRepoRecords } from "./migrations/repo-merger.js";
 import { getIndexerQueue } from "./queue.js";
 import {
   ensureBaseSchema,
@@ -147,44 +148,6 @@ function isBinaryBuffer(buffer: Buffer): boolean {
  * @param defaultBranch - Default branch name (e.g., "main", "master"), or null if unknown
  * @returns The repository ID (auto-generated on first insert, reused thereafter)
  */
-async function mergeLegacyRepoRows(
-  db: DuckDBClient,
-  canonicalRepoId: number,
-  legacyRepoIds: number[]
-): Promise<void> {
-  if (legacyRepoIds.length === 0) {
-    return;
-  }
-
-  const referencingTables = await db.all<{ table_name: string }>(
-    `SELECT DISTINCT c.table_name
-       FROM duckdb_columns() AS c
-       JOIN duckdb_tables() AS t
-         ON c.database_name = t.database_name
-        AND c.schema_name = t.schema_name
-        AND c.table_name = t.table_name
-      WHERE c.column_name = 'repo_id'
-        AND c.table_name <> 'repo'
-        AND t.table_type = 'BASE TABLE'`
-  );
-
-  const safeTables = referencingTables
-    .map((row) => row.table_name)
-    .filter((name) => /^[A-Za-z0-9_]+$/.test(name));
-
-  await db.transaction(async () => {
-    for (const legacyRepoId of legacyRepoIds) {
-      for (const tableName of safeTables) {
-        await db.run(`UPDATE ${tableName} SET repo_id = ? WHERE repo_id = ?`, [
-          canonicalRepoId,
-          legacyRepoId,
-        ]);
-      }
-      await db.run("DELETE FROM repo WHERE id = ?", [legacyRepoId]);
-    }
-  });
-}
-
 async function ensureRepo(
   db: DuckDBClient,
   repoRoot: string,
@@ -233,7 +196,7 @@ async function ensureRepo(
   }
 
   const legacyIds = rows.filter((row) => row.id !== canonicalRow.id).map((row) => row.id);
-  await mergeLegacyRepoRows(db, canonicalRow.id, legacyIds);
+  await mergeRepoRecords(db, canonicalRow.id, legacyIds);
 
   return canonicalRow.id;
 }

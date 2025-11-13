@@ -1,5 +1,6 @@
 import { DuckDBClient } from "../shared/duckdb.js";
 import { normalizeRepoPath } from "../shared/utils/path.js";
+import { mergeRepoRecords } from "./migrations/repo-merger.js";
 
 export async function ensureBaseSchema(db: DuckDBClient): Promise<void> {
   await db.run(`
@@ -262,12 +263,10 @@ export async function ensureNormalizedRootColumn(db: DuckDBClient): Promise<void
           .split(",")
           .map(Number)
           .sort((a, b) => a - b);
-        const keepId = ids[0]; // 最小IDを保持
-        const deleteIds = ids.slice(1); // それ以外を削除
+        const keepId = ids[0];
+        const deleteIds = ids.slice(1);
 
-        for (const id of deleteIds) {
-          await db.run(`DELETE FROM repo WHERE id = ?`, [id]);
-        }
+        await mergeRepoRecords(db, keepId, deleteIds);
       }
     }
   });

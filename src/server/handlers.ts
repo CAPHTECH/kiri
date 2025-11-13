@@ -5,12 +5,9 @@ import { checkFTSSchemaExists } from "../indexer/schema.js";
 import { DuckDBClient } from "../shared/duckdb.js";
 import { generateEmbedding, structuralSimilarity } from "../shared/embedding.js";
 import { encode as encodeGPT, tokenizeText } from "../shared/tokenizer.js";
-import { getRepoPathCandidates, normalizeRepoPath } from "../shared/utils/path.js";
 
 import { expandAbbreviations } from "./abbreviations.js";
 import { createServerServices, ServerServices } from "./services/index.js";
-import { RepoRepository } from "./services/repo-repository.js";
-import { RepoResolver } from "./services/repo-resolver.js";
 
 // Re-export extracted handlers for backward compatibility
 export {
@@ -353,7 +350,6 @@ export interface SemanticRerankResult {
 }
 
 const DEFAULT_SEARCH_LIMIT = 50;
-const DEFAULT_SNIPPET_WINDOW = 150;
 const DEFAULT_BUNDLE_LIMIT = 7; // Reduced from 12 to optimize token usage
 const MAX_BUNDLE_LIMIT = 20;
 const MAX_KEYWORDS = 12;
