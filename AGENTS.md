@@ -41,3 +41,4 @@ denylist（`secrets/**`, `*.pem`, `.env*` など）は `.gitignore` と indexer 
 - `pnpm run dev` や `scripts/assay/*` から `src/server/main.ts` を起動すると、ポート `19999` / `20099` のサーバープロセスが常駐します。**複数同時起動やプロセス放置は禁止**です。作業前後に `ps aux | grep 'src/server/main.ts'` を確認し、不要な Node プロセスは `kill` で停止してください。古いプロセスが残ると検索結果が更新されず、Assay も古い挙動を報告します。
 - DuckDB を更新するジョブ（`pnpm exec tsx src/indexer/cli.ts ...` や `pnpm run assay:*`）を実行する際は、必ず上記のサーバープロセスを全て停止した状態で行います。起動中のままインデクサを走らせると `var/index.duckdb.lock` が残り、`Database was already closed` のまま復旧できなくなります。
 - もし手動でロック解除が必要になった場合は、**プロセス停止 → `rm var/index.duckdb.lock` → `pnpm exec tsx src/indexer/cli.ts --full`** の順でのみ実施してください。ロック解除前にプロセスを殺さないとデータ破損につながります。
+- `external/assay-kit` は private submodule です。`pnpm run eval:golden` や `scripts/assay/*` が同リポジトリ内のファイルをそのまま参照するため、評価ログや JSON を外部へ共有しないでください。成果物は `var/assay/` や `tmp/` など gitignore 配下に保存し、パスを開示する場合は `***` でマスクします。アダプター実行前に既存 `kiri` サーバーを必ず停止しないと古いポートに接続され、最新インデックスが eval に反映されません。
