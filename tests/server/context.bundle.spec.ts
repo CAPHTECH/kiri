@@ -138,7 +138,7 @@ describe("context_bundle", () => {
 
     const withHints = await contextBundle(context, {
       goal,
-      limit: 5,
+      limit: 1,
       artifacts: {
         hints: ["rankBiserialEffect", "src/stats/rank-biserial.ts"],
       },
@@ -147,6 +147,8 @@ describe("context_bundle", () => {
     const hinted = withHints.context.find((item) => item.path === "src/stats/rank-biserial.ts");
     expect(hinted).toBeDefined();
     expect(hinted?.why).toContain("artifact:hint:src/stats/rank-biserial.ts");
+    expect(withHints.context).toHaveLength(1);
+    expect(withHints.context[0]?.path).toBe("src/stats/rank-biserial.ts");
   }, 10000);
 
   it("skips tokens_estimate calculation unless requested", async () => {

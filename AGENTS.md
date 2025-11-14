@@ -35,3 +35,9 @@ Conventional Commits を必須とし、例として `feat(server): expose semant
 ## セキュリティと設定メモ
 
 denylist（`secrets/**`, `*.pem`, `.env*` など）は `.gitignore` と indexer 内のフィルタで二重に適用してください。DuckDB ファイルは暗号化ディスク上の `var/index.duckdb` を既定にし、MCP 応答では機密パスを `***` へマスクします。外部へのコンテキスト共有時は `scripts/audit/export-log.ts` を経由して行範囲ログを残し、週次でレビューしてください。依存更新時は `pnpm up --latest` を `scripts/update-deps.ts` 経由で実行し、差分と署名確認結果を PR コメントで共有する方針を維持します。
+
+## MCP サーバー運用メモ
+
+- `pnpm run dev` や `scripts/assay/*` から `src/server/main.ts` を起動すると、ポート `19999` / `20099` のサーバープロセスが常駐します。**複数同時起動やプロセス放置は禁止**です。作業前後に `ps aux | grep 'src/server/main.ts'` を確認し、不要な Node プロセスは `kill` で停止してください。古いプロセスが残ると検索結果が更新されず、Assay も古い挙動を報告します。
+- DuckDB を更新するジョブ（`pnpm exec tsx src/indexer/cli.ts ...` や `pnpm run assay:*`）を実行する際は、必ず上記のサーバープロセスを全て停止した状態で行います。起動中のままインデクサを走らせると `var/index.duckdb.lock` が残り、`Database was already closed` のまま復旧できなくなります。
+- もし手動でロック解除が必要になった場合は、**プロセス停止 → `rm var/index.duckdb.lock` → `pnpm exec tsx src/indexer/cli.ts --full`** の順でのみ実施してください。ロック解除前にプロセスを殺さないとデータ破損につながります。

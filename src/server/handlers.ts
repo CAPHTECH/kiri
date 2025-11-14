@@ -569,6 +569,54 @@ interface FileWithEmbeddingRow extends FileWithBinaryRow {
   vector_dims: number | null;
 }
 
+function prioritizeHintCandidates(
+  rankedCandidates: CandidateInfo[],
+  hintPaths: string[],
+  limit: number
+): CandidateInfo[] {
+  if (rankedCandidates.length === 0) {
+    return [];
+  }
+  const sanitizedLimit = Math.max(1, Math.min(limit, rankedCandidates.length));
+  const candidateByPath = new Map<string, CandidateInfo>();
+  for (const candidate of rankedCandidates) {
+    if (!candidateByPath.has(candidate.path)) {
+      candidateByPath.set(candidate.path, candidate);
+    }
+  }
+  const final: CandidateInfo[] = [];
+  const seen = new Set<string>();
+
+  for (const hintPath of hintPaths) {
+    if (final.length >= sanitizedLimit) {
+      break;
+    }
+    const candidate = candidateByPath.get(hintPath);
+    if (!candidate || seen.has(candidate.path)) {
+      continue;
+    }
+    final.push(candidate);
+    seen.add(candidate.path);
+  }
+
+  if (final.length >= sanitizedLimit) {
+    return final;
+  }
+
+  for (const candidate of rankedCandidates) {
+    if (final.length >= sanitizedLimit) {
+      break;
+    }
+    if (seen.has(candidate.path)) {
+      continue;
+    }
+    final.push(candidate);
+    seen.add(candidate.path);
+  }
+
+  return final;
+}
+
 interface SnippetRow {
   snippet_id: number;
   start_line: number;
@@ -2204,6 +2252,7 @@ export async function contextBundle(
         candidate.score += baseBoost;
       }
       candidate.reasons.add(`artifact:hint:${hintPath}`);
+      candidate.pathMatchHits = Math.max(candidate.pathMatchHits, 1);
       candidate.matchLine ??= 1;
     }
   }
@@ -2384,20 +2433,30 @@ export async function contextBundle(
     logPenaltyTelemetry(telemetry, queryStats);
   }
 
-  const sortedCandidates = materializedCandidates
-    .filter((candidate) => candidate.score > 0) // Filter out candidates with negative or zero scores
+  const hintPathSet = new Set(pathHintTargets);
+  const rankedCandidates = materializedCandidates
+    .filter((candidate) => candidate.score > 0 || hintPathSet.has(candidate.path))
     .sort((a, b) => {
       if (b.score === a.score) {
         return a.path.localeCompare(b.path);
       }
       return b.score - a.score;
-    })
-    .slice(0, limit);
+    });
 
-  const maxScore = Math.max(...sortedCandidates.map((candidate) => candidate.score));
+  const prioritizedCandidates = prioritizeHintCandidates(rankedCandidates, pathHintTargets, limit);
+  if (prioritizedCandidates.length === 0) {
+    const warnings = [...context.warningManager.responseWarnings];
+    return {
+      context: [],
+      ...(includeTokensEstimate && { tokens_estimate: 0 }),
+      ...(warnings.length > 0 && { warnings }),
+    };
+  }
+
+  const maxScore = Math.max(...prioritizedCandidates.map((candidate) => candidate.score));
 
   const results: ContextBundleItem[] = [];
-  for (const candidate of sortedCandidates) {
+  for (const candidate of prioritizedCandidates) {
     if (!candidate.content) {
       continue;
     }
@@ -2467,7 +2526,7 @@ export async function contextBundle(
   let tokensEstimate: number | undefined;
   if (includeTokensEstimate) {
     tokensEstimate = results.reduce((acc, item) => {
-      const candidate = sortedCandidates.find((c) => c.path === item.path);
+      const candidate = prioritizedCandidates.find((c) => c.path === item.path);
       if (candidate && candidate.content) {
         return acc + estimateTokensFromContent(candidate.content, item.range[0], item.range[1]);
       }
