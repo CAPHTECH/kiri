@@ -429,16 +429,44 @@ const SAFE_PATH_PATTERN = /^[a-zA-Z0-9_.\-/]+$/;
 const HINT_PRIORITY_TEXT_MULTIPLIER = parseFloat(process.env.KIRI_HINT_TEXT_MULTIPLIER ?? "6");
 const HINT_PRIORITY_PATH_MULTIPLIER = parseFloat(process.env.KIRI_HINT_PATH_MULTIPLIER ?? "2");
 const HINT_PRIORITY_BASE_BONUS = parseFloat(process.env.KIRI_HINT_BASE_BONUS ?? "5");
-const HINT_DIR_LIMIT = parseInt(process.env.KIRI_HINT_NEAR_LIMIT_DIR ?? "2", 10) || 0;
-const HINT_DIR_MAX_FILES = parseInt(process.env.KIRI_HINT_NEAR_MAX_FILES ?? "10", 10) || 10;
-const HINT_DEP_OUT_LIMIT = parseInt(process.env.KIRI_HINT_DEP_OUT_LIMIT ?? "1", 10) || 0;
-const HINT_DEP_IN_LIMIT = parseInt(process.env.KIRI_HINT_DEP_IN_LIMIT ?? "1", 10) || 0;
-const HINT_SEM_LIMIT = parseInt(process.env.KIRI_HINT_SEM_LIMIT ?? "0", 10) || 0;
-const HINT_SEM_DIR_CANDIDATE_LIMIT =
-  parseInt(process.env.KIRI_HINT_SEM_DIR_CANDIDATES ?? "20", 10) || 20;
+const HINT_DIR_FEATURE_ENABLED = envFlagEnabled(process.env.KIRI_HINT_ENABLE_DIR, false);
+const HINT_DEP_FEATURE_ENABLED = envFlagEnabled(process.env.KIRI_HINT_ENABLE_DEP, false);
+const HINT_SEM_FEATURE_ENABLED = envFlagEnabled(process.env.KIRI_HINT_ENABLE_SEM, false);
+
+const HINT_DIR_LIMIT = HINT_DIR_FEATURE_ENABLED
+  ? Math.max(0, parseInt(process.env.KIRI_HINT_NEAR_LIMIT_DIR ?? "2", 10))
+  : 0;
+const HINT_DIR_MAX_FILES = Math.max(1, parseInt(process.env.KIRI_HINT_NEAR_MAX_FILES ?? "10", 10));
+const HINT_DEP_OUT_LIMIT = HINT_DEP_FEATURE_ENABLED
+  ? Math.max(0, parseInt(process.env.KIRI_HINT_DEP_OUT_LIMIT ?? "1", 10))
+  : 0;
+const HINT_DEP_IN_LIMIT = HINT_DEP_FEATURE_ENABLED
+  ? Math.max(0, parseInt(process.env.KIRI_HINT_DEP_IN_LIMIT ?? "1", 10))
+  : 0;
+const HINT_SEM_LIMIT = HINT_SEM_FEATURE_ENABLED
+  ? Math.max(0, parseInt(process.env.KIRI_HINT_SEM_LIMIT ?? "2", 10))
+  : 0;
+const HINT_SEM_DIR_CANDIDATE_LIMIT = Math.max(
+  1,
+  parseInt(process.env.KIRI_HINT_SEM_DIR_CANDIDATES ?? "20", 10)
+);
 const HINT_SEM_THRESHOLD = parseFloat(process.env.KIRI_HINT_SEM_THRESHOLD ?? "0.65");
-const HINT_PER_HINT_LIMIT = parseInt(process.env.KIRI_HINT_PER_HINT_LIMIT ?? "6", 10) || 6;
-const HINT_DB_QUERY_BUDGET = parseInt(process.env.KIRI_HINT_DB_QUERY_LIMIT ?? "12", 10) || 12;
+const HINT_EXPANSION_ENABLED =
+  HINT_DIR_FEATURE_ENABLED || HINT_DEP_FEATURE_ENABLED || HINT_SEM_FEATURE_ENABLED;
+const HINT_PER_HINT_LIMIT = HINT_EXPANSION_ENABLED
+  ? Math.max(1, parseInt(process.env.KIRI_HINT_PER_HINT_LIMIT ?? "6", 10))
+  : 0;
+const HINT_DB_QUERY_BUDGET = HINT_EXPANSION_ENABLED
+  ? Math.max(1, parseInt(process.env.KIRI_HINT_DB_QUERY_LIMIT ?? "12", 10))
+  : 0;
+
+function envFlagEnabled(value: string | undefined, defaultEnabled: boolean): boolean {
+  if (value === undefined) {
+    return defaultEnabled;
+  }
+  const normalized = value.trim().toLowerCase();
+  return normalized !== "0" && normalized !== "false" && normalized !== "off";
+}
 
 // Issue #68: Path/Large File Penalty configuration (環境変数で上書き可能)
 const PATH_MISS_DELTA = parseFloat(process.env.KIRI_PATH_MISS_DELTA || "-0.5");
