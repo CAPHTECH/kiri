@@ -2,50 +2,181 @@
 schemaVersion: "1.0.0"
 name: "kiri-ab-issue76"
 datasetId: "kiri-ab"
-description: "Minimal AB test queries focusing on abstract statistical/orchestrator terminology."
-version: "v2025-11-13"
+description: "Expanded A/B dataset emphasizing abstract terminology with concrete hint metadata."
+version: "v2025-11-14"
 
 defaultParams:
-  k: 5
+  k: 10
   timeoutMs: 30000
 
 queries:
+  - id: "q-bugfix"
+    text: "authentication JWT token validation"
+    goal: "Locate dataset loader logic touched by JWT regression fix"
+    metadata:
+      category: "bugfix"
+      intent: "Find dataset loader + schema validation"
+      tool: "context_bundle"
+      tags: ["auth", "security"]
+      hints:
+        - "loadDatasetFromYAML"
+        - "SchemaVersionError"
+        - "external/assay-kit/src/dataset/loader.ts"
+      expected:
+        - "external/assay-kit/src/dataset/loader.ts"
+        - "external/assay-kit/src/dataset/schemas/dataset.schema.ts"
+  - id: "q-feature"
+    text: "plugin system registry initialization"
+    goal: "Understand plugin registry bootstrap path"
+    metadata:
+      category: "feature"
+      intent: "Locate plugin registry implementation"
+      tool: "context_bundle"
+      tags: ["plugins", "architecture"]
+      hints:
+        - "PluginRegistry"
+        - "registerPlugin"
+        - "external/assay-kit/src/cli/commands/evaluate.ts"
+      expected:
+        - "external/assay-kit/src/runner/types.ts"
+        - "external/assay-kit/src/cli/commands/evaluate.ts"
+  - id: "q-refactor"
+    text: "comparison runner pairing strategy"
+    goal: "Inspect comparison runner pairing policy for refactor"
+    metadata:
+      category: "refactor"
+      intent: "Find comparison runner internals"
+      tool: "context_bundle"
+      tags: ["comparison", "runner"]
+      hints:
+        - "pairingPolicy"
+        - "ComparisonRunner"
+        - "external/assay-kit/src/runner/index.ts"
+      expected:
+        - "external/assay-kit/src/runner/types.ts"
+        - "external/assay-kit/src/runner/index.ts"
   - id: "q-testfail"
     text: "mann whitney u mannWhitneyU stats/tests.ts statistical analysis"
     goal: "Recover Mann-Whitney U implementation for regression debugging"
     metadata:
       category: "testfail"
-      intent: "Locate Mann-Whitney U implementation"
+      intent: "Locate Mann-Whitney U + rank biserial helpers"
       tool: "context_bundle"
       tags: ["stats", "tests"]
       hints:
-        - "mannWhitneyU"
-        - "stats/tests.ts"
-        - "rank-biserial"
+        - "mannWhitneyUTest"
+        - "rankBiserialEffect"
+        - "external/assay-kit/src/stats/mann-whitney.ts"
       expected:
         - "external/assay-kit/src/stats/mann-whitney.ts"
         - "external/assay-kit/src/stats/rank-biserial.ts"
-    expected:
-      rationale: "Adds concrete function and file hints so search can find stats helpers."
   - id: "q-performance"
     text: "orchestrator orchestratorMain runtime/workerPool.ts scheduling latency"
     goal: "Locate orchestrator bottleneck hot path for perf triage"
     metadata:
       category: "performance"
-      intent: "Locate orchestrator hot path"
+      intent: "Inspect tuning orchestrator + worker pool"
       tool: "context_bundle"
       tags: ["orchestrator", "runtime"]
       hints:
         - "orchestratorMain"
-        - "runtime/workerPool.ts"
-        - "pipeline scheduler"
+        - "workerPoolScheduler"
+        - "external/assay-kit/src/tuning/orchestrator.ts"
       expected:
         - "external/assay-kit/src/tuning/orchestrator.ts"
         - "external/assay-kit/src/runtime/worker-pool.ts"
-    expected:
-      rationale: "Hints call out orchestrator entrypoints and worker pools referenced in perf threads."
+  - id: "q-metrics"
+    text: "precision recall calculation utility functions"
+    goal: "Find shared precision/recall helpers"
+    metadata:
+      category: "metrics"
+      intent: "Locate metrics utilities"
+      tool: "context_bundle"
+      tags: ["metrics", "evaluation"]
+      hints:
+        - "precisionAtK"
+        - "recallAtK"
+        - "external/assay-kit/src/metrics/index.ts"
+      expected:
+        - "external/assay-kit/src/metrics/index.ts"
+        - "external/assay-kit/src/types/metrics.ts"
+  - id: "q-adapter"
+    text: "search adapter interface implementation"
+    goal: "Review search adapter contracts"
+    metadata:
+      category: "adapter"
+      intent: "Locate adapter types & mock implementation"
+      tool: "context_bundle"
+      tags: ["adapter", "interface"]
+      hints:
+        - "SearchAdapter"
+        - "MockSearchAdapter"
+        - "external/assay-kit/src/types/adapters.ts"
+      expected:
+        - "external/assay-kit/src/types/adapters.ts"
+        - "external/assay-kit/src/adapters/mock.ts"
+  - id: "q-reporter"
+    text: "markdown reporter output formatting"
+    goal: "Locate markdown reporter implementation"
+    metadata:
+      category: "reporter"
+      intent: "Inspect reporting outputs"
+      tool: "context_bundle"
+      tags: ["reporter", "output"]
+      hints:
+        - "MarkdownReporter"
+        - "renderMarkdownResult"
+        - "external/assay-kit/src/reporting/markdown.ts"
+      expected:
+        - "external/assay-kit/src/reporting/markdown.ts"
+        - "external/assay-kit/src/types/adapters.ts"
+  - id: "q-dataset"
+    text: "dataset loader yaml parsing"
+    goal: "Find dataset loading logic"
+    metadata:
+      category: "dataset"
+      intent: "Inspect loader + CLI validation"
+      tool: "context_bundle"
+      tags: ["dataset", "loader"]
+      hints:
+        - "loadDataset"
+        - "validateDatasetCommand"
+        - "external/assay-kit/src/cli/commands/validate.ts"
+      expected:
+        - "external/assay-kit/src/dataset/loader.ts"
+        - "external/assay-kit/src/cli/commands/validate.ts"
+  - id: "q-integration"
+    text: "kiri search adapter http json rpc"
+    goal: "Review example KIRI adapter integration"
+    metadata:
+      category: "integration"
+      intent: "Locate example adapter + runner"
+      tool: "context_bundle"
+      tags: ["kiri", "integration"]
+      hints:
+        - "KiriSearchAdapter"
+        - "runEvaluation"
+        - "external/assay-kit/examples/kiri-integration/src/kiri-adapter.ts"
+      expected:
+        - "external/assay-kit/examples/kiri-integration/src/kiri-adapter.ts"
+        - "external/assay-kit/examples/kiri-integration/src/run-evaluation.ts"
 
 expected:
+  - id: "q-bugfix"
+    reference:
+      paths:
+        - "external/assay-kit/src/dataset/loader.ts"
+        - "external/assay-kit/src/dataset/schemas/dataset.schema.ts"
+  - id: "q-feature"
+    reference:
+      paths:
+        - "external/assay-kit/src/runner/types.ts"
+        - "external/assay-kit/src/cli/commands/evaluate.ts"
+  - id: "q-refactor"
+    reference:
+      paths:
+        - "external/assay-kit/src/runner/types.ts"
+        - "external/assay-kit/src/runner/index.ts"
   - id: "q-testfail"
     reference:
       paths:
@@ -56,3 +187,28 @@ expected:
       paths:
         - "external/assay-kit/src/tuning/orchestrator.ts"
         - "external/assay-kit/src/runtime/worker-pool.ts"
+  - id: "q-metrics"
+    reference:
+      paths:
+        - "external/assay-kit/src/metrics/index.ts"
+        - "external/assay-kit/src/types/metrics.ts"
+  - id: "q-adapter"
+    reference:
+      paths:
+        - "external/assay-kit/src/types/adapters.ts"
+        - "external/assay-kit/src/adapters/mock.ts"
+  - id: "q-reporter"
+    reference:
+      paths:
+        - "external/assay-kit/src/reporting/markdown.ts"
+        - "external/assay-kit/src/types/adapters.ts"
+  - id: "q-dataset"
+    reference:
+      paths:
+        - "external/assay-kit/src/dataset/loader.ts"
+        - "external/assay-kit/src/cli/commands/validate.ts"
+  - id: "q-integration"
+    reference:
+      paths:
+        - "external/assay-kit/examples/kiri-integration/src/kiri-adapter.ts"
+        - "external/assay-kit/examples/kiri-integration/src/run-evaluation.ts"
