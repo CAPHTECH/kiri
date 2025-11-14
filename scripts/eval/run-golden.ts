@@ -77,6 +77,7 @@ interface GoldenQuery {
   tool?: string;
   intent: string;
   category: string;
+  repo?: string;
   expected: {
     paths: string[];
     patterns?: string[];
@@ -90,6 +91,15 @@ interface GoldenQuery {
   notes?: string;
 }
 
+interface RepoDefinition {
+  repoPath: string;
+  dbPath: string;
+}
+
+interface RepoRuntimeConfig extends RepoDefinition {
+  id: string;
+}
+
 interface GoldenSet {
   schemaVersion: string;
   datasetVersion: string;
@@ -100,6 +110,8 @@ interface GoldenSet {
     boostProfile: string;
     timeoutMs: number;
   };
+  defaultRepo?: string;
+  repos?: Record<string, RepoDefinition>;
   queries: GoldenQuery[];
 }
 
@@ -157,6 +169,8 @@ interface BenchmarkOptions {
   verbose: boolean;
   warmupRuns: number;
   maxRetries: number;
+  repoOverride: boolean;
+  dbOverride: boolean;
 }
 
 // ============================================================================
@@ -173,6 +187,8 @@ function parseArgs(): BenchmarkOptions {
     verbose: false,
     warmupRuns: 2,
     maxRetries: 2,
+    repoOverride: false,
+    dbOverride: false,
   };
 
   for (let i = 0; i < args.length; i++) {
@@ -183,9 +199,11 @@ function parseArgs(): BenchmarkOptions {
         break;
       case "--db":
         options.dbPath = args[++i] ?? options.dbPath;
+        options.dbOverride = true;
         break;
       case "--repo":
         options.repoPath = args[++i] ?? options.repoPath;
+        options.repoOverride = true;
         break;
       case "--out":
         options.outputPath = args[++i] ?? options.outputPath;
@@ -230,6 +248,10 @@ class McpServerManager {
   private serverLogs = "";
 
   async start(dbPath: string, repoPath: string, verbose: boolean): Promise<void> {
+    if (this.serverProc) {
+      await this.stop();
+    }
+    this.serverLogs = "";
     if (verbose) {
       console.log(`  → Starting MCP server on port ${this.port}...`);
     }
@@ -333,11 +355,16 @@ class McpServerManager {
     if (this.serverProc) {
       this.serverProc.kill("SIGTERM");
       await new Promise((resolve) => setTimeout(resolve, 1000));
+      this.serverProc = null;
     }
   }
 
   getPort(): number {
     return this.port;
+  }
+
+  isRunning(): boolean {
+    return this.serverProc !== null;
   }
 }
 
@@ -373,6 +400,51 @@ function loadGoldenSet(): GoldenSet {
   }
 
   return goldenSet;
+}
+
+function resolveRepoTargets(
+  goldenSet: GoldenSet,
+  options: BenchmarkOptions
+): { repoMap: Map<string, RepoRuntimeConfig>; defaultRepoId: string } {
+  const repoMap = new Map<string, RepoRuntimeConfig>();
+
+  if (goldenSet.repos) {
+    for (const [id, config] of Object.entries(goldenSet.repos)) {
+      if (!config?.repoPath || !config?.dbPath) {
+        throw new Error(`Repository '${id}' must define repoPath and dbPath`);
+      }
+      repoMap.set(id, { id, repoPath: config.repoPath, dbPath: config.dbPath });
+    }
+  }
+
+  let defaultRepoId = goldenSet.defaultRepo ?? "default";
+
+  // Allow CLI overrides to replace the default repo entry
+  if (options.repoOverride || options.dbOverride) {
+    repoMap.set(defaultRepoId, {
+      id: defaultRepoId,
+      repoPath: options.repoPath,
+      dbPath: options.dbPath,
+    });
+  }
+
+  if (!repoMap.size) {
+    repoMap.set(defaultRepoId, {
+      id: defaultRepoId,
+      repoPath: options.repoPath,
+      dbPath: options.dbPath,
+    });
+  }
+
+  if (!repoMap.has(defaultRepoId)) {
+    repoMap.set(defaultRepoId, {
+      id: defaultRepoId,
+      repoPath: options.repoPath,
+      dbPath: options.dbPath,
+    });
+  }
+
+  return { repoMap, defaultRepoId };
 }
 
 function loadBaseline(): BaselineData {
@@ -418,11 +490,34 @@ async function main(): Promise<void> {
 
   // Start MCP server
   const server = new McpServerManager();
-  try {
-    await server.start(options.dbPath, options.repoPath, options.verbose);
+  const { repoMap, defaultRepoId } = resolveRepoTargets(goldenSet, options);
 
-    // Warmup phase
+  const resolveQueryRepo = (query?: GoldenQuery): string => {
+    const repoId = query?.repo ?? defaultRepoId;
+    if (!repoMap.has(repoId)) {
+      throw new Error(`Query ${query?.id ?? "unknown"} references unknown repo '${repoId}'.`);
+    }
+    return repoId;
+  };
+
+  let activeRepoId: string | null = null;
+  const ensureServerForRepo = async (repoId: string): Promise<void> => {
+    if (activeRepoId === repoId && server.isRunning()) {
+      return;
+    }
+    const config = repoMap.get(repoId);
+    if (!config) {
+      throw new Error(`Repository alias '${repoId}' is not configured.`);
+    }
+    await server.start(config.dbPath, config.repoPath, options.verbose);
+    activeRepoId = repoId;
+  };
+
+  try {
+    // Warmup phase (use first query's repo to prime caches)
     if (options.warmupRuns > 0 && goldenSet.queries.length > 0) {
+      const warmupRepoId = resolveQueryRepo(goldenSet.queries[0]);
+      await ensureServerForRepo(warmupRepoId);
       console.log(`🔥 Warming up with ${options.warmupRuns} runs...`);
       for (let i = 0; i < options.warmupRuns; i++) {
         const warmupQuery = goldenSet.queries[0]!;
@@ -436,6 +531,8 @@ async function main(): Promise<void> {
     const queryResults: QueryResult[] = [];
 
     for (const query of goldenSet.queries) {
+      const repoId = resolveQueryRepo(query);
+      await ensureServerForRepo(repoId);
       const result = await executeQueryWithRetry(server, query, goldenSet.defaultParams, options);
       queryResults.push(result);
 

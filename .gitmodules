@@ -1,0 +1,3 @@
+[submodule "external/assay-kit"]
+	path = external/assay-kit
+	url = git@github.com:CAPHTECH/assay-kit.git

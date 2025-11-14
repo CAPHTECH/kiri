@@ -9,6 +9,16 @@ defaultParams:
   boostProfile: "default"
   timeoutMs: 30000
 
+# リポジトリ定義（複数レポの評価をサポート）
+defaultRepo: "kiri-core"
+repos:
+  kiri-core:
+    repoPath: "."
+    dbPath: "var/index.duckdb"
+  assay-kit:
+    repoPath: "external/assay-kit"
+    dbPath: "external/assay-kit/.kiri/index.duckdb"
+
 # クエリリスト
 queries:
   # Bugfix Category
@@ -85,6 +95,49 @@ queries:
         - "docs/**/*.md"
     tags: ["docs", "search", "ranking"]
     notes: "Use balanced profile to include docs/ directory"
+
+  # Assay Kit integration queries (private submodule)
+  - id: assay-001
+    repo: "assay-kit"
+    query: "tuning orchestrator parallel trials early stopping"
+    tool: "context_bundle"
+    intent: "Understand how Assay Kit schedules concurrent hyperparameter trials"
+    category: "feature"
+    expected:
+      paths:
+        - "external/assay-kit/src/tuning/orchestrator.ts"
+      patterns:
+        - "external/assay-kit/src/tuning/**/*.ts"
+    tags: ["assay-kit", "tuning", "concurrency"]
+    notes: "Should rank the tuning orchestrator that controls parallel trials and early stopping."
+
+  - id: assay-002
+    repo: "assay-kit"
+    query: "dataset loader manifest hydration pipeline"
+    tool: "context_bundle"
+    intent: "Locate the dataset loader responsible for manifest hydration"
+    category: "feature"
+    expected:
+      paths:
+        - "external/assay-kit/src/dataset/loader.ts"
+      patterns:
+        - "external/assay-kit/src/dataset/**/*.ts"
+    tags: ["assay-kit", "dataset", "loader"]
+    notes: "Validates that manifest-based dataset resolution surfaces loader.ts first."
+
+  - id: assay-003
+    repo: "assay-kit"
+    query: "assay cli evaluate command wiring"
+    tool: "context_bundle"
+    intent: "Trace how the CLI hooks into evaluation commands"
+    category: "infra"
+    expected:
+      paths:
+        - "external/assay-kit/src/cli/commands/evaluate.ts"
+      patterns:
+        - "external/assay-kit/src/cli/**/*.ts"
+    tags: ["assay-kit", "cli", "commands"]
+    notes: "Ensures CLI command surface returns the evaluate handler rather than shared utils."
 
   # === Expanded Query Set (13 additional queries) ===
   # 追加方針:

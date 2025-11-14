@@ -125,3 +125,19 @@ scripts/eval/
 3. `tests/eval/results/README.md` のサマリーテーブルを更新
 
 詳細は [tests/eval/results/README.md](../tests/eval/results/README.md) を参照。
+
+### 複数リポジトリの評価
+
+- `tests/eval/goldens/queries.yaml` に `defaultRepo` と `repos` を定義すると、1回のベンチマーク内で複数のコードベースを切り替えて検査できます。
+- `repos.<alias>.repoPath` は作業コピーのルート、`dbPath` は対応する DuckDB ファイルを指定します。
+- private リポジトリを扱う場合は Git submodule などで `external/<name>` 配下に配置し、`kiri index --repo external/<name> --db external/<name>/.kiri/index.duckdb` のように事前インデックスを作成します。
+- 各クエリは `repo: <alias>` を指定するだけで該当レポジトリを対象に検索できます（省略時は `defaultRepo` を使用）。
+- `pnpm run eval:golden` はクエリの `repo` を検知してMCPサーバーを自動的に再起動するため、手動で `--repo` を付け替える必要はありません。
+
+### Assay Kit 連携（Phase 2 機能）
+
+- `pnpm run assay:evaluate` で `external/assay-kit/examples/kiri-integration/datasets/kiri-golden.yaml` を対象に Assay Runner を実行し、`var/assay/eval-YYYY-MM-DD.(json|md)` に結果を保存します。`KiriSearchAdapter` が内部で `kiri-server` を HTTP モードで起動し、warmup/リトライ/並列実行を Assay に委譲します。
+- `pnpm run assay:compare` で `ComparisonRunner`（Phase 2.1）による A/B 比較を実行し、`default` と `balanced` バリアントを統計的に比較します。`--variant-a`/`--variant-b` や `--stats mann-whitney-u`、`--correction holm`（0.1.1 で修正された Holm-Bonferroni 補正を活用）などのフラグは `--` 以降に指定可能です。
+- どちらのコマンドも `.kiri/index.duckdb` を利用するため、事前に `pnpm exec kiri index --repo . --db .kiri/index.duckdb` などで最新のインデックスを作成してください。
+- `scripts/assay/plugins` にはカスタムメトリクス（Phase 2.2）の登録例があり、`assay:evaluate` 実行時に PluginRegistry を通じて読み込まれます。今後はここに自社固有のレポーターやベースラインプロバイダを追加できます。
+- Assay Kit v0.1.1 で統計補正の互換性が更新されたため、カスタムプラグインの `meta.assay` は `">=0.1.1"` を指定し、CLI から Holm/Bonferroni 補正を選べるようにしました。

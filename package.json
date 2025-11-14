@@ -65,6 +65,9 @@
     "verify:eval": "tsx scripts/test/verify-all.ts --category eval",
     "eval:golden": "tsx scripts/eval/run-golden.ts",
     "eval:golden:verbose": "tsx scripts/eval/run-golden.ts --verbose",
+    "assay:evaluate": "tsx scripts/assay/run-evaluation.ts",
+    "assay:compare": "tsx scripts/assay/run-comparison.ts",
+    "assay:compare:help": "tsx scripts/assay/run-comparison.ts --help",
     "check": "pnpm run lint && pnpm run test",
     "prepublishOnly": "pnpm run build"
   },

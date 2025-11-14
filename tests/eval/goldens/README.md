@@ -44,6 +44,16 @@ defaultParams:
   boostProfile: "default" # ファイルタイプブースト
   timeoutMs: 30000 # タイムアウト
 
+# リポジトリマッピング（必要に応じて）
+defaultRepo: "kiri-core"
+repos:
+  kiri-core:
+    repoPath: "."
+    dbPath: "var/index.duckdb"
+  assay-kit:
+    repoPath: "external/assay-kit"
+    dbPath: "external/assay-kit/.kiri/index.duckdb"
+
 # クエリリスト
 queries:
   - id: bugfix-001
@@ -85,20 +95,36 @@ queries:
 | `boostProfile` | string | "default"        | Boost profile ("default", "docs", "balanced", "none") |
 | `timeoutMs`    | number | 30000            | Query timeout in milliseconds                         |
 
+#### defaultRepo / repos
+
+複数のコードベースを同じ評価セットで扱うためのエントリポイントです。`defaultRepo` は `queries.repo` を省略した場合に使用され、`repos.<alias>` にリポジトリごとの `repoPath`（作業コピーのルート）と `dbPath`（DuckDB ファイル）を指定します。private リポジトリを参照する場合は、サブモジュールやローカルクローンを `repoPath` に向け、事前に `kiri index --repo <path> --db <db>` でインデックスを作成してください。
+
+```yaml
+defaultRepo: "kiri-core"
+repos:
+  kiri-core:
+    repoPath: "."
+    dbPath: "var/index.duckdb"
+  assay-kit:
+    repoPath: "external/assay-kit"
+    dbPath: "external/assay-kit/.kiri/index.duckdb"
+```
+
 #### queries[i]
 
-| Field               | Type     | Required | Description                                   |
-| ------------------- | -------- | -------- | --------------------------------------------- |
-| `id`                | string   | ✅       | Unique ID (format: `{category}-{nnn}`)        |
-| `query`             | string   | ✅       | Search query (5-100 chars recommended)        |
-| `tool`              | string   | ❌       | Override default tool                         |
-| `intent`            | string   | ✅       | 開発意図（自由記述）                          |
-| `category`          | string   | ✅       | カテゴリ (bugfix/feature/refactor/infra/docs) |
-| `expected.paths`    | string[] | ✅       | 期待される完全一致パス（rank 1-3）            |
-| `expected.patterns` | string[] | ❌       | 許容されるglobパターン                        |
-| `params`            | object   | ❌       | クエリ固有のパラメータ                        |
-| `tags`              | string[] | ✅       | タグリスト                                    |
-| `notes`             | string   | ❌       | 備考・補足説明                                |
+| Field               | Type     | Required | Description                                      |
+| ------------------- | -------- | -------- | ------------------------------------------------ |
+| `id`                | string   | ✅       | Unique ID (format: `{category}-{nnn}`)           |
+| `query`             | string   | ✅       | Search query (5-100 chars recommended)           |
+| `tool`              | string   | ❌       | Override default tool                            |
+| `intent`            | string   | ✅       | 開発意図（自由記述）                             |
+| `category`          | string   | ✅       | カテゴリ (bugfix/feature/refactor/infra/docs)    |
+| `repo`              | string   | ❌       | `repos` セクションで定義したリポジトリエイリアス |
+| `expected.paths`    | string[] | ✅       | 期待される完全一致パス（rank 1-3）               |
+| `expected.patterns` | string[] | ❌       | 許容されるglobパターン                           |
+| `params`            | object   | ❌       | クエリ固有のパラメータ                           |
+| `tags`              | string[] | ✅       | タグリスト                                       |
+| `notes`             | string   | ❌       | 備考・補足説明                                   |
 
 ---
 
