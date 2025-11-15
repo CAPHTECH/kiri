@@ -16,5 +16,5 @@
     "types": ["node", "vitest"]
   },
   "include": ["src", "tests", "scripts", "types"],
-  "exclude": ["dist", "var"]
+  "exclude": ["dist", "var", "scripts/assay"]
 }
