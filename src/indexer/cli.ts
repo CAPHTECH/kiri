@@ -190,6 +190,17 @@ const MAX_METADATA_ARRAY_LENGTH = 64;
 const MAX_METADATA_PAIRS_PER_FILE = 256;
 
 /**
+ * Maximum number of object keys processed in a metadata tree node.
+ *
+ * Rationale: Prevents memory exhaustion from maliciously crafted objects with excessive keys.
+ * Normal metadata objects have 5-20 keys. Setting to 256 provides generous headroom.
+ *
+ * Memory impact: Each key entry requires ~50 bytes (key name + value reference).
+ * 256 keys × 50 bytes ≈ 12.8KB per object, which is acceptable.
+ */
+const MAX_METADATA_OBJECT_KEYS = 256;
+
+/**
  * Key name used for root-level scalar values in metadata trees.
  * Internal use only - not exposed in search results.
  */
@@ -652,14 +663,13 @@ function sanitizeMetadataTree(value: unknown, depth = 0): MetadataTree | null {
     const entries = Object.entries(value as Record<string, unknown>);
 
     // Limit number of object keys to prevent memory exhaustion
-    const MAX_OBJECT_KEYS = 256;
-    if (entries.length > MAX_OBJECT_KEYS) {
+    if (entries.length > MAX_METADATA_OBJECT_KEYS) {
       console.warn(
-        `Object has ${entries.length} keys, limiting to ${MAX_OBJECT_KEYS} to prevent memory exhaustion`
+        `Object has ${entries.length} keys, limiting to ${MAX_METADATA_OBJECT_KEYS} to prevent memory exhaustion`
       );
     }
 
-    for (const [key, child] of entries.slice(0, MAX_OBJECT_KEYS)) {
+    for (const [key, child] of entries.slice(0, MAX_METADATA_OBJECT_KEYS)) {
       if (!key) continue;
       const sanitizedChild = sanitizeMetadataTree(child, depth + 1);
       if (sanitizedChild !== null) {
@@ -1300,19 +1310,21 @@ async function reconcileDeletedFiles(
   }
 
   // Delete all records for removed files in a single transaction
+  // Batched DELETE operations to avoid N+1 query problem
   if (deletedPaths.length > 0) {
     await db.transaction(async () => {
-      for (const path of deletedPaths) {
-        await db.run("DELETE FROM symbol WHERE repo_id = ? AND path = ?", [repoId, path]);
-        await db.run("DELETE FROM snippet WHERE repo_id = ? AND path = ?", [repoId, path]);
-        await db.run("DELETE FROM dependency WHERE repo_id = ? AND src_path = ?", [repoId, path]);
-        await db.run("DELETE FROM file_embedding WHERE repo_id = ? AND path = ?", [repoId, path]);
-        await db.run("DELETE FROM document_metadata WHERE repo_id = ? AND path = ?", [repoId, path]);
-        await db.run("DELETE FROM document_metadata_kv WHERE repo_id = ? AND path = ?", [repoId, path]);
-        await db.run("DELETE FROM markdown_link WHERE repo_id = ? AND src_path = ?", [repoId, path]);
-        await db.run("DELETE FROM tree WHERE repo_id = ? AND path = ?", [repoId, path]);
-        await db.run("DELETE FROM file WHERE repo_id = ? AND path = ?", [repoId, path]);
-      }
+      const placeholders = deletedPaths.map(() => "?").join(", ");
+      const params = [repoId, ...deletedPaths];
+
+      await db.run(`DELETE FROM symbol WHERE repo_id = ? AND path IN (${placeholders})`, params);
+      await db.run(`DELETE FROM snippet WHERE repo_id = ? AND path IN (${placeholders})`, params);
+      await db.run(`DELETE FROM dependency WHERE repo_id = ? AND src_path IN (${placeholders})`, params);
+      await db.run(`DELETE FROM file_embedding WHERE repo_id = ? AND path IN (${placeholders})`, params);
+      await db.run(`DELETE FROM document_metadata WHERE repo_id = ? AND path IN (${placeholders})`, params);
+      await db.run(`DELETE FROM document_metadata_kv WHERE repo_id = ? AND path IN (${placeholders})`, params);
+      await db.run(`DELETE FROM markdown_link WHERE repo_id = ? AND src_path IN (${placeholders})`, params);
+      await db.run(`DELETE FROM tree WHERE repo_id = ? AND path IN (${placeholders})`, params);
+      await db.run(`DELETE FROM file WHERE repo_id = ? AND path IN (${placeholders})`, params);
     });
   }
 
@@ -1347,6 +1359,28 @@ async function deleteFileRecords(
     path,
   ]);
   await db.run("DELETE FROM file WHERE repo_id = ? AND path = ?", [repoId, path]);
+}
+
+/**
+ * Remove blob records that are no longer referenced by any file.
+ * This garbage collection should be run after full re-indexing or periodically as maintenance.
+ *
+ * @param db - Database client
+ */
+async function garbageCollectBlobs(db: DuckDBClient): Promise<void> {
+  console.info("Running garbage collection on blob table...");
+  try {
+    await db.run(`
+      DELETE FROM blob
+      WHERE hash NOT IN (SELECT DISTINCT blob_hash FROM file)
+    `);
+    console.info("Blob garbage collection complete.");
+  } catch (error) {
+    console.warn(
+      "Failed to garbage collect blobs:",
+      error instanceof Error ? error.message : String(error)
+    );
+  }
 }
 
 export async function runIndexer(options: IndexerOptions): Promise<void> {
@@ -1679,6 +1713,9 @@ export async function runIndexer(options: IndexerOptions): Promise<void> {
 
       // Phase 2+3: Force rebuild FTS index after full reindex
       await rebuildFTSIfNeeded(dbClient, repoId, true);
+
+      // Garbage collect orphaned blobs after full reindex
+      await garbageCollectBlobs(dbClient);
     } finally {
       // Fix #2: Ensure lock is released even if DB connection fails
       if (db) {
