@@ -11,8 +11,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          submodules: recursive
+
+      - name: Fetch assay-kit submodule
+        run: git submodule update --init external/assay-kit
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
