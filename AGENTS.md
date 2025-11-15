@@ -42,3 +42,9 @@ denylist（`secrets/**`, `*.pem`, `.env*` など）は `.gitignore` と indexer 
 - DuckDB を更新するジョブ（`pnpm exec tsx src/indexer/cli.ts ...` や `pnpm run assay:*`）を実行する際は、必ず上記のサーバープロセスを全て停止した状態で行います。起動中のままインデクサを走らせると `var/index.duckdb.lock` が残り、`Database was already closed` のまま復旧できなくなります。
 - もし手動でロック解除が必要になった場合は、**プロセス停止 → `rm var/index.duckdb.lock` → `pnpm exec tsx src/indexer/cli.ts --full`** の順でのみ実施してください。ロック解除前にプロセスを殺さないとデータ破損につながります。
 - `external/assay-kit` は private submodule です。`pnpm run eval:golden` や `scripts/assay/*` が同リポジトリ内のファイルをそのまま参照するため、評価ログや JSON を外部へ共有しないでください。成果物は `var/assay/` や `tmp/` など gitignore 配下に保存し、パスを開示する場合は `***` でマスクします。アダプター実行前に既存 `kiri` サーバーを必ず停止しないと古いポートに接続され、最新インデックスが eval に反映されません。
+
+## 評価ベースライン運用
+
+- リリース挙動との比較は `pnpm exec tsx scripts/assay/run-evaluation.ts --profile release`／`--profile current` で行います。スクリプトが `KIRI_SUPPRESS_NON_CODE` などのフラグを自動で切り替えるため、MCP サーバーを起動する前に必ず該当コマンド経由で評価してください。同日内の結果は `var/assay/eval-<profile>-YYYY-MM-DD.(json|md)` に自動保存されます。
+- `npx kiri-mcp-server@0.10.0` を使ったベースデータ収集は `scripts/assay/collect-base-data.ts` から行い、成果物を `var/assay/base/` に置きます。外部配布禁止のため、ファイルパスを共有する際は `***` でマスクし、リポジトリ外へ raw JSON/ログを持ち出さないでください。
+- `pnpm run eval:golden -- --verbose` は VS Code DB（`external/vscode/.kiri/index.duckdb`）を使用します。開始前に `ps aux | grep 'src/server/main.ts'` で既存サーバーを落とし、完了後に再度確認してください。評価ログ（`var/eval/latest.(json|md)`）は ignore 対象なので誤コミットに注意します。
