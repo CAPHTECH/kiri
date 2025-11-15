@@ -261,10 +261,19 @@ export async function ensureNormalizedRootColumn(db: DuckDBClient): Promise<void
       for (const dup of duplicates) {
         const ids = dup.ids
           .split(",")
-          .map(Number)
+          .map((value) => Number.parseInt(value, 10))
+          .filter((id) => Number.isFinite(id))
           .sort((a, b) => a - b);
-        const keepId = ids[0];
+
+        if (ids.length === 0) {
+          continue;
+        }
+
+        const keepId = ids[0]!;
         const deleteIds = ids.slice(1);
+        if (deleteIds.length === 0) {
+          continue;
+        }
 
         await mergeRepoRecords(db, keepId, deleteIds);
       }

@@ -1,4 +1,33 @@
-import type { MetricPlugin } from "../../external/assay-kit/src/plugins/types.ts";
+interface Logger {
+  info(message: string): void;
+}
+
+interface MetricPluginContext {
+  logger: Logger;
+}
+
+type MetricDirection = "higher" | "lower" | "neutral";
+
+interface MetricPlugin {
+  kind: "metric";
+  meta: {
+    name: string;
+    version: string;
+    assay: string;
+    description: string;
+  };
+  init(context: MetricPluginContext): void | Promise<void>;
+  activate(): Promise<{
+    id: string;
+    calculate(): Promise<Record<string, number>>;
+    metadata: {
+      displayName: string;
+      description: string;
+      direction: MetricDirection;
+    };
+  }>;
+  dispose(): void | Promise<void>;
+}
 
 export const contextCoverageMetric: MetricPlugin = {
   kind: "metric",
@@ -8,7 +37,7 @@ export const contextCoverageMetric: MetricPlugin = {
     assay: ">=0.1.1",
     description: "Measures how well retrieved context covers expected paths",
   },
-  async init(context) {
+  async init(context: MetricPluginContext) {
     context.logger.info("Context coverage metric plugin initialized");
   },
   async activate() {

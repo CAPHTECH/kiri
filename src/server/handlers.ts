@@ -426,7 +426,13 @@ const MAX_MATCHES_PER_KEYWORD = 40;
 const MAX_DEPENDENCY_SEEDS = 8;
 const MAX_DEPENDENCY_SEEDS_QUERY_LIMIT = 100; // SQL injection防御用の上限
 const NEARBY_LIMIT = 6;
-const FALLBACK_SNIPPET_WINDOW = 40; // Reduced from 120 to optimize token usage
+const SUPPRESS_NON_CODE_ENABLED = envFlagEnabled(process.env.KIRI_SUPPRESS_NON_CODE, true);
+const FINAL_RESULT_SUPPRESSION_ENABLED = envFlagEnabled(
+  process.env.KIRI_SUPPRESS_FINAL_RESULTS,
+  true
+);
+const CLAMP_SNIPPETS_ENABLED = envFlagEnabled(process.env.KIRI_CLAMP_SNIPPETS, true);
+const FALLBACK_SNIPPET_WINDOW = Math.max(8, parseEnvNumber(process.env.KIRI_SNIPPET_WINDOW, 16));
 const MAX_RERANK_LIMIT = 50;
 const MAX_ARTIFACT_HINTS = 8;
 const SAFE_PATH_PATTERN = /^[a-zA-Z0-9_.\-/]+$/;
@@ -458,6 +464,22 @@ const HINT_SEM_DIR_CANDIDATE_LIMIT = Math.max(
 const HINT_SEM_THRESHOLD = parseFloat(process.env.KIRI_HINT_SEM_THRESHOLD ?? "0.65");
 const HINT_EXPANSION_ENABLED =
   HINT_DIR_FEATURE_ENABLED || HINT_DEP_FEATURE_ENABLED || HINT_SEM_FEATURE_ENABLED;
+
+const SUPPRESSED_PATH_PREFIXES = [".github/", ".git/", "ThirdPartyNotices", "node_modules/"];
+const SUPPRESSED_FILE_NAMES = ["thirdpartynotices.txt", "thirdpartynotices.md", "cgmanifest.json"];
+
+function isSuppressedPath(path: string): boolean {
+  if (!SUPPRESS_NON_CODE_ENABLED) {
+    return false;
+  }
+  const normalized = path.startsWith("./") ? path.replace(/^\.\/+/u, "") : path;
+  const lower = normalized.toLowerCase();
+  if (SUPPRESSED_FILE_NAMES.some((name) => lower.endsWith(name))) {
+    return true;
+  }
+  const lowerPrefixMatches = SUPPRESSED_PATH_PREFIXES.map((prefix) => prefix.toLowerCase());
+  return lowerPrefixMatches.some((prefix) => lower.includes(prefix));
+}
 const HINT_PER_HINT_LIMIT = HINT_EXPANSION_ENABLED
   ? Math.max(1, parseInt(process.env.KIRI_HINT_PER_HINT_LIMIT ?? "6", 10))
   : 0;
@@ -475,6 +497,17 @@ function envFlagEnabled(value: string | undefined, defaultEnabled: boolean): boo
   }
   const normalized = value.trim().toLowerCase();
   return normalized !== "0" && normalized !== "false" && normalized !== "off";
+}
+
+function parseEnvNumber(value: string | undefined, fallback: number): number {
+  if (value === undefined) {
+    return fallback;
+  }
+  const parsed = Number.parseInt(value, 10);
+  if (Number.isFinite(parsed) && parsed > 0) {
+    return parsed;
+  }
+  return fallback;
 }
 
 // Issue #68: Path/Large File Penalty configuration (環境変数で上書き可能)
@@ -1845,6 +1878,7 @@ function applyAdditiveFilePenalties(
     "test/",
     "tests/",
     ".git/",
+    ".github/",
     "node_modules/",
     "db/migrate/",
     "db/migrations/",
@@ -1869,6 +1903,12 @@ function applyAdditiveFilePenalties(
       candidate.reasons.add("penalty:blacklisted-dir");
       return true;
     }
+  }
+
+  if (isSuppressedPath(path)) {
+    candidate.score = -100;
+    candidate.reasons.add("penalty:suppressed");
+    return true;
   }
 
   // Test files - strong penalty
@@ -1926,6 +1966,42 @@ function applyAdditiveFilePenalties(
     // For other profiles, apply strong additive penalty
     candidate.score -= 1.5;
     candidate.reasons.add("penalty:config-file");
+    return true;
+  }
+
+  // Syntax grammars (tmLanguage/plist) - extremely long strings, low semantic value
+  const isSyntaxGrammar =
+    path.includes("/syntaxes/") &&
+    (lowerPath.endsWith(".tmlanguage") ||
+      lowerPath.endsWith(".tmlanguage.json") ||
+      lowerPath.endsWith(".tmtheme") ||
+      lowerPath.endsWith(".plist"));
+  if (isSyntaxGrammar) {
+    candidate.score -= 2.5;
+    candidate.reasons.add("penalty:syntax-file");
+    return true;
+  }
+
+  // Perf data dumps (perf.data/perf-data fixtures)
+  if (
+    lowerPath.includes(".perf.data") ||
+    lowerPath.includes(".perf-data") ||
+    lowerPath.includes("-perf-data")
+  ) {
+    candidate.score -= 2.0;
+    candidate.reasons.add("penalty:perf-data");
+    return true;
+  }
+
+  // Legal / inventory files (e.g., ThirdPartyNotices, cgmanifest) - deprioritize
+  if (fileName.toLowerCase().includes("thirdpartynotices")) {
+    candidate.score -= 3.0;
+    candidate.reasons.add("penalty:legal-notice");
+    return true;
+  }
+  if (fileName.toLowerCase() === "cgmanifest.json") {
+    candidate.score -= 2.5;
+    candidate.reasons.add("penalty:manifest");
     return true;
   }
 
@@ -2837,6 +2913,9 @@ export async function contextBundle(
 
   const materializedCandidates: CandidateInfo[] = [];
   for (const candidate of candidates.values()) {
+    if (isSuppressedPath(candidate.path)) {
+      continue;
+    }
     if (!candidate.content) {
       const cached = fileCache.get(candidate.path);
       if (cached) {
@@ -2974,6 +3053,24 @@ export async function contextBundle(
       );
     }
 
+    if (CLAMP_SNIPPETS_ENABLED) {
+      // Clamp snippet length to FALLBACK_SNIPPET_WINDOW even when symbol spans large regions
+      const maxWindow = FALLBACK_SNIPPET_WINDOW;
+      const selectedEnd = selected ? selected.end_line : endLine;
+      const selectedStart = selected ? selected.start_line : startLine;
+      if (endLine - startLine + 1 > maxWindow) {
+        const anchor = candidate.matchLine ?? startLine;
+        let clampedStart = Math.max(selectedStart, anchor - Math.floor(maxWindow / 2));
+        let clampedEnd = clampedStart + maxWindow - 1;
+        if (clampedEnd > selectedEnd) {
+          clampedEnd = selectedEnd;
+          clampedStart = Math.max(selectedStart, clampedEnd - maxWindow + 1);
+        }
+        startLine = clampedStart;
+        endLine = Math.max(clampedStart, clampedEnd);
+      }
+    }
+
     if (endLine < startLine) {
       endLine = startLine;
     }
@@ -3022,8 +3119,14 @@ export async function contextBundle(
   // Get warnings from WarningManager (includes breaking change notification if applicable)
   const warnings = [...context.warningManager.responseWarnings];
 
+  const shouldFilterResults = FINAL_RESULT_SUPPRESSION_ENABLED && SUPPRESS_NON_CODE_ENABLED;
+  const sanitizedResults = shouldFilterResults
+    ? results.filter((item) => !isSuppressedPath(item.path))
+    : results;
+  const finalResults = sanitizedResults.length > 0 ? sanitizedResults : results;
+
   const payload: ContextBundleResult = {
-    context: results,
+    context: finalResults,
     ...(warnings.length > 0 && { warnings }),
   };
   if (tokensEstimate !== undefined) {

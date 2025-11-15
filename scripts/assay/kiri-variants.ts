@@ -60,11 +60,16 @@ export function createKiriAdapter(
   kiriServerPath?: string
 ): KiriSearchAdapter {
   const config = getVariantConfig(variantName);
-  const adapterConfig: KiriAdapterConfig = {
-    limit: config.limit,
-    compact: config.compact,
-    boostProfile: config.boostProfile,
-  };
+  const adapterConfig: KiriAdapterConfig = {};
+  if (config.limit !== undefined) {
+    adapterConfig.limit = config.limit;
+  }
+  if (config.compact !== undefined) {
+    adapterConfig.compact = config.compact;
+  }
+  if (config.boostProfile !== undefined) {
+    adapterConfig.boostProfile = config.boostProfile;
+  }
 
   return new KiriSearchAdapter(
     databasePath,

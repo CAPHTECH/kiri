@@ -20,7 +20,11 @@ function shouldFallbackWithoutRecurse(error: unknown): boolean {
     return false;
   }
   const err = error as NodeJS.ErrnoException & { stderr?: string };
-  if (err.code === 129) {
+  if (typeof err.code === "number" && err.code === 129) {
+    // git returns exit code 129 for unknown options
+    return true;
+  }
+  if (typeof err.code === "string" && Number.parseInt(err.code, 10) === 129) {
     // git returns exit code 129 for unknown options
     return true;
   }

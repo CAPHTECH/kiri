@@ -3,6 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import type { MockInstance } from "vitest";
 
 import {
   defineCli,
@@ -111,13 +112,17 @@ describe("CLI Utilities", () => {
   });
 
   describe("defineCli", () => {
-    let processExitSpy: ReturnType<typeof vi.spyOn>;
+    let processExitSpy: MockInstance<(code?: number | string | null | undefined) => never>;
     let consoleLogSpy: ReturnType<typeof vi.spyOn>;
     let originalArgv: string[];
 
     beforeEach(() => {
       originalArgv = process.argv;
-      processExitSpy = vi.spyOn(process, "exit").mockImplementation((() => {}) as never);
+      processExitSpy = vi.spyOn(process, "exit").mockImplementation(((
+        code?: number | string | null | undefined
+      ) => {
+        throw new Error(`process.exit called with code ${code ?? "unknown"}`);
+      }) as (code?: number | string | null | undefined) => never);
       consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     });
 

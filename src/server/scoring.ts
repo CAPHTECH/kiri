@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -29,7 +29,15 @@ export interface ScoringWeights {
   implBoostMultiplier: number;
 }
 
-export type ScoringProfileName = "default" | "bugfix" | "testfail" | "typeerror" | "feature";
+export type ScoringProfileName =
+  | "default"
+  | "bugfix"
+  | "testfail"
+  | "typeerror"
+  | "feature"
+  | "debug"
+  | "api"
+  | "editor";
 
 // プロファイルキャッシュ（起動時に一度だけロード）
 let profilesCache: Record<ScoringProfileName, ScoringWeights> | null = null;
@@ -68,6 +76,27 @@ function validateWeights(weights: unknown, profileName: string): ScoringWeights 
   return weights as ScoringWeights;
 }
 
+function resolveScoringConfigPath(currentDir: string): string {
+  const envPath = process.env.KIRI_SCORING_CONFIG;
+  const candidates = [
+    envPath,
+    join(process.cwd(), "config/scoring-profiles.yml"),
+    join(currentDir, "../../../config/scoring-profiles.yml"),
+    join(currentDir, "../../../../config/scoring-profiles.yml"),
+  ].filter((candidate): candidate is string => Boolean(candidate));
+
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  throw new Error(
+    `Scoring profiles config not found. Checked paths: ${candidates.join(", ")}. ` +
+      "Set KIRI_SCORING_CONFIG or place config/scoring-profiles.yml in the repo root."
+  );
+}
+
 function loadProfilesFromConfig(): Record<ScoringProfileName, ScoringWeights> {
   if (profilesCache) {
     return profilesCache;
@@ -77,8 +106,7 @@ function loadProfilesFromConfig(): Record<ScoringProfileName, ScoringWeights> {
     // 環境変数でカスタムパスを指定可能
     // 開発環境（src/）と本番環境（dist/src/）の両方で動作するようにdirname(__filename)から相対パス解決
     const __dirname = dirname(fileURLToPath(import.meta.url));
-    const configPath =
-      process.env.KIRI_SCORING_CONFIG ?? join(__dirname, "../../../config/scoring-profiles.yml");
+    const configPath = resolveScoringConfigPath(__dirname);
 
     const configContent = readFileSync(configPath, "utf-8");
     const parsed = parseSimpleYaml(configContent) as unknown as Record<string, ScoringWeights>;
@@ -90,6 +118,9 @@ function loadProfilesFromConfig(): Record<ScoringProfileName, ScoringWeights> {
       "testfail",
       "typeerror",
       "feature",
+      "debug",
+      "api",
+      "editor",
     ];
     const validated: Partial<Record<ScoringProfileName, ScoringWeights>> = {};
     for (const profile of requiredProfiles) {
@@ -115,6 +146,39 @@ function loadProfilesFromConfig(): Record<ScoringProfileName, ScoringWeights> {
         docPenaltyMultiplier: 0.5,
         configPenaltyMultiplier: 0.05,
         implBoostMultiplier: 1.3,
+      },
+      debug: {
+        textMatch: 1.0,
+        pathMatch: 1.3,
+        editingPath: 1.7,
+        dependency: 1.2,
+        proximity: 0.35,
+        structural: 0.9,
+        docPenaltyMultiplier: 0.5,
+        configPenaltyMultiplier: 0.05,
+        implBoostMultiplier: 1.45,
+      },
+      api: {
+        textMatch: 1.0,
+        pathMatch: 1.5,
+        editingPath: 1.8,
+        dependency: 1.0,
+        proximity: 0.3,
+        structural: 0.95,
+        docPenaltyMultiplier: 0.55,
+        configPenaltyMultiplier: 0.05,
+        implBoostMultiplier: 1.4,
+      },
+      editor: {
+        textMatch: 1.0,
+        pathMatch: 1.4,
+        editingPath: 1.9,
+        dependency: 1.0,
+        proximity: 0.4,
+        structural: 0.9,
+        docPenaltyMultiplier: 0.6,
+        configPenaltyMultiplier: 0.05,
+        implBoostMultiplier: 1.4,
       },
       bugfix: {
         textMatch: 1.0,
@@ -176,30 +240,6 @@ export function coerceProfileName(name?: string | null): ScoringProfileName | nu
 
 export function loadScoringProfile(profileName?: ScoringProfileName | null): ScoringWeights {
   const profiles = loadProfilesFromConfig();
-
-  // ⚠️ DEPRECATION WARNING (v0.9.10+): config/scoring-profiles.yml is ignored
-  // Emit warning if user has custom config that differs from defaults
-  if (profiles.default) {
-    const hasCustomConfig =
-      profiles.default.docPenaltyMultiplier !== 0.5 ||
-      profiles.default.configPenaltyMultiplier !== 0.05 ||
-      profiles.default.implBoostMultiplier !== 1.3;
-
-    if (hasCustomConfig) {
-      console.warn(
-        "[DEPRECATION WARNING] config/scoring-profiles.yml is no longer used in v0.9.10+.\n" +
-          `Your custom values: { docPenaltyMultiplier: ${profiles.default.docPenaltyMultiplier}, ` +
-          `configPenaltyMultiplier: ${profiles.default.configPenaltyMultiplier}, ` +
-          `implBoostMultiplier: ${profiles.default.implBoostMultiplier} }\n` +
-          "Boost profiles now use fixed multipliers from src/server/boost-profiles.ts.\n" +
-          "Please select a built-in profile via 'boost_profile' parameter:\n" +
-          "  - 'default': prioritizes implementation (impl: 1.3x, docs: 0.5x)\n" +
-          "  - 'balanced': equal weight (impl: 1.0x, docs: 1.0x) - NEW in v0.9.10\n" +
-          "  - 'docs': prioritizes documentation (docs: 1.5x, impl: 0.5x)\n" +
-          "See docs/search-ranking.md for details."
-      );
-    }
-  }
 
   if (profileName && profileName in profiles) {
     return profiles[profileName];

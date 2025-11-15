@@ -13,12 +13,19 @@
  */
 
 import { spawn, type ChildProcess, execSync } from "node:child_process";
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { once } from "node:events";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
 import { parse as parseYAML } from "yaml";
 
 import { evaluateRetrieval, type RetrievalEvent } from "../../src/eval/metrics.js";
+import { encode as encodeGPT } from "../../src/shared/tokenizer.js";
+
+const TOKEN_SAVINGS_TARGET = 0.4;
+const FORCE_COMPACT_MODE =
+  process.env.KIRI_FORCE_COMPACT?.toLowerCase() !== "false" &&
+  process.env.KIRI_FORCE_COMPACT !== "0";
 
 // ============================================================================
 // Glob Pattern Matching
@@ -59,6 +66,75 @@ function matchesGlob(path: string, pattern: string): boolean {
 }
 
 // ============================================================================
+// Token & Hint Helpers
+// ============================================================================
+
+function isContextBundleResponse(payload: unknown): payload is ContextBundleResponsePayload {
+  if (!payload || typeof payload !== "object") {
+    return false;
+  }
+  const maybeContext = (payload as { context?: unknown }).context;
+  return Array.isArray(maybeContext);
+}
+
+function estimateTokensFromText(content: string): number {
+  try {
+    return encodeGPT(content).length;
+  } catch (error) {
+    console.warn("Token encoding failed in eval script, using fallback", error);
+    return Math.max(1, Math.ceil(content.length / 4));
+  }
+}
+
+function computeNaiveTokenBaseline(paths: string[], repoRoot: string): number | null {
+  if (paths.length === 0) {
+    return null;
+  }
+  let total = 0;
+  const seen = new Set<string>();
+  for (const relativePath of paths) {
+    if (!relativePath || seen.has(relativePath)) {
+      continue;
+    }
+    seen.add(relativePath);
+    const absPath = join(repoRoot, relativePath);
+    if (!existsSync(absPath)) {
+      console.warn(`⚠️  Baseline token calc skipped. Missing path: ${absPath}`);
+      return null;
+    }
+    try {
+      const content = readFileSync(absPath, "utf8");
+      total += estimateTokensFromText(content);
+    } catch (error) {
+      console.warn(`⚠️  Failed to read ${absPath} for token baseline`, error);
+      return null;
+    }
+  }
+  return total;
+}
+
+function computeHintCoverage(items: ContextBundleItemResponse[]): number | null {
+  if (!items.length) {
+    return null;
+  }
+  const hintHits = items.filter((item) =>
+    Array.isArray(item.why) ? item.why.some((tag) => tag.startsWith("artifact:hint")) : false
+  ).length;
+  return items.length === 0 ? null : hintHits / items.length;
+}
+
+function computeAverage(values: Array<number | null | undefined>): number | null {
+  const valid = values.filter(
+    (value): value is number => typeof value === "number" && isFinite(value)
+  );
+  if (valid.length === 0) {
+    return null;
+  }
+  const total = valid.reduce((sum, value) => sum + value, 0);
+  return total / valid.length;
+}
+
+// ============================================================================
 // CI Guard
 // ============================================================================
 
@@ -87,6 +163,7 @@ interface GoldenQuery {
     boostProfile?: string;
     k?: number;
     timeoutMs?: number;
+    scoringProfile?: string;
   };
   tags: string[];
   notes?: string;
@@ -128,6 +205,10 @@ interface QueryResult {
   retriedCount: number;
   error?: string;
   durationMs: number;
+  tokensEstimate: number | null;
+  tokensBaseline: number | null;
+  tokenSavingsRatio: number | null;
+  hintCoverage: number | null;
 }
 
 interface BenchmarkResult {
@@ -142,8 +223,21 @@ interface BenchmarkResult {
     totalQueries: number;
     successfulQueries: number;
     failedQueries: number;
+    avgTokensEstimate: number | null;
+    avgBaselineTokens: number | null;
+    avgTokenSavingsRatio: number | null;
+    avgHintCoverage: number | null;
   };
-  byCategory: Record<string, { precisionAtK: number; avgTTFU: number; count: number }>;
+  byCategory: Record<
+    string,
+    {
+      precisionAtK: number;
+      avgTTFU: number;
+      count: number;
+      avgTokenSavingsRatio: number | null;
+      avgHintCoverage: number | null;
+    }
+  >;
   queries: QueryResult[];
 }
 
@@ -172,6 +266,19 @@ interface BenchmarkOptions {
   maxRetries: number;
   repoOverride: boolean;
   dbOverride: boolean;
+}
+
+interface ContextBundleItemResponse {
+  path: string;
+  range?: [number, number];
+  why?: string[];
+  preview?: string;
+  score?: number;
+}
+
+interface ContextBundleResponsePayload {
+  context: ContextBundleItemResponse[];
+  tokens_estimate?: number;
 }
 
 // ============================================================================
@@ -249,6 +356,8 @@ class McpServerManager {
   private assignedPort = this.basePort;
   private serverLogs = "";
 
+  private scoringConfigPath = join(process.cwd(), "config", "scoring-profiles.yml");
+
   async start(dbPath: string, repoPath: string, verbose: boolean): Promise<void> {
     if (this.serverProc) {
       await this.stop();
@@ -256,11 +365,28 @@ class McpServerManager {
     this.serverLogs = "";
     if (verbose) {
       console.log(
-        `  → Starting MCP server on port ${this.port} (db=${dbPath}, repo=${repoPath})...`
+        `  → Starting MCP server on port ${this.assignedPort} (db=${dbPath}, repo=${repoPath})...`
       );
     }
 
     this.assignedPort = await findAvailablePort(this.basePort);
+    const lockPath = `${dbPath}.lock`;
+    if (existsSync(lockPath)) {
+      const message = `⚠️  Removing stale DuckDB lock file: ${lockPath}`;
+      if (verbose) {
+        console.warn(message);
+      }
+      try {
+        rmSync(lockPath);
+      } catch (error) {
+        console.warn(`❌ Failed to remove ${lockPath}:`, error);
+      }
+    }
+    const env: NodeJS.ProcessEnv = { ...process.env };
+    if (existsSync(this.scoringConfigPath) && !env.KIRI_SCORING_CONFIG) {
+      env.KIRI_SCORING_CONFIG = this.scoringConfigPath;
+    }
+
     this.serverProc = spawn(
       "tsx",
       [
@@ -275,7 +401,7 @@ class McpServerManager {
       {
         stdio: ["ignore", "pipe", "pipe"],
         cwd: process.cwd(),
-        env: process.env, // Inherit environment variables (KIRI_* flags)
+        env,
       }
     );
 
@@ -365,10 +491,20 @@ class McpServerManager {
   }
 
   async stop(): Promise<void> {
-    if (this.serverProc) {
-      this.serverProc.kill("SIGTERM");
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-      this.serverProc = null;
+    if (!this.serverProc) {
+      return;
+    }
+
+    const proc = this.serverProc;
+    this.serverProc = null;
+    proc.kill("SIGTERM");
+
+    try {
+      await Promise.race([once(proc, "exit"), new Promise((resolve) => setTimeout(resolve, 3000))]);
+    } catch (error) {
+      console.warn("⚠️  Failed to confirm MCP server shutdown:", error);
+    } finally {
+      proc.removeAllListeners();
       this.assignedPort = this.basePort;
     }
   }
@@ -558,10 +694,21 @@ async function main(): Promise<void> {
     if (options.warmupRuns > 0 && goldenSet.queries.length > 0) {
       const warmupRepoId = resolveQueryRepo(goldenSet.queries[0]);
       await ensureServerForRepo(warmupRepoId);
+      const warmupRepoPath = repoMap.get(warmupRepoId)?.repoPath;
+      if (!warmupRepoPath) {
+        throw new Error(`Repository path not found for warmup repo '${warmupRepoId}'.`);
+      }
       console.log(`🔥 Warming up with ${options.warmupRuns} runs...`);
       for (let i = 0; i < options.warmupRuns; i++) {
         const warmupQuery = goldenSet.queries[0]!;
-        await executeQuery(server, warmupQuery, goldenSet.defaultParams, options, true);
+        await executeQuery(
+          server,
+          warmupQuery,
+          goldenSet.defaultParams,
+          options,
+          warmupRepoPath,
+          true
+        );
       }
       console.log("  ✓ Warmup complete\n");
     }
@@ -573,10 +720,20 @@ async function main(): Promise<void> {
     for (const query of goldenSet.queries) {
       const repoId = resolveQueryRepo(query);
       await ensureServerForRepo(repoId);
+      const repoPath = repoMap.get(repoId)?.repoPath;
+      if (!repoPath) {
+        throw new Error(`Repository path missing for repo '${repoId}'.`);
+      }
       console.log(
         `  → Executing ${query.id} on repo '${repoId}' (db=${repoMap.get(repoId)?.dbPath})`
       );
-      const result = await executeQueryWithRetry(server, query, goldenSet.defaultParams, options);
+      const result = await executeQueryWithRetry(
+        server,
+        query,
+        goldenSet.defaultParams,
+        options,
+        repoPath
+      );
       if (options.verbose) {
         console.log(`    ↪ Retrieved paths: ${result.retrieved.slice(0, 5).join(", ")}`);
       }
@@ -619,7 +776,16 @@ async function main(): Promise<void> {
 
     // By-category metrics (include failures as P@K=0)
     const categories = [...new Set(goldenSet.queries.map((q) => q.category))];
-    const byCategory: Record<string, { precisionAtK: number; avgTTFU: number; count: number }> = {};
+    const byCategory: Record<
+      string,
+      {
+        precisionAtK: number;
+        avgTTFU: number;
+        count: number;
+        avgTokenSavingsRatio: number | null;
+        avgHintCoverage: number | null;
+      }
+    > = {};
 
     for (const category of categories) {
       const catResults = queryResults.filter((r) => r.category === category);
@@ -631,6 +797,9 @@ async function main(): Promise<void> {
           (r) => r.timeToFirstUseful !== null && isFinite(r.timeToFirstUseful)
         );
 
+        const catTokenSavings = computeAverage(catResults.map((r) => r.tokenSavingsRatio));
+        const catHintCoverage = computeAverage(catResults.map((r) => r.hintCoverage));
+
         byCategory[category] = {
           precisionAtK:
             catResults.reduce((sum, r) => sum + (r.precisionAtK ?? 0), 0) / catResults.length,
@@ -641,9 +810,18 @@ async function main(): Promise<void> {
                 1000
               : 0,
           count: catResults.length,
+          avgTokenSavingsRatio: catTokenSavings,
+          avgHintCoverage: catHintCoverage,
         };
       }
     }
+
+    const avgTokensEstimate = computeAverage(queryResults.map((r) => r.tokensEstimate));
+    const avgBaselineTokens = computeAverage(
+      queryResults.map((r) => (r.tokensBaseline && r.tokensBaseline > 0 ? r.tokensBaseline : null))
+    );
+    const avgTokenSavingsRatio = computeAverage(queryResults.map((r) => r.tokenSavingsRatio));
+    const avgHintCoverage = computeAverage(queryResults.map((r) => r.hintCoverage));
 
     // Get version info
     const packageJson = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8")) as {
@@ -669,6 +847,10 @@ async function main(): Promise<void> {
         totalQueries: queryResults.length,
         successfulQueries: successfulResults.length,
         failedQueries: failedResults.length,
+        avgTokensEstimate,
+        avgBaselineTokens,
+        avgTokenSavingsRatio,
+        avgHintCoverage,
       },
       byCategory,
       queries: queryResults,
@@ -691,6 +873,14 @@ async function main(): Promise<void> {
     console.log(
       `          TFFU = ${Math.round(overallTTFU)}ms ${compareThreshold(overallTTFU, baseline.thresholds.maxTTFU, false)}`
     );
+    if (avgTokenSavingsRatio !== null) {
+      console.log(
+        `          Token Savings = ${(avgTokenSavingsRatio * 100).toFixed(1)}% ${compareThreshold(avgTokenSavingsRatio, TOKEN_SAVINGS_TARGET, true)}`
+      );
+    }
+    if (avgHintCoverage !== null) {
+      console.log(`          Hint Coverage = ${(avgHintCoverage * 100).toFixed(1)}%`);
+    }
     console.log(`Queries:  ${successfulResults.length} successful, ${failedResults.length} failed`);
     console.log("=".repeat(60));
 
@@ -739,11 +929,12 @@ async function executeQueryWithRetry(
   server: McpServerManager,
   query: GoldenQuery,
   defaultParams: GoldenSet["defaultParams"],
-  options: BenchmarkOptions
+  options: BenchmarkOptions,
+  repoRoot: string
 ): Promise<QueryResult> {
   for (let attempt = 0; attempt <= options.maxRetries; attempt++) {
     try {
-      const result = await executeQuery(server, query, defaultParams, options, false);
+      const result = await executeQuery(server, query, defaultParams, options, repoRoot, false);
       return { ...result, retriedCount: attempt };
     } catch (error) {
       if (attempt === options.maxRetries) {
@@ -759,6 +950,10 @@ async function executeQueryWithRetry(
           retriedCount: attempt,
           error: error instanceof Error ? error.message : String(error),
           durationMs: 0,
+          tokensEstimate: null,
+          tokensBaseline: null,
+          tokenSavingsRatio: null,
+          hintCoverage: null,
         };
       }
       // Exponential backoff with jitter
@@ -777,11 +972,14 @@ async function executeQuery(
   query: GoldenQuery,
   defaultParams: GoldenSet["defaultParams"],
   options: BenchmarkOptions,
+  repoRoot: string,
   isWarmup: boolean
 ): Promise<QueryResult> {
   const tool = query.tool || defaultParams.tool;
+  const isContextBundleTool = tool === "context_bundle";
   const k = query.params?.k || options.k;
   const boostProfile = query.params?.boostProfile || defaultParams.boostProfile;
+  const scoringProfile = query.params?.scoringProfile;
   const timeoutMs = query.params?.timeoutMs || defaultParams.timeoutMs;
 
   const params: Record<string, unknown> = {
@@ -794,11 +992,18 @@ async function executeQuery(
     artifacts.hints = query.hints;
   }
 
-  if (tool === "context_bundle") {
+  if (isContextBundleTool) {
     params.goal = query.query;
     if (artifacts.hints) {
       params.artifacts = artifacts;
     }
+    if (scoringProfile) {
+      params.profile = scoringProfile;
+    }
+    if (FORCE_COMPACT_MODE) {
+      params.compact = true;
+    }
+    params.includeTokensEstimate = true;
   } else if (tool === "files_search") {
     params.query = query.query;
   } else {
@@ -808,14 +1013,6 @@ async function executeQuery(
   const startTime = process.hrtime.bigint();
   const rawResult = await server.call(tool, params, timeoutMs);
   const durationMs = Number((process.hrtime.bigint() - startTime) / 1000000n);
-
-  // Type guard for result
-  const result: { context: Array<{ path: string }> } | Array<{ path: string }> =
-    rawResult && typeof rawResult === "object" && "context" in rawResult
-      ? (rawResult as { context: Array<{ path: string }> })
-      : Array.isArray(rawResult)
-        ? (rawResult as Array<{ path: string }>)
-        : { context: [] };
 
   if (isWarmup) {
     return {
@@ -829,12 +1026,42 @@ async function executeQuery(
       timeToFirstUseful: null,
       retriedCount: 0,
       durationMs,
+      tokensEstimate: null,
+      tokensBaseline: null,
+      tokenSavingsRatio: null,
+      hintCoverage: null,
     };
   }
 
-  // Extract paths
-  const items = Array.isArray(result) ? result : result.context;
-  const retrieved = items.map((item) => item.path);
+  const contextPayload =
+    isContextBundleTool && isContextBundleResponse(rawResult)
+      ? (rawResult as ContextBundleResponsePayload)
+      : null;
+  const contextItems = contextPayload?.context ?? [];
+  const tokensEstimate =
+    contextPayload && typeof contextPayload.tokens_estimate === "number"
+      ? contextPayload.tokens_estimate
+      : null;
+  const hintCoverage = contextPayload ? computeHintCoverage(contextItems) : null;
+
+  type MinimalResultItem = { path?: string };
+  const resultItems: MinimalResultItem[] = Array.isArray(rawResult)
+    ? (rawResult as MinimalResultItem[])
+    : contextItems;
+
+  const retrieved = resultItems
+    .map((item) => item.path)
+    .filter((path): path is string => typeof path === "string");
+
+  let tokensBaseline: number | null = null;
+  let tokenSavingsRatio: number | null = null;
+  if (isContextBundleTool && retrieved.length > 0) {
+    tokensBaseline = computeNaiveTokenBaseline(retrieved, repoRoot);
+    if (tokensEstimate !== null && typeof tokensBaseline === "number" && tokensBaseline > 0) {
+      const savings = 1 - tokensEstimate / tokensBaseline;
+      tokenSavingsRatio = Math.max(0, Math.min(1, savings));
+    }
+  }
 
   if (retrieved.length === 0) {
     return {
@@ -848,6 +1075,10 @@ async function executeQuery(
       timeToFirstUseful: null,
       retriedCount: 0,
       durationMs,
+      tokensEstimate,
+      tokensBaseline,
+      tokenSavingsRatio,
+      hintCoverage,
     };
   }
 
@@ -883,10 +1114,20 @@ async function executeQuery(
     timeToFirstUseful: metrics.timeToFirstUseful,
     retriedCount: 0,
     durationMs,
+    tokensEstimate,
+    tokensBaseline,
+    tokenSavingsRatio,
+    hintCoverage,
   };
 }
 
 function generateMarkdown(result: BenchmarkResult, baseline: BaselineData): string {
+  const formatPercent = (value: number | null): string =>
+    value === null ? "N/A" : `${(value * 100).toFixed(1)}%`;
+  const formatNumber = (value: number | null): string =>
+    value === null ? "N/A" : Math.round(value).toString();
+  const tokenTargetPercent = (TOKEN_SAVINGS_TARGET * 100).toFixed(0);
+
   let md = `# KIRI Golden Set Evaluation - ${result.timestamp.split("T")[0]}\n\n`;
   md += `**Version**: ${result.version} (${result.gitSha})\n`;
   md += `**Dataset**: ${result.datasetVersion}\n`;
@@ -897,15 +1138,25 @@ function generateMarkdown(result: BenchmarkResult, baseline: BaselineData): stri
   md += `|--------|-------|-----------|--------|\n`;
   md += `| P@${result.k} | ${result.overall.precisionAtK.toFixed(3)} | ≥${baseline.thresholds.minP10} | ${result.overall.precisionAtK >= baseline.thresholds.minP10 ? "✅" : "❌"} |\n`;
   md += `| Avg TFFU | ${Math.round(result.overall.avgTTFU)}ms | ≤${baseline.thresholds.maxTTFU}ms | ${result.overall.avgTTFU <= baseline.thresholds.maxTTFU ? "✅" : "❌"} |\n`;
+  const tokenStatus =
+    result.overall.avgTokenSavingsRatio === null
+      ? "-"
+      : result.overall.avgTokenSavingsRatio >= TOKEN_SAVINGS_TARGET
+        ? "✅"
+        : "❌";
+  md += `| Avg Token Savings | ${formatPercent(result.overall.avgTokenSavingsRatio)} | ≥${tokenTargetPercent}% | ${tokenStatus} |\n`;
+  md += `| Avg Hint Coverage | ${formatPercent(result.overall.avgHintCoverage)} | - | - |\n`;
+  md += `| Avg Bundle Tokens | ${formatNumber(result.overall.avgTokensEstimate)} | - | - |\n`;
+  md += `| Avg Baseline Tokens | ${formatNumber(result.overall.avgBaselineTokens)} | - | - |\n`;
   md += `| Total Queries | ${result.overall.totalQueries} | - | - |\n`;
   md += `| Successful | ${result.overall.successfulQueries} | - | - |\n`;
   md += `| Failed | ${result.overall.failedQueries} | - | - |\n\n`;
 
   md += `## By Category\n\n`;
-  md += `| Category | P@${result.k} | Avg TFFU | Count |\n`;
-  md += `|----------|------|----------|-------|\n`;
+  md += `| Category | P@${result.k} | Avg TFFU | Avg Token Savings | Avg Hint Coverage | Count |\n`;
+  md += `|----------|------|----------|-----------------|------------------|-------|\n`;
   for (const [category, metrics] of Object.entries(result.byCategory)) {
-    md += `| ${category} | ${metrics.precisionAtK.toFixed(3)} | ${Math.round(metrics.avgTTFU)}ms | ${metrics.count} |\n`;
+    md += `| ${category} | ${metrics.precisionAtK.toFixed(3)} | ${Math.round(metrics.avgTTFU)}ms | ${formatPercent(metrics.avgTokenSavingsRatio ?? null)} | ${formatPercent(metrics.avgHintCoverage ?? null)} | ${metrics.count} |\n`;
   }
   md += `\n`;
 
@@ -928,10 +1179,14 @@ function generateMarkdown(result: BenchmarkResult, baseline: BaselineData): stri
 // Entry Point
 // ============================================================================
 
-main().catch((error) => {
-  console.error(`\n❌ Benchmark failed: ${error.message}`);
-  if (error.stack) {
-    console.error(error.stack);
-  }
-  process.exit(1);
-});
+main()
+  .then(() => {
+    process.exit(0);
+  })
+  .catch((error) => {
+    console.error(`\n❌ Benchmark failed: ${error.message}`);
+    if (error.stack) {
+      console.error(error.stack);
+    }
+    process.exit(1);
+  });

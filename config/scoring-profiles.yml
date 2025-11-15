@@ -58,3 +58,23 @@ editor:
   docPenaltyMultiplier: 0.6
   configPenaltyMultiplier: 0.05
   implBoostMultiplier: 1.4
+testfail:
+  textMatch: 1.0
+  pathMatch: 1.5
+  editingPath: 1.6
+  dependency: 0.85
+  proximity: 0.3
+  structural: 0.8
+  docPenaltyMultiplier: 0.5
+  configPenaltyMultiplier: 0.05
+  implBoostMultiplier: 1.3
+typeerror:
+  textMatch: 1.0
+  pathMatch: 1.5
+  editingPath: 1.4
+  dependency: 0.6
+  proximity: 0.4
+  structural: 0.6
+  docPenaltyMultiplier: 0.5
+  configPenaltyMultiplier: 0.05
+  implBoostMultiplier: 1.3

@@ -28,6 +28,8 @@ queries:
     hints:
       - "registerWorkbenchContribution"
       - "workbench.contribution.ts"
+      - "src/vs/workbench/browser/workbench.contribution.ts"
+      - "src/vs/workbench/browser/workbench.ts"
 
   - id: vscode-tree-data-provider
     query: "TreeDataProvider registerTreeDataProvider"
@@ -43,6 +45,9 @@ queries:
     hints:
       - "registerTreeDataProvider"
       - "extHostTreeViews.ts"
+      - "viewsRegistry"
+      - "src/vs/workbench/api/common/extHostTreeViews.ts"
+      - "src/vs/workbench/browser/parts/views/viewsRegistry.ts"
 
   - id: vscode-debug-adapter
     query: "DebugAdapter tracker session"
@@ -58,6 +63,8 @@ queries:
     hints:
       - "DebugAdapterTrackerFactory"
       - "debugAdapterManager.ts"
+      - "src/vs/workbench/contrib/debug/browser/debugAdapterManager.ts"
+      - "src/vs/workbench/contrib/debug/common/debug.ts"
 
   - id: vscode-terminal-prompt
     query: "terminal shell integration prompt decoration"
@@ -73,6 +80,11 @@ queries:
     hints:
       - "terminalShellIntegration"
       - "registerDecorationTypes"
+      - "terminalInstance"
+      - "terminalShellIntegration.ts"
+      - "terminalInstance.ts"
+      - "src/vs/workbench/contrib/terminal/browser/terminalShellIntegration.ts"
+      - "src/vs/workbench/contrib/terminal/browser/terminalInstance.ts"
 
   - id: vscode-notebook-kernel
     query: "NotebookKernelService resolveKernelSource"
@@ -88,6 +100,10 @@ queries:
     hints:
       - "NotebookKernelService"
       - "resolveKernelSource"
+      - "notebookKernelServiceImpl"
+      - "kernelServiceImpl.ts"
+      - "src/vs/workbench/contrib/notebook/browser/services/notebookKernelServiceImpl.ts"
+      - "src/vs/workbench/contrib/notebook/common/notebookKernelService.ts"
 
   - id: vscode-merge-editor
     query: "merge editor diff algorithm chunk alignment"
@@ -95,14 +111,25 @@ queries:
     intent: "Inspect merge editor diff chunk alignment logic"
     category: "feature"
     repo: "vscode"
+    params:
+      scoringProfile: "editor"
     expected:
       paths:
-        - "src/vs/workbench/contrib/mergeEditor/browser/mergeEditorModel.ts"
-        - "src/vs/workbench/contrib/mergeEditor/browser/mergeEditorViewModel.ts"
+        - "src/vs/workbench/contrib/mergeEditor/browser/model/mergeEditorModel.ts"
+        - "src/vs/workbench/contrib/mergeEditor/browser/view/viewModel.ts"
+      patterns:
+        - "src/vs/workbench/contrib/mergeEditor/**/*.ts"
     tags: ["merge", "diff", "editor"]
     hints:
       - "mergeEditorModel"
       - "chunkAlignment"
+      - "mergeEditorViewModel"
+      - "browser/model/mergeEditorModel.ts"
+      - "browser/view/viewModel.ts"
+      - "lineAlignment.ts"
+      - "mergeEditorView"
+      - "src/vs/workbench/contrib/mergeEditor/browser/model/mergeEditorModel.ts"
+      - "src/vs/workbench/contrib/mergeEditor/browser/view/viewModel.ts"
 
   - id: vscode-color-theme
     query: "color registry registerColor workbench"
@@ -118,6 +145,9 @@ queries:
     hints:
       - "registerColor"
       - "colorRegistry"
+      - "colorRegistry.ts"
+      - "src/vs/platform/theme/common/colorRegistry.ts"
+      - "src/vs/workbench/common/theme.ts"
 
   - id: vscode-file-search
     query: "ripgrepTextSearchEngine fileWalker"
@@ -133,6 +163,11 @@ queries:
     hints:
       - "ripgrepTextSearchEngine"
       - "fileWalker"
+      - "textSearchAdapter"
+      - "ripgrepTextSearchEngine.ts"
+      - "textSearchAdapter.ts"
+      - "src/vs/workbench/services/search/node/ripgrepTextSearchEngine.ts"
+      - "src/vs/workbench/services/search/common/searchExtTypes.ts"
 
   - id: vscode-extension-activation
     query: "ExtensionHostProcess setupActivationEvents"
@@ -148,6 +183,10 @@ queries:
     hints:
       - "setupActivationEvents"
       - "ExtensionHostProcess"
+      - "extHostExtensionService"
+      - "extensionHostProcess.ts"
+      - "src/vs/workbench/api/common/extHostExtensionService.ts"
+      - "src/vs/workbench/services/extensions/browser/extensionHostProcess.ts"
 
   - id: vscode-settings-sync
     query: "settings sync keybindings merge conflict"
@@ -157,12 +196,22 @@ queries:
     repo: "vscode"
     expected:
       paths:
-        - "src/vs/workbench/services/userDataSync/common/userDataSyncResources.ts"
-        - "src/vs/workbench/services/userDataSync/common/settingsSync.ts"
+        - "src/vs/platform/userDataSync/common/settingsSync.ts"
+        - "src/vs/platform/userDataSync/common/abstractSynchronizer.ts"
+        - "src/vs/platform/userDataSync/common/userDataSync.ts"
+      patterns:
+        - "src/vs/platform/userDataSync/**/*.ts"
     tags: ["sync", "settings"]
     hints:
       - "keybindingsMerge"
       - "SyncResource"
+      - "settingsSync.ts"
+      - "abstractSynchronizer"
+      - "userDataSync"
+      - "IUserDataSynchroniser"
+      - "src/vs/platform/userDataSync/common/settingsSync.ts"
+      - "src/vs/platform/userDataSync/common/abstractSynchronizer.ts"
+      - "src/vs/platform/userDataSync/common/userDataSync.ts"
 
   - id: vscode-microtask-debug
     query: "microtaskQueue tracer schedule vs/base"
@@ -178,6 +227,10 @@ queries:
     hints:
       - "MicrotaskQueueTracer"
       - "scheduleMicrotask"
+      - "microtaskQueue.ts"
+      - "telemetryUtils.ts"
+      - "src/vs/base/common/microtaskQueue.ts"
+      - "src/vs/platform/telemetry/common/telemetryUtils.ts"
 
   - id: vscode-task-terminal
     query: "TaskTerminalShellIntegration registerRunProfiles"
@@ -193,3 +246,7 @@ queries:
     hints:
       - "TaskTerminalShellIntegration"
       - "registerRunProfiles"
+      - "terminalTaskSystem.ts"
+      - "src/vs/workbench/contrib/tasks/browser/terminalTaskSystem.ts"
+      - "src/vs/workbench/contrib/tasks/browser/terminalTaskSystemContribution.ts"
+      - "terminalTaskSystemContribution"
