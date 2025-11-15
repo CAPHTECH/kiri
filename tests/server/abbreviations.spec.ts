@@ -116,11 +116,20 @@ describe("expandAbbreviations", () => {
             ["error", "err", "errors"]
           ),
           (variants) => {
-            const expansions = variants.map((v) => new Set(expandAbbreviations(v)));
-            const first = Array.from(expansions[0]).sort();
+            const expansions: Array<Set<string>> = variants.map(
+              (v) => new Set(expandAbbreviations(v))
+            );
+            if (expansions.length === 0) {
+              return true;
+            }
+            const [firstSet, ...rest] = expansions;
+            if (firstSet == null) {
+              return true;
+            }
+            const first = Array.from(firstSet).sort();
 
             // All expansions should be identical
-            return expansions.every((exp) => {
+            return rest.every((exp) => {
               const sorted = Array.from(exp).sort();
               return JSON.stringify(sorted) === JSON.stringify(first);
             });
