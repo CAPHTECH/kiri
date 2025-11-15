@@ -1,5 +1,6 @@
 import { DuckDBClient } from "../shared/duckdb.js";
 import { normalizeRepoPath } from "../shared/utils/path.js";
+
 import { mergeRepoRecords } from "./migrations/repo-merger.js";
 
 export async function ensureBaseSchema(db: DuckDBClient): Promise<void> {

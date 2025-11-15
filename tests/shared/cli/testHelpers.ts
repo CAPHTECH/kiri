@@ -2,8 +2,8 @@
  * Test helpers for CLI testing
  */
 
-import { describe, it, expect } from "vitest";
 import { execa } from "execa";
+import { describe, it, expect } from "vitest";
 
 /**
  * Test suite configuration for CLI testing

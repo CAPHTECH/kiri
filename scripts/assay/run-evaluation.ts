@@ -1,6 +1,7 @@
 #!/usr/bin/env tsx
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
+
 import {
   loadDataset,
   Runner,
@@ -9,8 +10,9 @@ import {
   ConsoleReporter,
 } from "../../external/assay-kit/src/index.ts";
 import { PluginRegistry } from "../../external/assay-kit/src/plugins/registry.ts";
-import contextCoverageMetric from "./plugins/context-coverage-metric.js";
+
 import { createKiriAdapter } from "./kiri-variants.js";
+import contextCoverageMetric from "./plugins/context-coverage-metric.js";
 
 async function main(): Promise<void> {
   const repoRoot = process.cwd();

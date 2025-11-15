@@ -224,7 +224,9 @@ describe("runIndexer", () => {
       "SELECT path, source, key, value FROM document_metadata_kv WHERE repo_id = ? ORDER BY path, key, value",
       [repoId]
     );
-    const frontMatterTags = kvRows.filter((row) => row.path === "docs/runbook.md" && row.key === "tags");
+    const frontMatterTags = kvRows.filter(
+      (row) => row.path === "docs/runbook.md" && row.key === "tags"
+    );
     expect(frontMatterTags.map((row) => row.value.toLowerCase())).toEqual(
       expect.arrayContaining(["observability", "dashboards"])
     );
@@ -232,7 +234,11 @@ describe("runIndexer", () => {
       expect.objectContaining({ path: "configs/alerting.yml", key: "service", value: "alerts" })
     );
     expect(kvRows).toContainEqual(
-      expect.objectContaining({ path: "data/owner.json", key: "owner.name", value: "Observability" })
+      expect.objectContaining({
+        path: "data/owner.json",
+        key: "owner.name",
+        value: "Observability",
+      })
     );
 
     const linkRows = await db.all<{
@@ -240,10 +246,9 @@ describe("runIndexer", () => {
       target: string;
       resolved_path: string | null;
       anchor_text: string;
-    }>(
-      "SELECT src_path, target, resolved_path, anchor_text FROM markdown_link WHERE repo_id = ?",
-      [repoId]
-    );
+    }>("SELECT src_path, target, resolved_path, anchor_text FROM markdown_link WHERE repo_id = ?", [
+      repoId,
+    ]);
     expect(linkRows).toContainEqual(
       expect.objectContaining({
         src_path: "docs/runbook.md",

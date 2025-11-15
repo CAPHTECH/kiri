@@ -413,6 +413,7 @@ mcp:
 - Degrade-first architecture with fallback search
 - Security features including sensitive token masking
 - Daemon mode for persistent background operation
+
 ## [0.10.1] - 2025-11-15
 
 ### Added

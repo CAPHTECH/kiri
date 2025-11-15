@@ -7,6 +7,13 @@ import { generateEmbedding, structuralSimilarity } from "../shared/embedding.js"
 import { encode as encodeGPT, tokenizeText } from "../shared/tokenizer.js";
 
 import { expandAbbreviations } from "./abbreviations.js";
+import {
+  type BoostProfileName,
+  type BoostProfileConfig,
+  getBoostProfile,
+} from "./boost-profiles.js";
+import { FtsStatusCache, ServerContext } from "./context.js";
+import { coerceProfileName, loadScoringProfile, type ScoringWeights } from "./scoring.js";
 import { createServerServices, ServerServices } from "./services/index.js";
 
 // Re-export extracted handlers for backward compatibility
@@ -15,13 +22,6 @@ export {
   type SnippetsGetParams,
   type SnippetResult,
 } from "./handlers/snippets-get.js";
-import {
-  type BoostProfileName,
-  type BoostProfileConfig,
-  getBoostProfile,
-} from "./boost-profiles.js";
-import { FtsStatusCache, ServerContext } from "./context.js";
-import { coerceProfileName, loadScoringProfile, type ScoringWeights } from "./scoring.js";
 
 // Configuration file patterns (v0.8.0+: consolidated to avoid duplication)
 // Comprehensive list covering multiple languages and tools
@@ -1242,7 +1242,7 @@ function parseInlineMetadataFilters(query: string): {
     }
     let rawValue = match[2] ?? "";
     if (
-      (rawValue.startsWith("\"") && rawValue.endsWith("\"")) ||
+      (rawValue.startsWith('"') && rawValue.endsWith('"')) ||
       (rawValue.startsWith("'") && rawValue.endsWith("'"))
     ) {
       rawValue = rawValue.slice(1, -1);
@@ -1270,7 +1270,10 @@ function parseInlineMetadataFilters(query: string): {
   }
   cleaned += query.slice(lastIndex);
   const normalizedQuery = cleaned.replace(/\s{2,}/g, " ").trim();
-  return { cleanedQuery: normalizedQuery, filters: mergeMetadataFilters(matches.map((m) => m.filter)) };
+  return {
+    cleanedQuery: normalizedQuery,
+    filters: mergeMetadataFilters(matches.map((m) => m.filter)),
+  };
 }
 
 function buildMetadataFilterConditions(
@@ -1328,11 +1331,7 @@ async function safeMetadataQuery<T>(
   }
 }
 
-async function safeLinkQuery<T>(
-  db: DuckDBClient,
-  sql: string,
-  params: unknown[]
-): Promise<T[]> {
+async function safeLinkQuery<T>(db: DuckDBClient, sql: string, params: unknown[]): Promise<T[]> {
   if (linkTableMissing) {
     return [];
   }
@@ -1409,7 +1408,9 @@ async function fetchMetadataKeywordMatches(
   const whereClauses = ["mk.repo_id = ?", `(${keywordClauses})`];
 
   if (excludePaths.size > 0) {
-    const placeholders = Array.from(excludePaths).map(() => "?").join(", ");
+    const placeholders = Array.from(excludePaths)
+      .map(() => "?")
+      .join(", ");
     whereClauses.push(`f.path NOT IN (${placeholders})`);
     params.push(...excludePaths);
   }
@@ -1453,11 +1454,12 @@ async function loadMetadataForPaths(
     FROM document_metadata_kv
     WHERE repo_id = ? AND path IN (${placeholders})
   `;
-  const rows = await safeMetadataQuery<{ path: string; key: string; value: string; source: string | null }>(
-    db,
-    sql,
-    [repoId, ...paths]
-  );
+  const rows = await safeMetadataQuery<{
+    path: string;
+    key: string;
+    value: string;
+    source: string | null;
+  }>(db, sql, [repoId, ...paths]);
 
   for (const row of rows) {
     if (!result.has(row.path)) {
@@ -2100,7 +2102,12 @@ export async function filesSearch(
   }
 
   if (!hasTextQuery && metadataFilters.length > 0) {
-    const metadataOnlyRows = await fetchMetadataOnlyCandidates(db, repoId, metadataFilters, limit * 2);
+    const metadataOnlyRows = await fetchMetadataOnlyCandidates(
+      db,
+      repoId,
+      metadataFilters,
+      limit * 2
+    );
     for (const row of metadataOnlyRows) {
       row.score = 1 + metadataFilters.length * 0.2;
     }
@@ -2108,7 +2115,9 @@ export async function filesSearch(
   }
 
   if (hasTextQuery) {
-    const metadataKeywords = splitQueryWords(cleanedQuery.toLowerCase()).map((kw) => kw.toLowerCase());
+    const metadataKeywords = splitQueryWords(cleanedQuery.toLowerCase()).map((kw) =>
+      kw.toLowerCase()
+    );
     if (metadataKeywords.length > 0) {
       const excludePaths = new Set(candidateRows.map((row) => row.path));
       const metadataRows = await fetchMetadataKeywordMatches(
@@ -2156,7 +2165,7 @@ export async function filesSearch(
   const options = parseOutputOptions(params);
   const previewQuery = hasTextQuery
     ? cleanedQuery
-    : metadataFilters[0]?.values[0] ?? rawQuery.trim();
+    : (metadataFilters[0]?.values[0] ?? rawQuery.trim());
 
   return limitedRows
     .map((row) => {
@@ -2173,7 +2182,11 @@ export async function filesSearch(
       }
 
       const metadataEntries = metadataMap.get(row.path);
-      const metadataBoost = computeMetadataBoost(metadataEntries, metadataKeywordSet, filterValueSet);
+      const metadataBoost = computeMetadataBoost(
+        metadataEntries,
+        metadataKeywordSet,
+        filterValueSet
+      );
       const inboundBoost = computeInboundLinkBoost(inboundCounts.get(row.path));
       const baseScore = (row.score ?? (hasTextQuery ? 1.0 : 0.8)) + metadataBoost + inboundBoost;
       const boostedScore =
@@ -2866,12 +2879,7 @@ export async function contextBundle(
     if (metadataFilters.length === 0) {
       return [];
     }
-    const metadataRows = await fetchMetadataOnlyCandidates(
-      db,
-      repoId,
-      metadataFilters,
-      limit * 2
-    );
+    const metadataRows = await fetchMetadataOnlyCandidates(db, repoId, metadataFilters, limit * 2);
     if (metadataRows.length === 0) {
       return [];
     }
@@ -2921,11 +2929,7 @@ export async function contextBundle(
   );
 
   let metadataEntriesMap: Map<string, MetadataEntry[]> | undefined;
-  if (
-    metadataFilters.length > 0 ||
-    metadataKeywordSet.size > 0 ||
-    filterValueSet.size > 0
-  ) {
+  if (metadataFilters.length > 0 || metadataKeywordSet.size > 0 || filterValueSet.size > 0) {
     metadataEntriesMap = await loadMetadataForPaths(
       db,
       repoId,
@@ -2949,7 +2953,6 @@ export async function contextBundle(
     if (materializedCandidates.length === 0) {
       materializedCandidates = await hydrateMetadataFallback();
     }
-
 
     if (materializedCandidates.length === 0) {
       const warnings = [...context.warningManager.responseWarnings];

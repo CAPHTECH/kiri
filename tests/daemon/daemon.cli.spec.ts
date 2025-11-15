@@ -2,8 +2,8 @@
  * Integration tests for kiri-daemon CLI
  */
 
-import { fileURLToPath } from "url";
 import { dirname, join } from "path";
+import { fileURLToPath } from "url";
 
 import { createCliTests } from "../shared/cli/testHelpers.js";
 

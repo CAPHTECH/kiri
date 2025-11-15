@@ -4,6 +4,8 @@ import { readFile, stat } from "node:fs/promises";
 import { join, resolve, extname, posix as pathPosix } from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { parse as parseYAML } from "yaml";
+
 import { DuckDBClient } from "../shared/duckdb.js";
 import { generateEmbedding } from "../shared/embedding.js";
 import { acquireLock, releaseLock, LockfileError, getLockOwner } from "../shared/utils/lockfile.js";
@@ -26,7 +28,6 @@ import {
   rebuildFTSIfNeeded,
 } from "./schema.js";
 import { IndexWatcher } from "./watch.js";
-import { parse as parseYAML } from "yaml";
 
 interface IndexerOptions {
   repoRoot: string;
@@ -737,7 +738,14 @@ function collectMetadataPairsFromValue(
     for (const [childKey, childValue] of Object.entries(value)) {
       const normalizedKey = childKey.toLowerCase();
       const nextPrefix = keyPrefix.length > 0 ? `${keyPrefix}.${normalizedKey}` : normalizedKey;
-      collectMetadataPairsFromValue(childValue as MetadataTree, path, source, pairs, state, nextPrefix);
+      collectMetadataPairsFromValue(
+        childValue as MetadataTree,
+        path,
+        source,
+        pairs,
+        state,
+        nextPrefix
+      );
       if (state.count >= MAX_METADATA_PAIRS_PER_FILE) {
         break;
       }
@@ -770,13 +778,15 @@ function parseFrontMatterBlock(content: string, path: string): FrontMatterResult
   } catch (error) {
     // Structured error logging for better debugging
     const errorMessage = error instanceof Error ? error.message : String(error);
-    console.warn(JSON.stringify({
-      level: "warn",
-      message: "Failed to parse Markdown front matter",
-      file: path,
-      error: errorMessage,
-      context: "Front matter YAML parsing failed, metadata will be skipped for this file"
-    }));
+    console.warn(
+      JSON.stringify({
+        level: "warn",
+        message: "Failed to parse Markdown front matter",
+        file: path,
+        error: errorMessage,
+        context: "Front matter YAML parsing failed, metadata will be skipped for this file",
+      })
+    );
     return { data: null, body };
   }
 }
@@ -883,7 +893,7 @@ function resolveMarkdownLink(
   // Security: Prevent directory traversal by checking for ".." segments
   // Even after normalization, check that no path segment contains ".." or "."
   const segments = candidate.split("/");
-  if (segments.some(seg => seg === ".." || seg === ".")) {
+  if (segments.some((seg) => seg === ".." || seg === ".")) {
     return null;
   }
 
@@ -923,13 +933,15 @@ function parseJsonValue(content: string, path: string): unknown | null {
   } catch (error) {
     // Structured error logging for better debugging
     const errorMessage = error instanceof Error ? error.message : String(error);
-    console.warn(JSON.stringify({
-      level: "warn",
-      message: "Failed to parse JSON metadata",
-      file: path,
-      error: errorMessage,
-      context: "JSON parsing failed, metadata will be skipped for this file"
-    }));
+    console.warn(
+      JSON.stringify({
+        level: "warn",
+        message: "Failed to parse JSON metadata",
+        file: path,
+        error: errorMessage,
+        context: "JSON parsing failed, metadata will be skipped for this file",
+      })
+    );
     return null;
   }
 }
@@ -940,13 +952,15 @@ function parseYamlValue(content: string, path: string): unknown | null {
   } catch (error) {
     // Structured error logging for better debugging
     const errorMessage = error instanceof Error ? error.message : String(error);
-    console.warn(JSON.stringify({
-      level: "warn",
-      message: "Failed to parse YAML metadata",
-      file: path,
-      error: errorMessage,
-      context: "YAML parsing failed, metadata will be skipped for this file"
-    }));
+    console.warn(
+      JSON.stringify({
+        level: "warn",
+        message: "Failed to parse YAML metadata",
+        file: path,
+        error: errorMessage,
+        context: "YAML parsing failed, metadata will be skipped for this file",
+      })
+    );
     return null;
   }
 }
@@ -978,14 +992,26 @@ function extractStructuredData(
       const sanitized = sanitizeMetadataTree(parsed);
       if (sanitized) {
         structured.metadataRecords.push({ path: file.path, source: "json", data: sanitized });
-        collectMetadataPairsFromValue(sanitized, file.path, "json", structured.metadataPairs, pairState);
+        collectMetadataPairsFromValue(
+          sanitized,
+          file.path,
+          "json",
+          structured.metadataPairs,
+          pairState
+        );
       }
     } else if (ext === ".yaml" || ext === ".yml") {
       const parsed = parseYamlValue(blob.content, file.path);
       const sanitized = sanitizeMetadataTree(parsed);
       if (sanitized) {
         structured.metadataRecords.push({ path: file.path, source: "yaml", data: sanitized });
-        collectMetadataPairsFromValue(sanitized, file.path, "yaml", structured.metadataPairs, pairState);
+        collectMetadataPairsFromValue(
+          sanitized,
+          file.path,
+          "yaml",
+          structured.metadataPairs,
+          pairState
+        );
       }
     }
 
@@ -996,7 +1022,11 @@ function extractStructuredData(
         if (frontMatter.data) {
           const sanitized = sanitizeMetadataTree(frontMatter.data);
           if (sanitized) {
-            structured.metadataRecords.push({ path: file.path, source: "front_matter", data: sanitized });
+            structured.metadataRecords.push({
+              path: file.path,
+              source: "front_matter",
+              data: sanitized,
+            });
             collectMetadataPairsFromValue(
               sanitized,
               file.path,
@@ -1027,9 +1057,7 @@ function extractStructuredData(
   return map;
 }
 
-function aggregateStructuredData(
-  map: Map<string, StructuredFileData>
-): {
+function aggregateStructuredData(map: Map<string, StructuredFileData>): {
   metadataRecords: DocumentMetadataRecord[];
   metadataPairs: MetadataPairRecord[];
   links: MarkdownLinkRecord[];
@@ -1318,11 +1346,26 @@ async function reconcileDeletedFiles(
 
       await db.run(`DELETE FROM symbol WHERE repo_id = ? AND path IN (${placeholders})`, params);
       await db.run(`DELETE FROM snippet WHERE repo_id = ? AND path IN (${placeholders})`, params);
-      await db.run(`DELETE FROM dependency WHERE repo_id = ? AND src_path IN (${placeholders})`, params);
-      await db.run(`DELETE FROM file_embedding WHERE repo_id = ? AND path IN (${placeholders})`, params);
-      await db.run(`DELETE FROM document_metadata WHERE repo_id = ? AND path IN (${placeholders})`, params);
-      await db.run(`DELETE FROM document_metadata_kv WHERE repo_id = ? AND path IN (${placeholders})`, params);
-      await db.run(`DELETE FROM markdown_link WHERE repo_id = ? AND src_path IN (${placeholders})`, params);
+      await db.run(
+        `DELETE FROM dependency WHERE repo_id = ? AND src_path IN (${placeholders})`,
+        params
+      );
+      await db.run(
+        `DELETE FROM file_embedding WHERE repo_id = ? AND path IN (${placeholders})`,
+        params
+      );
+      await db.run(
+        `DELETE FROM document_metadata WHERE repo_id = ? AND path IN (${placeholders})`,
+        params
+      );
+      await db.run(
+        `DELETE FROM document_metadata_kv WHERE repo_id = ? AND path IN (${placeholders})`,
+        params
+      );
+      await db.run(
+        `DELETE FROM markdown_link WHERE repo_id = ? AND src_path IN (${placeholders})`,
+        params
+      );
       await db.run(`DELETE FROM tree WHERE repo_id = ? AND path IN (${placeholders})`, params);
       await db.run(`DELETE FROM file WHERE repo_id = ? AND path IN (${placeholders})`, params);
     });
