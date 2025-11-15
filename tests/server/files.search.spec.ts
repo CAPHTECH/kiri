@@ -157,6 +157,78 @@ describe("files_search", () => {
     expect(paths).toContain("tests/test.ts"); // contains "MCP", "handler"
   });
 
+  it("supports metadata-driven filtering", async () => {
+    const repo = await createTempRepo({
+      "docs/runbook.md":
+        "---\ntitle: Observability Runbook\ntags:\n  - observability\ncategory: guides\n---\nDashboards reference.\n",
+      "docs/faq.md":
+        "---\ntitle: FAQ\ntags:\n  - payments\ncategory: guides\n---\nDashboards reference.\n",
+    });
+    cleanupTargets.push({ dispose: repo.cleanup });
+
+    const dbDir = await mkdtemp(join(tmpdir(), "kiri-metadata-search-"));
+    const dbPath = join(dbDir, "index.duckdb");
+    cleanupTargets.push({ dispose: async () => await rm(dbDir, { recursive: true, force: true }) });
+
+    await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+    const db = await DuckDBClient.connect({ databasePath: dbPath });
+    cleanupTargets.push({ dispose: async () => await db.close() });
+
+    const repoId = await resolveRepoId(db, repo.path);
+    const context: ServerContext = {
+      db,
+      repoId,
+      services: createServerServices(db),
+      warningManager: new WarningManager(),
+    };
+
+    const filtered = await filesSearch(context, {
+      query: "dashboards",
+      metadata_filters: { tags: "observability" },
+    });
+    expect(filtered.map((item) => item.path)).toEqual(["docs/runbook.md"]);
+
+    const inline = await filesSearch(context, {
+      query: "tag:payments dashboards",
+    });
+    expect(inline.map((item) => item.path)).toEqual(["docs/faq.md"]);
+
+    const metadataOnly = await filesSearch(context, {
+      query: "",
+      metadata_filters: { tags: "observability" },
+    });
+    expect(metadataOnly.map((item) => item.path)).toEqual(["docs/runbook.md"]);
+  });
+
+  it("returns matches when keywords exist only in metadata", async () => {
+    const repo = await createTempRepo({
+      "docs/runbook.md": "---\ntags: [observability]\n---\nRefer to dashboards.\n",
+      "docs/infra.md": "# Infra\\nRefer to dashboards.\\n",
+    });
+    cleanupTargets.push({ dispose: repo.cleanup });
+
+    const dbDir = await mkdtemp(join(tmpdir(), "kiri-metadata-keyword-"));
+    const dbPath = join(dbDir, "index.duckdb");
+    cleanupTargets.push({ dispose: async () => await rm(dbDir, { recursive: true, force: true }) });
+
+    await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+    const db = await DuckDBClient.connect({ databasePath: dbPath });
+    cleanupTargets.push({ dispose: async () => await db.close() });
+
+    const repoId = await resolveRepoId(db, repo.path);
+    const context: ServerContext = {
+      db,
+      repoId,
+      services: createServerServices(db),
+      warningManager: new WarningManager(),
+    };
+
+    const results = await filesSearch(context, { query: "observability" });
+    expect(results.map((item) => item.path)).toContain("docs/runbook.md");
+  });
+
   // Critical: boost_profile parameter tests (v0.7.0+)
   describe("boost_profile parameter", () => {
     it("boost_profile='default' prioritizes implementation over docs", async () => {

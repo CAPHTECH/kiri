@@ -117,6 +117,50 @@ export async function ensureBaseSchema(db: DuckDBClient): Promise<void> {
       PRIMARY KEY (repo_id, path)
     )
   `);
+
+  await db.run(`
+    CREATE TABLE IF NOT EXISTS document_metadata (
+      repo_id INTEGER,
+      path TEXT,
+      source TEXT,
+      data JSON,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (repo_id, path, source)
+    )
+  `);
+
+  await db.run(`
+    CREATE TABLE IF NOT EXISTS document_metadata_kv (
+      repo_id INTEGER,
+      path TEXT,
+      source TEXT,
+      key TEXT,
+      value TEXT,
+      PRIMARY KEY (repo_id, path, source, key, value)
+    )
+  `);
+
+  await db.run(`
+    CREATE INDEX IF NOT EXISTS idx_document_metadata_key
+      ON document_metadata_kv(repo_id, key)
+  `);
+
+  await db.run(`
+    CREATE TABLE IF NOT EXISTS markdown_link (
+      repo_id INTEGER,
+      src_path TEXT,
+      target TEXT,
+      resolved_path TEXT,
+      anchor_text TEXT,
+      kind TEXT,
+      PRIMARY KEY (repo_id, src_path, target, anchor_text)
+    )
+  `);
+
+  await db.run(`
+    CREATE INDEX IF NOT EXISTS idx_markdown_link_target
+      ON markdown_link(repo_id, resolved_path)
+  `);
 }
 
 /**
@@ -264,6 +308,9 @@ export async function ensureNormalizedRootColumn(db: DuckDBClient): Promise<void
           .map(Number)
           .sort((a, b) => a - b);
         const keepId = ids[0];
+        if (keepId === undefined) {
+          continue; // Skip if no valid ID found
+        }
         const deleteIds = ids.slice(1);
 
         await mergeRepoRecords(db, keepId, deleteIds);

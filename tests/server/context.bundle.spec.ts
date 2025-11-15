@@ -149,6 +149,47 @@ describe("context_bundle", () => {
     expect(hinted?.why).toContain("artifact:hint:src/stats/rank-biserial.ts");
   }, 10000);
 
+  it("applies metadata filters to context bundle", async () => {
+    const repo = await createTempRepo({
+      "docs/runbook.md":
+        "---\ntitle: Observability Runbook\ntags:\n  - observability\ncategory: guides\n---\nDashboards reference.\n",
+      "docs/faq.md":
+        "---\ntitle: FAQ\ntags:\n  - payments\ncategory: guides\n---\nDashboards reference.\n",
+    });
+    cleanupTargets.push({ dispose: repo.cleanup });
+
+    const dbDir = await mkdtemp(join(tmpdir(), "kiri-context-metadata-"));
+    const dbPath = join(dbDir, "index.duckdb");
+    cleanupTargets.push({ dispose: async () => await rm(dbDir, { recursive: true, force: true }) });
+
+    await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+    const db = await DuckDBClient.connect({ databasePath: dbPath });
+    cleanupTargets.push({ dispose: async () => await db.close() });
+
+    const repoId = await resolveRepoId(db, repo.path);
+    const context: ServerContext = {
+      db,
+      repoId,
+      services: createServerServices(db),
+      warningManager: new WarningManager(),
+    };
+
+    const filtered = await contextBundle(context, {
+      goal: "tag:observability dashboards",
+      limit: 3,
+    });
+    expect(filtered.context.map((item) => item.path)).toContain("docs/runbook.md");
+    expect(filtered.context.map((item) => item.path)).not.toContain("docs/faq.md");
+
+    const paramFiltered = await contextBundle(context, {
+      goal: "dashboards",
+      metadata_filters: { tags: "payments" },
+      limit: 3,
+    });
+    expect(paramFiltered.context.map((item) => item.path)).toEqual(["docs/faq.md"]);
+  });
+
   it("skips tokens_estimate calculation unless requested", async () => {
     const repo = await createTempRepo({
       "src/app.ts": "export function app() { return 1; }\n",

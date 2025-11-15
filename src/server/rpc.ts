@@ -476,6 +476,10 @@ function parseFilesSearchParams(input: unknown): FilesSearchParams {
     params.compact = record.compact;
   }
 
+  if (record.metadata_filters && typeof record.metadata_filters === "object") {
+    params.metadata_filters = record.metadata_filters as Record<string, string | string[]>;
+  }
+
   return params;
 }
 
@@ -641,6 +645,10 @@ function parseContextBundleParams(input: unknown, context: ServerContext): Conte
   const includeTokensEstimate = record.includeTokensEstimate ?? record.include_tokens_estimate;
   if (typeof includeTokensEstimate === "boolean") {
     params.includeTokensEstimate = includeTokensEstimate;
+  }
+
+  if (record.metadata_filters && typeof record.metadata_filters === "object") {
+    params.metadata_filters = record.metadata_filters as Record<string, string | string[]>;
   }
 
   return params;

@@ -44,3 +44,24 @@ OpenTelemetry が利用可能な環境では、各リクエストにスパンが
 1. エラースパンでフィルタリングして失敗オペレーションを特定
 2. `error.stack` 属性からスタックトレースを確認
 3. スパンの継続時間から性能ボトルネックを発見
+
+## メタデータスキーマ移行（2025-11-15）
+
+DuckDB に `document_metadata` / `document_metadata_kv` / `markdown_link` テーブルが追加された。既存 DB をアップグレードするには以下の手順を実行する：
+
+1. 作業ディレクトリをクリーンにし、`pnpm install && pnpm run build` で最新バイナリを生成する。
+2. 対象リポジトリで `pnpm exec kiri index --full --repo <repo> --db <path/to/index.duckdb>` を実行し、全ファイルを再取り込みする。完了後 `repo` テーブルの `indexed_at` を確認して最新化されていることを確認。
+3. `pnpm run check` を実行し、検索テスト（`files_search`/`context_bundle`）が metadata フィルタ付きで成功することを確認する。
+
+### ロールバック
+
+万一メタデータテーブルが原因で問題が発生した場合は以下でロールバックできる：
+
+```
+duckdb <path/to/index.duckdb>
+> DROP TABLE IF EXISTS markdown_link;
+> DROP TABLE IF EXISTS document_metadata_kv;
+> DROP TABLE IF EXISTS document_metadata;
+```
+
+ロールバック後に旧バージョンのバイナリで `pnpm exec kiri index --full …` を再実行すると従来のスキーマに戻せる。再移行時は上記手順を繰り返す。

@@ -245,6 +245,25 @@ Watch mode (`--watch`) monitors repository file changes and automatically reinde
     - `hints`: 関数名やファイルパスなど短いヒントの配列。抽象的な目的でも該当実装へ到達できるよう自動でクエリ展開されます。
   - 出力: 断片リスト（path, [start,end], why[], score, optional preview）と `tokens_estimate`（`includeTokensEstimate: true` のときのみ）
 
+### メタデータフィルタ（`files_search` / `context_bundle` 共通）
+
+- Markdown Front Matter や YAML/JSON で宣言した `title`/`tags`/`category` などを対象に検索・フィルタリングできます。
+- **インライン構文**: `tag:observability dashboard` のように `goal` / `query` に `key:value` を含めると、その値でフィルタされます（`tag`/`tags`/`category`/`title`/`service` をサポート）。
+- **任意キー**: `metadata_filters` パラメータに `{ "meta.service.name": "billing" }` のようなオブジェクトを渡すと、フリーテキストクエリと組み合わせて絞り込みが可能です。
+- フィルタのみ指定した場合（`query:""` + `metadata_filters`）でも一致ファイルが返されます。
+
+```json
+{
+  "method": "files_search",
+  "params": {
+    "query": "dashboards",
+    "metadata_filters": { "tags": "observability" }
+  }
+}
+```
+
+`context_bundle` でも同じ `metadata_filters` が利用できます。例えば `goal: "tag:payments retry logic"` とすると「payments」タグの付いたファイルのみに限定して調査できます。
+
 ## `context_bundle` リクエスト/レスポンス例
 
 ```json

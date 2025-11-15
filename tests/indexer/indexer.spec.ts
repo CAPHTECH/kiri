@@ -176,4 +176,80 @@ describe("runIndexer", () => {
     if (!firstRow) throw new Error("No repo row found");
     expect(firstRow.root).toBe(repo.path);
   });
+
+  it("captures structured metadata and markdown links", async () => {
+    const repo = await createTempRepo({
+      "docs/runbook.md": `---\ntitle: Metrics Runbook\ntags:\n  - observability\n  - dashboards\ncategory: guides\n---\nRefer to the API doc for request flow.\n\nSee the [API](../src/api.md#handlers) reference.\n`,
+      "docs/faq.md": `# FAQ\nThis document lists common questions.\n`,
+      "src/api.md": `# API\nImplements handlers.\n`,
+      "configs/alerting.yml": `service: alerts\nteam: sre\n`,
+      "data/owner.json": `{"owner": {"name": "Observability"}, "priority": "P1"}`,
+    });
+    cleanupTargets.push({ dispose: repo.cleanup });
+
+    const dbDir = await mkdtemp(join(tmpdir(), "kiri-metadata-"));
+    const dbPath = join(dbDir, "index.duckdb");
+    cleanupTargets.push({ dispose: async () => await rm(dbDir, { recursive: true, force: true }) });
+
+    await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+    const db = await DuckDBClient.connect({ databasePath: dbPath });
+    cleanupTargets.push({ dispose: async () => await db.close() });
+
+    const repoRow = await db.all<{ id: number }>("SELECT id FROM repo");
+    const repoId = repoRow[0]?.id;
+    expect(repoId).toBeDefined();
+    if (!repoId) throw new Error("repo id missing");
+
+    const metadataRows = await db.all<{ path: string; source: string; data: string }>(
+      "SELECT path, source, data FROM document_metadata WHERE repo_id = ? ORDER BY path, source",
+      [repoId]
+    );
+    expect(metadataRows).toEqual([
+      expect.objectContaining({ path: "configs/alerting.yml", source: "yaml" }),
+      expect.objectContaining({ path: "data/owner.json", source: "json" }),
+      expect.objectContaining({ path: "docs/runbook.md", source: "front_matter" }),
+    ]);
+    const frontMatter = metadataRows.find((row) => row.path === "docs/runbook.md");
+    expect(frontMatter).toBeDefined();
+    const parsedFrontMatter = JSON.parse(frontMatter!.data);
+    expect(parsedFrontMatter.title).toBe("Metrics Runbook");
+
+    const kvRows = await db.all<{
+      path: string;
+      source: string;
+      key: string;
+      value: string;
+    }>(
+      "SELECT path, source, key, value FROM document_metadata_kv WHERE repo_id = ? ORDER BY path, key, value",
+      [repoId]
+    );
+    const frontMatterTags = kvRows.filter((row) => row.path === "docs/runbook.md" && row.key === "tags");
+    expect(frontMatterTags.map((row) => row.value.toLowerCase())).toEqual(
+      expect.arrayContaining(["observability", "dashboards"])
+    );
+    expect(kvRows).toContainEqual(
+      expect.objectContaining({ path: "configs/alerting.yml", key: "service", value: "alerts" })
+    );
+    expect(kvRows).toContainEqual(
+      expect.objectContaining({ path: "data/owner.json", key: "owner.name", value: "Observability" })
+    );
+
+    const linkRows = await db.all<{
+      src_path: string;
+      target: string;
+      resolved_path: string | null;
+      anchor_text: string;
+    }>(
+      "SELECT src_path, target, resolved_path, anchor_text FROM markdown_link WHERE repo_id = ?",
+      [repoId]
+    );
+    expect(linkRows).toContainEqual(
+      expect.objectContaining({
+        src_path: "docs/runbook.md",
+        resolved_path: "src/api.md",
+        anchor_text: "API",
+      })
+    );
+  });
 });

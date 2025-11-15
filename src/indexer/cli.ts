@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
-import { join, resolve, extname } from "node:path";
+import { join, resolve, extname, posix as pathPosix } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { DuckDBClient } from "../shared/duckdb.js";
@@ -26,6 +26,7 @@ import {
   rebuildFTSIfNeeded,
 } from "./schema.js";
 import { IndexWatcher } from "./watch.js";
+import { parse as parseYAML } from "yaml";
 
 interface IndexerOptions {
   repoRoot: string;
@@ -84,9 +85,115 @@ interface EmbeddingRow {
   vector: number[];
 }
 
+type MetadataSource = "json" | "yaml" | "front_matter";
+
+type MetadataTree = string | number | boolean | MetadataTree[] | { [key: string]: MetadataTree };
+
+interface DocumentMetadataRecord {
+  path: string;
+  source: MetadataSource;
+  data: MetadataTree;
+}
+
+interface MetadataPairRecord {
+  path: string;
+  source: MetadataSource;
+  key: string;
+  value: string;
+}
+
+type DocLinkKind = "relative" | "absolute" | "external" | "anchor";
+
+interface MarkdownLinkRecord {
+  srcPath: string;
+  target: string;
+  resolvedPath: string | null;
+  anchorText: string;
+  kind: DocLinkKind;
+}
+
+interface StructuredFileData {
+  metadataRecords: DocumentMetadataRecord[];
+  metadataPairs: MetadataPairRecord[];
+  links: MarkdownLinkRecord[];
+}
+
+interface PairCollectorState {
+  count: number;
+  seen: Set<string>;
+}
+
 const MAX_SAMPLE_BYTES = 32_768;
 const MAX_FILE_BYTES = 32 * 1024 * 1024; // 32MB limit to prevent memory exhaustion
 const SCAN_BATCH_SIZE = 100; // Process files in batches to limit memory usage
+const MARKDOWN_EXTENSIONS = new Set([".md", ".mdx", ".markdown"]);
+
+/**
+ * Metadata processing limits to prevent DoS attacks and memory exhaustion.
+ *
+ * These values balance security, performance, and real-world usage patterns.
+ * Adjust based on:
+ * - Performance testing with 10000+ file repositories
+ * - Memory profiling (Node.js heap size impact)
+ * - Analysis of 99th percentile values in production data
+ */
+
+/**
+ * Maximum length of a single metadata value (characters).
+ *
+ * Rationale: Typical YAML front matter fields (title, description) are 200-300 chars.
+ * Setting to 512 provides headroom while preventing abuse.
+ *
+ * Example use cases:
+ * - Document titles: ~100 chars
+ * - Descriptions: ~300 chars
+ * - Tags (as comma-separated string): ~200 chars
+ */
+const MAX_METADATA_VALUE_LENGTH = 512;
+
+/**
+ * Maximum nesting depth for metadata tree structures.
+ *
+ * Rationale: Normal YAML/JSON documents nest 3-5 levels deep.
+ * Setting to 8 accommodates complex configurations while preventing stack overflow.
+ *
+ * Defense: Prevents malicious deeply-nested documents from causing:
+ * - Stack overflow (recursive function calls)
+ * - Exponential memory growth
+ * - CPU exhaustion during traversal
+ */
+const MAX_METADATA_DEPTH = 8;
+
+/**
+ * Maximum number of elements in a metadata array.
+ *
+ * Rationale: Common use case is tags/categories arrays with ~10 items.
+ * Setting to 64 provides generous headroom for edge cases.
+ *
+ * Example arrays:
+ * - Tags: ["frontend", "react", "typescript"] (~3-10 items)
+ * - Authors: ["John Doe", "Jane Smith"] (~1-5 items)
+ * - Categories: ["guide", "tutorial", "api"] (~2-8 items)
+ */
+const MAX_METADATA_ARRAY_LENGTH = 64;
+
+/**
+ * Maximum number of key-value pairs extracted per file.
+ *
+ * Rationale: Memory footprint calculation:
+ * - 256 pairs × ~40 bytes/pair ≈ 10KB per file
+ * - For 10000 files: 10KB × 10000 = 100MB (acceptable overhead)
+ *
+ * Prevents DoS from files with thousands of metadata fields.
+ * Normal documents have 5-20 metadata fields.
+ */
+const MAX_METADATA_PAIRS_PER_FILE = 256;
+
+/**
+ * Key name used for root-level scalar values in metadata trees.
+ * Internal use only - not exposed in search results.
+ */
+const ROOT_METADATA_KEY = "__root";
 
 /**
  * Maximum number of SQL placeholders per INSERT statement.
@@ -424,6 +531,514 @@ async function persistEmbeddings(
   }));
 }
 
+async function persistDocumentMetadata(
+  db: DuckDBClient,
+  repoId: number,
+  records: DocumentMetadataRecord[]
+): Promise<void> {
+  if (records.length === 0) return;
+  const BATCH_SIZE = calculateBatchSize(4);
+
+  await persistInBatches(db, records, BATCH_SIZE, (batch) => ({
+    sql: `INSERT OR REPLACE INTO document_metadata (repo_id, path, source, data) VALUES ${batch.map(() => "(?, ?, ?, ?)").join(", ")}`,
+    params: batch.flatMap((record) => [
+      repoId,
+      record.path,
+      record.source,
+      JSON.stringify(record.data),
+    ]),
+  }));
+}
+
+async function persistMetadataPairs(
+  db: DuckDBClient,
+  repoId: number,
+  records: MetadataPairRecord[]
+): Promise<void> {
+  if (records.length === 0) return;
+  const BATCH_SIZE = calculateBatchSize(5);
+
+  await persistInBatches(db, records, BATCH_SIZE, (batch) => ({
+    sql: `INSERT OR REPLACE INTO document_metadata_kv (repo_id, path, source, key, value) VALUES ${batch.map(() => "(?, ?, ?, ?, ?)").join(", ")}`,
+    params: batch.flatMap((record) => [
+      repoId,
+      record.path,
+      record.source,
+      record.key,
+      record.value,
+    ]),
+  }));
+}
+
+async function persistMarkdownLinks(
+  db: DuckDBClient,
+  repoId: number,
+  records: MarkdownLinkRecord[]
+): Promise<void> {
+  if (records.length === 0) return;
+  const BATCH_SIZE = calculateBatchSize(6);
+
+  await persistInBatches(db, records, BATCH_SIZE, (batch) => ({
+    sql: `INSERT OR REPLACE INTO markdown_link (repo_id, src_path, target, resolved_path, anchor_text, kind) VALUES ${batch.map(() => "(?, ?, ?, ?, ?, ?)").join(", ")}`,
+    params: batch.flatMap((record) => [
+      repoId,
+      record.srcPath,
+      record.target,
+      record.resolvedPath,
+      record.anchorText,
+      record.kind,
+    ]),
+  }));
+}
+
+function sanitizeMetadataTree(value: unknown, depth = 0): MetadataTree | null {
+  // Depth check at the beginning to prevent stack overflow
+  if (depth > MAX_METADATA_DEPTH) {
+    console.warn(`Metadata depth limit (${MAX_METADATA_DEPTH}) exceeded, truncating nested value`);
+    return null;
+  }
+
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed.length === 0) {
+      return null;
+    }
+    return trimmed.length > MAX_METADATA_VALUE_LENGTH
+      ? trimmed.slice(0, MAX_METADATA_VALUE_LENGTH)
+      : trimmed;
+  }
+
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) {
+      return null;
+    }
+    return value;
+  }
+
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    if (value.length === 0) {
+      return null;
+    }
+    // Warn if array is too large
+    if (value.length > MAX_METADATA_ARRAY_LENGTH) {
+      console.warn(
+        `Metadata array has ${value.length} elements, limiting to ${MAX_METADATA_ARRAY_LENGTH}`
+      );
+    }
+    const sanitized: MetadataTree[] = [];
+    for (const item of value.slice(0, MAX_METADATA_ARRAY_LENGTH)) {
+      const child = sanitizeMetadataTree(item, depth + 1);
+      if (child !== null) {
+        sanitized.push(child);
+      }
+    }
+    return sanitized.length > 0 ? sanitized : null;
+  }
+
+  if (typeof value === "object") {
+    const result: Record<string, MetadataTree> = {};
+    const entries = Object.entries(value as Record<string, unknown>);
+
+    // Limit number of object keys to prevent memory exhaustion
+    const MAX_OBJECT_KEYS = 256;
+    if (entries.length > MAX_OBJECT_KEYS) {
+      console.warn(
+        `Object has ${entries.length} keys, limiting to ${MAX_OBJECT_KEYS} to prevent memory exhaustion`
+      );
+    }
+
+    for (const [key, child] of entries.slice(0, MAX_OBJECT_KEYS)) {
+      if (!key) continue;
+      const sanitizedChild = sanitizeMetadataTree(child, depth + 1);
+      if (sanitizedChild !== null) {
+        result[key] = sanitizedChild;
+      }
+    }
+    return Object.keys(result).length > 0 ? result : null;
+  }
+
+  return null;
+}
+
+function metadataValueToString(value: string | number | boolean): string {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value.toString() : "";
+  }
+  return value ? "true" : "false";
+}
+
+function collectMetadataPairsFromValue(
+  value: MetadataTree,
+  path: string,
+  source: MetadataSource,
+  pairs: MetadataPairRecord[],
+  state: PairCollectorState,
+  keyPrefix = ""
+): void {
+  if (state.count >= MAX_METADATA_PAIRS_PER_FILE) {
+    return;
+  }
+
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    const key = keyPrefix.length > 0 ? keyPrefix : ROOT_METADATA_KEY;
+    let normalized = metadataValueToString(value).trim();
+    if (normalized.length === 0) {
+      return;
+    }
+    if (normalized.length > MAX_METADATA_VALUE_LENGTH) {
+      normalized = normalized.slice(0, MAX_METADATA_VALUE_LENGTH);
+    }
+    const dedupeKey = `${source}:${key}:${normalized.toLowerCase()}`;
+    if (state.seen.has(dedupeKey)) {
+      return;
+    }
+    state.seen.add(dedupeKey);
+    pairs.push({ path, source, key, value: normalized });
+    state.count += 1;
+    return;
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectMetadataPairsFromValue(item, path, source, pairs, state, keyPrefix);
+      if (state.count >= MAX_METADATA_PAIRS_PER_FILE) {
+        break;
+      }
+    }
+    return;
+  }
+
+  if (typeof value === "object" && value !== null) {
+    for (const [childKey, childValue] of Object.entries(value)) {
+      const normalizedKey = childKey.toLowerCase();
+      const nextPrefix = keyPrefix.length > 0 ? `${keyPrefix}.${normalizedKey}` : normalizedKey;
+      collectMetadataPairsFromValue(childValue as MetadataTree, path, source, pairs, state, nextPrefix);
+      if (state.count >= MAX_METADATA_PAIRS_PER_FILE) {
+        break;
+      }
+    }
+  }
+}
+
+interface FrontMatterResult {
+  data: unknown | null;
+  body: string;
+}
+
+function parseFrontMatterBlock(content: string, path: string): FrontMatterResult | null {
+  const leading = content.startsWith("\uFEFF") ? content.slice(1) : content;
+  if (!leading.startsWith("---")) {
+    return null;
+  }
+
+  const match = leading.match(/^---\s*\r?\n([\s\S]*?)\r?\n---\s*(?:\r?\n|$)/);
+  if (!match) {
+    return null;
+  }
+
+  const rawBlock = match[1] ?? "";
+  const body = leading.slice(match[0]!.length);
+
+  try {
+    const data = parseYAML(rawBlock);
+    return { data: data ?? null, body };
+  } catch (error) {
+    // Structured error logging for better debugging
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.warn(JSON.stringify({
+      level: "warn",
+      message: "Failed to parse Markdown front matter",
+      file: path,
+      error: errorMessage,
+      context: "Front matter YAML parsing failed, metadata will be skipped for this file"
+    }));
+    return { data: null, body };
+  }
+}
+
+function stripLinkTitle(target: string): string {
+  const trimmed = target.trim();
+  if (trimmed.length === 0) {
+    return trimmed;
+  }
+  const angleWrapped = trimmed.startsWith("<") && trimmed.endsWith(">");
+  const unwrapped = angleWrapped ? trimmed.slice(1, -1) : trimmed;
+  return unwrapped.replace(/\s+("[^"]*"|'[^']*')\s*$/, "").trim();
+}
+
+function extractMarkdownLinks(
+  content: string,
+  srcPath: string,
+  repoFileSet: Set<string>
+): MarkdownLinkRecord[] {
+  const links: MarkdownLinkRecord[] = [];
+  const pattern = /\[(?<text>[^\]]+)\]\((?<target>[^)]+)\)/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = pattern.exec(content)) !== null) {
+    if (match.index > 0 && content[match.index - 1] === "!") {
+      continue; // Skip images
+    }
+    const text = match.groups?.text?.trim() ?? "";
+    let target = match.groups?.target?.trim() ?? "";
+    if (!text || !target) {
+      continue;
+    }
+    target = stripLinkTitle(target);
+    if (!target) {
+      continue;
+    }
+    const kind = classifyMarkdownTarget(target);
+    const resolvedPath = resolveMarkdownLink(kind, target, srcPath, repoFileSet);
+    if (kind === "anchor" && resolvedPath === null) {
+      continue;
+    }
+    links.push({
+      srcPath,
+      target,
+      resolvedPath,
+      anchorText: text.slice(0, 160),
+      kind,
+    });
+  }
+
+  return links;
+}
+
+function classifyMarkdownTarget(target: string): DocLinkKind {
+  const trimmed = target.trim();
+  if (!trimmed) {
+    return "external";
+  }
+  if (trimmed.startsWith("#")) {
+    return "anchor";
+  }
+  if (/^[a-z][a-z0-9+.-]*:/i.test(trimmed) || trimmed.startsWith("//")) {
+    return "external";
+  }
+  if (trimmed.startsWith("/")) {
+    return "absolute";
+  }
+  return "relative";
+}
+
+function resolveMarkdownLink(
+  kind: DocLinkKind,
+  target: string,
+  srcPath: string,
+  repoFileSet: Set<string>
+): string | null {
+  if (kind === "external" || kind === "anchor") {
+    return null;
+  }
+
+  let cleanTarget = target.split("?")[0] ?? "";
+  const hashIndex = cleanTarget.indexOf("#");
+  if (hashIndex >= 0) {
+    cleanTarget = cleanTarget.slice(0, hashIndex);
+  }
+  cleanTarget = cleanTarget.trim().replace(/\\/g, "/");
+  if (!cleanTarget) {
+    return null;
+  }
+
+  let candidate: string;
+  if (kind === "absolute") {
+    candidate = cleanTarget.replace(/^\/+/, "");
+  } else {
+    const dir = pathPosix.dirname(srcPath);
+    candidate = pathPosix.join(dir, cleanTarget);
+  }
+
+  candidate = pathPosix.normalize(candidate);
+  if (!candidate || candidate.startsWith("..")) {
+    return null;
+  }
+
+  // Security: Prevent directory traversal by checking for ".." segments
+  // Even after normalization, check that no path segment contains ".." or "."
+  const segments = candidate.split("/");
+  if (segments.some(seg => seg === ".." || seg === ".")) {
+    return null;
+  }
+
+  // Additional security: reject absolute paths that may have bypassed earlier checks
+  if (candidate.startsWith("/")) {
+    return null;
+  }
+
+  const candidates = buildLinkCandidatePaths(candidate);
+  for (const pathCandidate of candidates) {
+    if (repoFileSet.has(pathCandidate)) {
+      return pathCandidate;
+    }
+  }
+  return null;
+}
+
+function buildLinkCandidatePaths(basePath: string): string[] {
+  const candidates = new Set<string>();
+  candidates.add(basePath);
+
+  if (!pathPosix.extname(basePath)) {
+    candidates.add(`${basePath}.md`);
+    candidates.add(`${basePath}.mdx`);
+    candidates.add(`${basePath}/README.md`);
+    candidates.add(`${basePath}/readme.md`);
+    candidates.add(`${basePath}/index.md`);
+    candidates.add(`${basePath}/INDEX.md`);
+  }
+
+  return Array.from(candidates);
+}
+
+function parseJsonValue(content: string, path: string): unknown | null {
+  try {
+    return JSON.parse(content);
+  } catch (error) {
+    // Structured error logging for better debugging
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.warn(JSON.stringify({
+      level: "warn",
+      message: "Failed to parse JSON metadata",
+      file: path,
+      error: errorMessage,
+      context: "JSON parsing failed, metadata will be skipped for this file"
+    }));
+    return null;
+  }
+}
+
+function parseYamlValue(content: string, path: string): unknown | null {
+  try {
+    return parseYAML(content);
+  } catch (error) {
+    // Structured error logging for better debugging
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.warn(JSON.stringify({
+      level: "warn",
+      message: "Failed to parse YAML metadata",
+      file: path,
+      error: errorMessage,
+      context: "YAML parsing failed, metadata will be skipped for this file"
+    }));
+    return null;
+  }
+}
+
+function extractStructuredData(
+  files: FileRecord[],
+  blobs: Map<string, BlobRecord>,
+  repoFileSet: Set<string>
+): Map<string, StructuredFileData> {
+  const map = new Map<string, StructuredFileData>();
+
+  for (const file of files) {
+    if (file.isBinary) continue;
+    const blob = blobs.get(file.blobHash);
+    if (!blob || blob.content === null) {
+      continue;
+    }
+
+    const ext = (file.ext ?? "").toLowerCase();
+    const structured: StructuredFileData = {
+      metadataRecords: [],
+      metadataPairs: [],
+      links: [],
+    };
+    const pairState: PairCollectorState = { count: 0, seen: new Set<string>() };
+
+    if (ext === ".json") {
+      const parsed = parseJsonValue(blob.content, file.path);
+      const sanitized = sanitizeMetadataTree(parsed);
+      if (sanitized) {
+        structured.metadataRecords.push({ path: file.path, source: "json", data: sanitized });
+        collectMetadataPairsFromValue(sanitized, file.path, "json", structured.metadataPairs, pairState);
+      }
+    } else if (ext === ".yaml" || ext === ".yml") {
+      const parsed = parseYamlValue(blob.content, file.path);
+      const sanitized = sanitizeMetadataTree(parsed);
+      if (sanitized) {
+        structured.metadataRecords.push({ path: file.path, source: "yaml", data: sanitized });
+        collectMetadataPairsFromValue(sanitized, file.path, "yaml", structured.metadataPairs, pairState);
+      }
+    }
+
+    if (MARKDOWN_EXTENSIONS.has(ext)) {
+      const frontMatter = parseFrontMatterBlock(blob.content, file.path);
+      let markdownBody = blob.content;
+      if (frontMatter) {
+        if (frontMatter.data) {
+          const sanitized = sanitizeMetadataTree(frontMatter.data);
+          if (sanitized) {
+            structured.metadataRecords.push({ path: file.path, source: "front_matter", data: sanitized });
+            collectMetadataPairsFromValue(
+              sanitized,
+              file.path,
+              "front_matter",
+              structured.metadataPairs,
+              pairState
+            );
+          }
+        }
+        markdownBody = frontMatter.body;
+      }
+
+      const links = extractMarkdownLinks(markdownBody, file.path, repoFileSet);
+      if (links.length > 0) {
+        structured.links.push(...links);
+      }
+    }
+
+    if (
+      structured.metadataRecords.length > 0 ||
+      structured.metadataPairs.length > 0 ||
+      structured.links.length > 0
+    ) {
+      map.set(file.path, structured);
+    }
+  }
+
+  return map;
+}
+
+function aggregateStructuredData(
+  map: Map<string, StructuredFileData>
+): {
+  metadataRecords: DocumentMetadataRecord[];
+  metadataPairs: MetadataPairRecord[];
+  links: MarkdownLinkRecord[];
+} {
+  const aggregated = {
+    metadataRecords: [] as DocumentMetadataRecord[],
+    metadataPairs: [] as MetadataPairRecord[],
+    links: [] as MarkdownLinkRecord[],
+  };
+
+  for (const entry of map.values()) {
+    aggregated.metadataRecords.push(...entry.metadataRecords);
+    aggregated.metadataPairs.push(...entry.metadataPairs);
+    aggregated.links.push(...entry.links);
+  }
+
+  return aggregated;
+}
+
 async function buildCodeIntel(
   files: FileRecord[],
   blobs: Map<string, BlobRecord>,
@@ -692,6 +1307,9 @@ async function reconcileDeletedFiles(
         await db.run("DELETE FROM snippet WHERE repo_id = ? AND path = ?", [repoId, path]);
         await db.run("DELETE FROM dependency WHERE repo_id = ? AND src_path = ?", [repoId, path]);
         await db.run("DELETE FROM file_embedding WHERE repo_id = ? AND path = ?", [repoId, path]);
+        await db.run("DELETE FROM document_metadata WHERE repo_id = ? AND path = ?", [repoId, path]);
+        await db.run("DELETE FROM document_metadata_kv WHERE repo_id = ? AND path = ?", [repoId, path]);
+        await db.run("DELETE FROM markdown_link WHERE repo_id = ? AND src_path = ?", [repoId, path]);
         await db.run("DELETE FROM tree WHERE repo_id = ? AND path = ?", [repoId, path]);
         await db.run("DELETE FROM file WHERE repo_id = ? AND path = ?", [repoId, path]);
       }
@@ -720,6 +1338,9 @@ async function deleteFileRecords(
   await db.run("DELETE FROM snippet WHERE repo_id = ? AND path = ?", [repoId, path]);
   await db.run("DELETE FROM dependency WHERE repo_id = ? AND src_path = ?", [repoId, path]);
   await db.run("DELETE FROM file_embedding WHERE repo_id = ? AND path = ?", [repoId, path]);
+  await db.run("DELETE FROM document_metadata WHERE repo_id = ? AND path = ?", [repoId, path]);
+  await db.run("DELETE FROM document_metadata_kv WHERE repo_id = ? AND path = ?", [repoId, path]);
+  await db.run("DELETE FROM markdown_link WHERE repo_id = ? AND src_path = ?", [repoId, path]);
   await db.run("DELETE FROM tree WHERE repo_id = ? AND commit_hash = ? AND path = ?", [
     repoId,
     headCommit,
@@ -852,6 +1473,16 @@ export async function runIndexer(options: IndexerOptions): Promise<void> {
           return;
         }
 
+        const existingFileRows = await dbClient.all<{ path: string }>(
+          "SELECT path FROM file WHERE repo_id = ?",
+          [repoId]
+        );
+        const repoFileSet = new Set(existingFileRows.map((row) => row.path));
+        for (const file of files) {
+          repoFileSet.add(file.path);
+        }
+        const structuredByFile = extractStructuredData(changedFiles, changedBlobs, repoFileSet);
+
         // Process all changed files in a single transaction for atomicity
         const fileSet = new Set<string>(files.map((f) => f.path));
         const embeddingMap = new Map<string, EmbeddingRow>();
@@ -878,77 +1509,91 @@ export async function runIndexer(options: IndexerOptions): Promise<void> {
             const blob = changedBlobs.get(file.blobHash);
             if (!blob) continue;
 
-            // Build code intelligence for this file
-            const fileSymbols: SymbolRow[] = [];
-            const fileSnippets: SnippetRow[] = [];
-            const fileDependencies: DependencyRow[] = [];
+            try {
+              // Build code intelligence for this file
+              const fileSymbols: SymbolRow[] = [];
+              const fileSnippets: SnippetRow[] = [];
+              const fileDependencies: DependencyRow[] = [];
 
-            if (!file.isBinary && blob.content) {
-              const analysis = await analyzeSource(
-                file.path,
-                file.lang,
-                blob.content,
-                fileSet,
-                repoRoot
-              );
-              for (const symbol of analysis.symbols) {
-                fileSymbols.push({
-                  path: file.path,
-                  symbolId: symbol.symbolId,
-                  name: symbol.name,
-                  kind: symbol.kind,
-                  rangeStartLine: symbol.rangeStartLine,
-                  rangeEndLine: symbol.rangeEndLine,
-                  signature: symbol.signature,
-                  doc: symbol.doc,
-                });
-              }
-              for (const snippet of analysis.snippets) {
+              if (!file.isBinary && blob.content) {
+                const analysis = await analyzeSource(
+                  file.path,
+                  file.lang,
+                  blob.content,
+                  fileSet,
+                  repoRoot
+                );
+                for (const symbol of analysis.symbols) {
+                  fileSymbols.push({
+                    path: file.path,
+                    symbolId: symbol.symbolId,
+                    name: symbol.name,
+                    kind: symbol.kind,
+                    rangeStartLine: symbol.rangeStartLine,
+                    rangeEndLine: symbol.rangeEndLine,
+                    signature: symbol.signature,
+                    doc: symbol.doc,
+                  });
+                }
+                for (const snippet of analysis.snippets) {
+                  fileSnippets.push({
+                    path: file.path,
+                    snippetId: snippet.startLine,
+                    startLine: snippet.startLine,
+                    endLine: snippet.endLine,
+                    symbolId: snippet.symbolId,
+                  });
+                }
+                for (const dep of analysis.dependencies) {
+                  fileDependencies.push({
+                    srcPath: file.path,
+                    dstKind: dep.dstKind,
+                    dst: dep.dst,
+                    rel: dep.rel,
+                  });
+                }
+              } else {
+                // Binary or no content: add fallback snippet
+                const fallback = buildFallbackSnippet(blob.lineCount ?? 1);
                 fileSnippets.push({
                   path: file.path,
-                  snippetId: snippet.startLine,
-                  startLine: snippet.startLine,
-                  endLine: snippet.endLine,
-                  symbolId: snippet.symbolId,
+                  snippetId: fallback.startLine,
+                  startLine: fallback.startLine,
+                  endLine: fallback.endLine,
+                  symbolId: fallback.symbolId,
                 });
               }
-              for (const dep of analysis.dependencies) {
-                fileDependencies.push({
-                  srcPath: file.path,
-                  dstKind: dep.dstKind,
-                  dst: dep.dst,
-                  rel: dep.rel,
-                });
+
+              const fileEmbedding = embeddingMap.get(file.path) ?? null;
+
+              // Delete old records for this file (within main transaction)
+              await deleteFileRecords(dbClient, repoId, headCommit, file.path);
+
+              // Insert new records (within main transaction)
+              await persistBlobs(dbClient, new Map([[blob.hash, blob]]));
+              await persistTrees(dbClient, repoId, headCommit, [file]);
+              await persistFiles(dbClient, repoId, [file]);
+              await persistSymbols(dbClient, repoId, fileSymbols);
+              await persistSnippets(dbClient, repoId, fileSnippets);
+              await persistDependencies(dbClient, repoId, fileDependencies);
+              const structured = structuredByFile.get(file.path);
+              if (structured) {
+                await persistDocumentMetadata(dbClient, repoId, structured.metadataRecords);
+                await persistMetadataPairs(dbClient, repoId, structured.metadataPairs);
+                await persistMarkdownLinks(dbClient, repoId, structured.links);
               }
-            } else {
-              // Binary or no content: add fallback snippet
-              const fallback = buildFallbackSnippet(blob.lineCount ?? 1);
-              fileSnippets.push({
-                path: file.path,
-                snippetId: fallback.startLine,
-                startLine: fallback.startLine,
-                endLine: fallback.endLine,
-                symbolId: fallback.symbolId,
-              });
+              if (fileEmbedding) {
+                await persistEmbeddings(dbClient, repoId, [fileEmbedding]);
+              }
+
+              processedCount++;
+            } catch (error) {
+              console.error(
+                `Failed to process file ${file.path}, transaction will rollback:`,
+                error instanceof Error ? error.message : String(error)
+              );
+              throw error; // Re-throw to rollback the transaction
             }
-
-            const fileEmbedding = embeddingMap.get(file.path) ?? null;
-
-            // Delete old records for this file (within main transaction)
-            await deleteFileRecords(dbClient, repoId, headCommit, file.path);
-
-            // Insert new records (within main transaction)
-            await persistBlobs(dbClient, new Map([[blob.hash, blob]]));
-            await persistTrees(dbClient, repoId, headCommit, [file]);
-            await persistFiles(dbClient, repoId, [file]);
-            await persistSymbols(dbClient, repoId, fileSymbols);
-            await persistSnippets(dbClient, repoId, fileSnippets);
-            await persistDependencies(dbClient, repoId, fileDependencies);
-            if (fileEmbedding) {
-              await persistEmbeddings(dbClient, repoId, [fileEmbedding]);
-            }
-
-            processedCount++;
           }
 
           // Update timestamp and mark FTS dirty inside transaction for atomicity
@@ -988,6 +1633,9 @@ export async function runIndexer(options: IndexerOptions): Promise<void> {
       }
 
       const codeIntel = await buildCodeIntel(files, blobs, repoRoot);
+      const repoFileSetFull = new Set(files.map((file) => file.path));
+      const structuredMap = extractStructuredData(files, blobs, repoFileSetFull);
+      const aggregatedStructured = aggregateStructuredData(structuredMap);
 
       await dbClient.transaction(async () => {
         await dbClient.run("DELETE FROM tree WHERE repo_id = ?", [repoId]);
@@ -996,6 +1644,9 @@ export async function runIndexer(options: IndexerOptions): Promise<void> {
         await dbClient.run("DELETE FROM snippet WHERE repo_id = ?", [repoId]);
         await dbClient.run("DELETE FROM dependency WHERE repo_id = ?", [repoId]);
         await dbClient.run("DELETE FROM file_embedding WHERE repo_id = ?", [repoId]);
+        await dbClient.run("DELETE FROM document_metadata WHERE repo_id = ?", [repoId]);
+        await dbClient.run("DELETE FROM document_metadata_kv WHERE repo_id = ?", [repoId]);
+        await dbClient.run("DELETE FROM markdown_link WHERE repo_id = ?", [repoId]);
         await persistBlobs(dbClient, blobs);
         await persistTrees(dbClient, repoId, headCommit, files);
         await persistFiles(dbClient, repoId, files);
@@ -1003,6 +1654,9 @@ export async function runIndexer(options: IndexerOptions): Promise<void> {
         await persistSnippets(dbClient, repoId, codeIntel.snippets);
         await persistDependencies(dbClient, repoId, codeIntel.dependencies);
         await persistEmbeddings(dbClient, repoId, embeddings);
+        await persistDocumentMetadata(dbClient, repoId, aggregatedStructured.metadataRecords);
+        await persistMetadataPairs(dbClient, repoId, aggregatedStructured.metadataPairs);
+        await persistMarkdownLinks(dbClient, repoId, aggregatedStructured.links);
 
         // Update timestamp and mark FTS dirty inside transaction to ensure atomicity
         // Fix: Increment fts_generation to prevent lost updates during concurrent rebuilds

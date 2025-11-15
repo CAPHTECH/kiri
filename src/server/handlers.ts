@@ -170,6 +170,44 @@ const CONFIG_PATTERNS = [
 
 const FTS_STATUS_CACHE_TTL_MS = 10_000;
 
+type MetadataSourceTag = "front_matter" | "yaml" | "json" | undefined;
+
+interface MetadataFilter {
+  key: string;
+  values: string[];
+  source?: MetadataSourceTag;
+}
+
+interface MetadataEntry {
+  key: string;
+  value: string;
+  source: MetadataSourceTag;
+}
+
+const METADATA_ALIAS_MAP = new Map<string, { key: string; source?: MetadataSourceTag }>([
+  ["tag", { key: "tags" }],
+  ["tags", { key: "tags" }],
+  ["category", { key: "category" }],
+  ["title", { key: "title" }],
+  ["service", { key: "service" }],
+]);
+
+const METADATA_KEY_PREFIXES: Array<{ prefix: string; source?: MetadataSourceTag }> = [
+  { prefix: "meta." },
+  { prefix: "metadata." },
+  { prefix: "frontmatter.", source: "front_matter" },
+  { prefix: "fm.", source: "front_matter" },
+  { prefix: "yaml.", source: "yaml" },
+  { prefix: "json.", source: "json" },
+];
+
+const METADATA_MATCH_WEIGHT = 0.15;
+const METADATA_FILTER_MATCH_WEIGHT = 0.1;
+const INBOUND_LINK_WEIGHT = 0.2;
+
+let metadataTablesMissing = false;
+let linkTableMissing = false;
+
 async function hasDirtyRepos(db: DuckDBClient): Promise<boolean> {
   const statusCheck = await db.all<{ count: number }>(
     `SELECT COUNT(*) as count FROM repo
@@ -283,6 +321,7 @@ export interface FilesSearchParams {
   limit?: number;
   boost_profile?: BoostProfileName;
   compact?: boolean; // If true, omit preview to reduce token usage
+  metadata_filters?: Record<string, string | string[]>;
 }
 
 export interface FilesSearchResult {
@@ -311,6 +350,7 @@ export interface ContextBundleParams {
   boost_profile?: BoostProfileName;
   compact?: boolean; // If true, omit preview field to reduce token usage
   includeTokensEstimate?: boolean; // If true, compute tokens_estimate (slower)
+  metadata_filters?: Record<string, string | string[]>;
 }
 
 export interface ContextBundleItem {
@@ -1101,6 +1141,416 @@ function splitQueryWords(query: string): string[] {
   return words.length > 0 ? words : [query]; // 全て除外された場合は元のクエリを使用
 }
 
+function normalizeMetadataFilterKey(
+  rawKey: string
+): { key: string; source?: MetadataSourceTag } | null {
+  if (!rawKey) {
+    return null;
+  }
+  const normalized = rawKey.toLowerCase();
+  const alias = METADATA_ALIAS_MAP.get(normalized);
+  if (alias) {
+    return { ...alias };
+  }
+  for (const entry of METADATA_KEY_PREFIXES) {
+    if (normalized.startsWith(entry.prefix)) {
+      const remainder = normalized.slice(entry.prefix.length);
+      if (!remainder) {
+        return null;
+      }
+      return { key: remainder, source: entry.source };
+    }
+  }
+  return null;
+}
+
+function normalizeFilterValues(value: unknown): string[] {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed ? [trimmed] : [];
+  }
+  if (Array.isArray(value)) {
+    const values: string[] = [];
+    for (const item of value) {
+      if (typeof item === "string") {
+        const trimmed = item.trim();
+        if (trimmed) {
+          values.push(trimmed);
+        }
+      }
+    }
+    return values;
+  }
+  return [];
+}
+
+function normalizeMetadataFiltersParam(input: unknown): MetadataFilter[] {
+  if (!input || typeof input !== "object") {
+    return [];
+  }
+  const filters: MetadataFilter[] = [];
+  for (const [rawKey, rawValue] of Object.entries(input)) {
+    const normalizedKey = normalizeMetadataFilterKey(rawKey);
+    if (!normalizedKey) {
+      continue;
+    }
+    const values = normalizeFilterValues(rawValue);
+    if (values.length === 0) {
+      continue;
+    }
+    filters.push({ key: normalizedKey.key, values, source: normalizedKey.source });
+  }
+  return filters;
+}
+
+function mergeMetadataFilters(filters: MetadataFilter[]): MetadataFilter[] {
+  const merged = new Map<string, MetadataFilter>();
+  for (const filter of filters) {
+    if (filter.values.length === 0) continue;
+    const mapKey = `${filter.source ?? "*"}::${filter.key}`;
+    const existing = merged.get(mapKey);
+    if (existing) {
+      const existingSet = new Set(existing.values.map((val) => val.toLowerCase()));
+      for (const value of filter.values) {
+        if (!existingSet.has(value.toLowerCase())) {
+          existing.values.push(value);
+          existingSet.add(value.toLowerCase());
+        }
+      }
+    } else {
+      merged.set(mapKey, { key: filter.key, source: filter.source, values: [...filter.values] });
+    }
+  }
+  return Array.from(merged.values());
+}
+
+function parseInlineMetadataFilters(query: string): {
+  cleanedQuery: string;
+  filters: MetadataFilter[];
+} {
+  if (!query) {
+    return { cleanedQuery: "", filters: [] };
+  }
+
+  const matches: Array<{ start: number; end: number; filter: MetadataFilter }> = [];
+  const pattern = /(\b[\w.]+):("[^"]+"|'[^']+'|[^\s]+)/g;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(query)) !== null) {
+    const normalizedKey = normalizeMetadataFilterKey(match[1] ?? "");
+    if (!normalizedKey) {
+      continue;
+    }
+    let rawValue = match[2] ?? "";
+    if (
+      (rawValue.startsWith("\"") && rawValue.endsWith("\"")) ||
+      (rawValue.startsWith("'") && rawValue.endsWith("'"))
+    ) {
+      rawValue = rawValue.slice(1, -1);
+    }
+    const value = rawValue.trim();
+    if (!value) {
+      continue;
+    }
+    matches.push({
+      start: match.index,
+      end: pattern.lastIndex,
+      filter: { key: normalizedKey.key, source: normalizedKey.source, values: [value] },
+    });
+  }
+
+  if (matches.length === 0) {
+    return { cleanedQuery: query.trim(), filters: [] };
+  }
+
+  let cleaned = "";
+  let lastIndex = 0;
+  for (const info of matches) {
+    cleaned += query.slice(lastIndex, info.start);
+    lastIndex = info.end;
+  }
+  cleaned += query.slice(lastIndex);
+  const normalizedQuery = cleaned.replace(/\s{2,}/g, " ").trim();
+  return { cleanedQuery: normalizedQuery, filters: mergeMetadataFilters(matches.map((m) => m.filter)) };
+}
+
+function buildMetadataFilterConditions(
+  filters: MetadataFilter[],
+  alias = "f"
+): Array<{ sql: string; params: unknown[] }> {
+  const clauses: Array<{ sql: string; params: unknown[] }> = [];
+  for (const filter of filters) {
+    if (!filter.key || filter.values.length === 0) {
+      continue;
+    }
+    const likeClauses = filter.values.map(() => "mk.value ILIKE ?").join(" OR ");
+    const whereParts = [`mk.repo_id = ${alias}.repo_id`, `mk.path = ${alias}.path`];
+    const params: unknown[] = [];
+    if (filter.source) {
+      whereParts.push("mk.source = ?");
+      params.push(filter.source);
+    }
+    whereParts.push("mk.key = ?");
+    params.push(filter.key);
+    whereParts.push(`(${likeClauses})`);
+    params.push(...filter.values.map((value) => `%${value}%`));
+    const sql = `EXISTS (SELECT 1 FROM document_metadata_kv mk WHERE ${whereParts.join(" AND ")})`;
+    clauses.push({ sql, params });
+  }
+  return clauses;
+}
+
+function isTableMissingError(error: unknown, table: string): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  return error.message.includes(`Table with name ${table}`) || error.message.includes(table);
+}
+
+async function safeMetadataQuery<T>(
+  db: DuckDBClient,
+  sql: string,
+  params: unknown[]
+): Promise<T[]> {
+  if (metadataTablesMissing) {
+    return [];
+  }
+  try {
+    return await db.all<T>(sql, params);
+  } catch (error) {
+    if (isTableMissingError(error, "document_metadata_kv")) {
+      metadataTablesMissing = true;
+      console.warn(
+        "Metadata tables not found; disabling metadata filters and boosts until database is upgraded."
+      );
+      return [];
+    }
+    throw error;
+  }
+}
+
+async function safeLinkQuery<T>(
+  db: DuckDBClient,
+  sql: string,
+  params: unknown[]
+): Promise<T[]> {
+  if (linkTableMissing) {
+    return [];
+  }
+  try {
+    return await db.all<T>(sql, params);
+  } catch (error) {
+    if (isTableMissingError(error, "markdown_link")) {
+      linkTableMissing = true;
+      console.warn(
+        "Markdown link table not found; inbound link boosting disabled until database is upgraded."
+      );
+      return [];
+    }
+    throw error;
+  }
+}
+
+async function fetchMetadataOnlyCandidates(
+  db: DuckDBClient,
+  repoId: number,
+  filters: MetadataFilter[],
+  limit: number
+): Promise<FileRow[]> {
+  if (metadataTablesMissing || filters.length === 0 || limit <= 0) {
+    return [];
+  }
+
+  const filterClauses = buildMetadataFilterConditions(filters);
+  const whereClauses = ["f.repo_id = ?"];
+  const params: unknown[] = [repoId];
+  for (const clause of filterClauses) {
+    whereClauses.push(clause.sql);
+    params.push(...clause.params);
+  }
+
+  const sql = `
+    SELECT f.path, f.lang, f.ext, b.content
+    FROM file f
+    JOIN blob b ON b.hash = f.blob_hash
+    WHERE ${whereClauses.join(" AND ")}
+    ORDER BY f.path
+    LIMIT ?
+  `;
+  params.push(limit);
+
+  try {
+    return await db.all<FileRow>(sql, params);
+  } catch (error) {
+    if (isTableMissingError(error, "document_metadata_kv")) {
+      metadataTablesMissing = true;
+      console.warn(
+        "Metadata tables not found; disabling metadata-only searches until database is upgraded."
+      );
+      return [];
+    }
+    throw error;
+  }
+}
+
+async function fetchMetadataKeywordMatches(
+  db: DuckDBClient,
+  repoId: number,
+  keywords: string[],
+  filters: MetadataFilter[],
+  limit: number,
+  excludePaths: Set<string>
+): Promise<FileRow[]> {
+  if (metadataTablesMissing || keywords.length === 0 || limit <= 0) {
+    return [];
+  }
+
+  const keywordClauses = keywords.map(() => "mk.value ILIKE ?").join(" OR ");
+  const params: unknown[] = [repoId, ...keywords.map((kw) => `%${kw}%`)];
+  const whereClauses = ["mk.repo_id = ?", `(${keywordClauses})`];
+
+  if (excludePaths.size > 0) {
+    const placeholders = Array.from(excludePaths).map(() => "?").join(", ");
+    whereClauses.push(`f.path NOT IN (${placeholders})`);
+    params.push(...excludePaths);
+  }
+
+  const filterClauses = buildMetadataFilterConditions(filters, "f");
+  for (const clause of filterClauses) {
+    whereClauses.push(clause.sql);
+    params.push(...clause.params);
+  }
+
+  params.push(limit);
+
+  const sql = `
+    SELECT f.path, f.lang, f.ext, b.content, COUNT(*) AS score
+    FROM document_metadata_kv mk
+    JOIN file f ON f.repo_id = mk.repo_id AND f.path = mk.path
+    JOIN blob b ON b.hash = f.blob_hash
+    WHERE ${whereClauses.join(" AND ")}
+    GROUP BY f.path, f.lang, f.ext, b.content
+    ORDER BY score DESC, f.path
+    LIMIT ?
+  `;
+
+  const rows = await safeMetadataQuery<FileRow>(db, sql, params);
+  return rows.map((row) => ({ ...row, score: Number(row.score ?? 1) }));
+}
+
+async function loadMetadataForPaths(
+  db: DuckDBClient,
+  repoId: number,
+  paths: string[]
+): Promise<Map<string, MetadataEntry[]>> {
+  const result = new Map<string, MetadataEntry[]>();
+  if (metadataTablesMissing || paths.length === 0) {
+    return result;
+  }
+
+  const placeholders = paths.map(() => "?").join(", ");
+  const sql = `
+    SELECT path, key, value, source
+    FROM document_metadata_kv
+    WHERE repo_id = ? AND path IN (${placeholders})
+  `;
+  const rows = await safeMetadataQuery<{ path: string; key: string; value: string; source: string | null }>(
+    db,
+    sql,
+    [repoId, ...paths]
+  );
+
+  for (const row of rows) {
+    if (!result.has(row.path)) {
+      result.set(row.path, []);
+    }
+    result.get(row.path)!.push({
+      key: row.key,
+      value: row.value,
+      source: (row.source as MetadataSourceTag) ?? undefined,
+    });
+  }
+  return result;
+}
+
+async function loadInboundLinkCounts(
+  db: DuckDBClient,
+  repoId: number,
+  paths: string[]
+): Promise<Map<string, number>> {
+  const counts = new Map<string, number>();
+  if (linkTableMissing || paths.length === 0) {
+    return counts;
+  }
+  const placeholders = paths.map(() => "?").join(", ");
+  const sql = `
+    SELECT resolved_path AS path, COUNT(*) AS inbound
+    FROM markdown_link
+    WHERE repo_id = ? AND resolved_path IS NOT NULL AND resolved_path IN (${placeholders})
+    GROUP BY resolved_path
+  `;
+  const rows = await safeLinkQuery<{ path: string; inbound: number }>(db, sql, [repoId, ...paths]);
+  for (const row of rows) {
+    counts.set(row.path, row.inbound);
+  }
+  return counts;
+}
+
+function computeMetadataBoost(
+  entries: MetadataEntry[] | undefined,
+  keywordSet: Set<string>,
+  filterValueSet: Set<string>
+): number {
+  if (!entries || entries.length === 0) {
+    return 0;
+  }
+  let boost = 0;
+  for (const entry of entries) {
+    const valueLower = entry.value.toLowerCase();
+    for (const keyword of keywordSet) {
+      if (valueLower.includes(keyword)) {
+        boost += METADATA_MATCH_WEIGHT;
+        break;
+      }
+    }
+    if (filterValueSet.has(valueLower)) {
+      boost += METADATA_FILTER_MATCH_WEIGHT;
+    }
+  }
+  return Math.min(boost, 1.5);
+}
+
+function computeInboundLinkBoost(count: number | undefined): number {
+  if (!count || count <= 0) {
+    return 0;
+  }
+  return Math.min(Math.log1p(count) * INBOUND_LINK_WEIGHT, 1.0);
+}
+
+function candidateMatchesMetadataFilters(
+  entries: MetadataEntry[] | undefined,
+  filters: MetadataFilter[]
+): boolean {
+  if (filters.length === 0) {
+    return true;
+  }
+  if (!entries || entries.length === 0) {
+    return false;
+  }
+  return filters.every((filter) => {
+    const expectedValues = filter.values.map((value) => value.toLowerCase());
+    return entries.some((entry) => {
+      if (entry.key !== filter.key) {
+        return false;
+      }
+      if (filter.source && entry.source !== filter.source) {
+        return false;
+      }
+      const lowerValue = entry.value.toLowerCase();
+      return expectedValues.some((value) => lowerValue.includes(value));
+    });
+  });
+}
+
 /**
  * パス固有のマルチプライヤーを取得（最長プレフィックスマッチ）
  * 配列の順序に依存せず、常に最長一致のプレフィックスを選択
@@ -1539,124 +1989,193 @@ export async function filesSearch(
   params: FilesSearchParams
 ): Promise<FilesSearchResult[]> {
   const { db, repoId } = context;
-  const { query } = params;
-  if (!query || query.trim().length === 0) {
+  const rawQuery = params.query ?? "";
+  const inlineMetadata = parseInlineMetadataFilters(rawQuery);
+  const paramFilters = normalizeMetadataFiltersParam(params.metadata_filters);
+  const metadataFilters = mergeMetadataFilters([...inlineMetadata.filters, ...paramFilters]);
+  if (metadataFilters.length > 0) {
+    console.warn("metadataFilters", metadataFilters);
+  }
+  const cleanedQuery = inlineMetadata.cleanedQuery;
+  const hasTextQuery = cleanedQuery.length > 0;
+
+  if (!hasTextQuery && metadataFilters.length === 0) {
     throw new Error(
-      "files_search requires a non-empty query. Provide a search keyword to continue."
+      "files_search requires a query or metadata_filters. Provide keywords or structured filters to continue."
     );
   }
 
   const limit = normalizeLimit(params.limit);
-
   const ftsStatus = await getFreshFtsStatus(context);
   const hasFTS = ftsStatus.ready;
+  const metadataClauses = buildMetadataFilterConditions(metadataFilters);
+  const candidateRows: FileRow[] = [];
 
-  let sql: string;
-  let values: unknown[];
+  if (hasTextQuery) {
+    let sql: string;
+    let values: unknown[];
 
-  if (hasFTS) {
-    // FTS拡張利用可能: fts_main_blob.match_bm25 を使用
-    const conditions = ["f.repo_id = ?"];
-    values = [repoId];
+    if (hasFTS) {
+      const conditions = ["f.repo_id = ?"];
+      values = [repoId];
 
-    // 言語・拡張子フィルタ
-    if (params.lang) {
-      conditions.push("COALESCE(f.lang, '') = ?");
-      values.push(params.lang);
-    }
-    if (params.ext) {
-      conditions.push("COALESCE(f.ext, '') = ?");
-      values.push(params.ext);
-    }
-    if (params.path_prefix) {
-      conditions.push("f.path LIKE ?");
-      values.push(`${params.path_prefix}%`);
-    }
+      if (params.lang) {
+        conditions.push("COALESCE(f.lang, '') = ?");
+        values.push(params.lang);
+      }
+      if (params.ext) {
+        conditions.push("COALESCE(f.ext, '') = ?");
+        values.push(params.ext);
+      }
+      if (params.path_prefix) {
+        conditions.push("f.path LIKE ?");
+        values.push(`${params.path_prefix}%`);
+      }
+      for (const clause of metadataClauses) {
+        conditions.push(clause.sql);
+        values.push(...clause.params);
+      }
 
-    // FTS検索（BM25スコアリング）
-    sql = `
-      SELECT f.path, f.lang, f.ext, b.content, fts.score
-      FROM file f
-      JOIN blob b ON b.hash = f.blob_hash
-      JOIN (
-        SELECT hash, fts_main_blob.match_bm25(hash, ?) AS score
-        FROM blob
-        WHERE score IS NOT NULL
-      ) fts ON fts.hash = b.hash
-      WHERE ${conditions.join(" AND ")}
-      ORDER BY fts.score DESC
-      LIMIT ?
-    `;
+      sql = `
+        SELECT f.path, f.lang, f.ext, b.content, fts.score
+        FROM file f
+        JOIN blob b ON b.hash = f.blob_hash
+        JOIN (
+          SELECT hash, fts_main_blob.match_bm25(hash, ?) AS score
+          FROM blob
+          WHERE score IS NOT NULL
+        ) fts ON fts.hash = b.hash
+        WHERE ${conditions.join(" AND ")}
+        ORDER BY fts.score DESC
+        LIMIT ?
+      `;
 
-    values.unshift(query); // FTSクエリを先頭に追加
-    values.push(limit);
-  } else {
-    // FTS拡張利用不可: ILIKE検索（Phase 1の単語分割ロジック）
-    const conditions = ["f.repo_id = ?", "b.content IS NOT NULL"];
-    values = [repoId];
-
-    const words = splitQueryWords(query);
-    if (words.length === 1) {
-      conditions.push("b.content ILIKE '%' || ? || '%'");
-      values.push(query);
+      values.unshift(cleanedQuery);
+      values.push(limit);
     } else {
-      const wordConditions = words.map(() => "b.content ILIKE '%' || ? || '%'");
-      conditions.push(`(${wordConditions.join(" OR ")})`);
-      values.push(...words);
+      const conditions = ["f.repo_id = ?", "b.content IS NOT NULL"];
+      values = [repoId];
+
+      const words = splitQueryWords(cleanedQuery);
+      if (words.length === 1) {
+        conditions.push("b.content ILIKE '%' || ? || '%'");
+        values.push(cleanedQuery);
+      } else {
+        const wordConditions = words.map(() => "b.content ILIKE '%' || ? || '%'");
+        conditions.push(`(${wordConditions.join(" OR ")})`);
+        values.push(...words);
+      }
+
+      if (params.lang) {
+        conditions.push("COALESCE(f.lang, '') = ?");
+        values.push(params.lang);
+      }
+      if (params.ext) {
+        conditions.push("COALESCE(f.ext, '') = ?");
+        values.push(params.ext);
+      }
+      if (params.path_prefix) {
+        conditions.push("f.path LIKE ?");
+        values.push(`${params.path_prefix}%`);
+      }
+      for (const clause of metadataClauses) {
+        conditions.push(clause.sql);
+        values.push(...clause.params);
+      }
+
+      sql = `
+        SELECT f.path, f.lang, f.ext, b.content
+        FROM file f
+        JOIN blob b ON b.hash = f.blob_hash
+        WHERE ${conditions.join(" AND ")}
+        ORDER BY f.path
+        LIMIT ?
+      `;
+
+      values.push(limit);
     }
 
-    if (params.lang) {
-      conditions.push("COALESCE(f.lang, '') = ?");
-      values.push(params.lang);
-    }
-    if (params.ext) {
-      conditions.push("COALESCE(f.ext, '') = ?");
-      values.push(params.ext);
-    }
-    if (params.path_prefix) {
-      conditions.push("f.path LIKE ?");
-      values.push(`${params.path_prefix}%`);
-    }
-
-    sql = `
-      SELECT f.path, f.lang, f.ext, b.content
-      FROM file f
-      JOIN blob b ON b.hash = f.blob_hash
-      WHERE ${conditions.join(" AND ")}
-      ORDER BY f.path
-      LIMIT ?
-    `;
-
-    values.push(limit);
+    const textRows = await db.all<FileRow>(sql, values);
+    candidateRows.push(...textRows);
   }
 
-  const rows = await db.all<FileRow>(sql, values);
+  if (!hasTextQuery && metadataFilters.length > 0) {
+    const metadataOnlyRows = await fetchMetadataOnlyCandidates(db, repoId, metadataFilters, limit * 2);
+    for (const row of metadataOnlyRows) {
+      row.score = 1 + metadataFilters.length * 0.2;
+    }
+    candidateRows.push(...metadataOnlyRows);
+  }
 
-  const boostProfile = params.boost_profile ?? "default";
+  if (hasTextQuery) {
+    const metadataKeywords = splitQueryWords(cleanedQuery.toLowerCase()).map((kw) => kw.toLowerCase());
+    if (metadataKeywords.length > 0) {
+      const excludePaths = new Set(candidateRows.map((row) => row.path));
+      const metadataRows = await fetchMetadataKeywordMatches(
+        db,
+        repoId,
+        metadataKeywords,
+        metadataFilters,
+        limit * 2,
+        excludePaths
+      );
+      candidateRows.push(...metadataRows);
+    }
+  }
+
+  if (candidateRows.length === 0) {
+    return [];
+  }
+
+  const rowMap = new Map<string, FileRow>();
+  for (const row of candidateRows) {
+    const base = row.score ?? (hasTextQuery ? 1.0 : 0.8);
+    const existing = rowMap.get(row.path);
+    const existingScore = existing?.score ?? (hasTextQuery ? 1.0 : 0.8);
+    if (!existing || base > existingScore) {
+      rowMap.set(row.path, { ...row, score: base });
+    }
+  }
+
+  const dedupedRows = Array.from(rowMap.values()).sort((a, b) => (b.score ?? 1) - (a.score ?? 1));
+  const limitedRows = dedupedRows.slice(0, limit);
+  const paths = limitedRows.map((row) => row.path);
+  const metadataMap = await loadMetadataForPaths(db, repoId, paths);
+  const inboundCounts = await loadInboundLinkCounts(db, repoId, paths);
+  const metadataKeywordSet = hasTextQuery
+    ? new Set(splitQueryWords(cleanedQuery.toLowerCase()).map((kw) => kw.toLowerCase()))
+    : new Set<string>();
+  const filterValueSet = new Set(
+    metadataFilters.flatMap((filter) => filter.values.map((value) => value.toLowerCase()))
+  );
+
+  const boostProfile: BoostProfileName =
+    params.boost_profile ?? (metadataFilters.length > 0 ? "docs" : "default");
   const profileConfig = getBoostProfile(boostProfile);
-
-  // ✅ v0.7.0+: Load configurable scoring weights for unified boosting logic
-  // Note: filesSearch doesn't have a separate profile parameter, uses default weights
   const weights = loadScoringProfile(null);
-
   const options = parseOutputOptions(params);
+  const previewQuery = hasTextQuery
+    ? cleanedQuery
+    : metadataFilters[0]?.values[0] ?? rawQuery.trim();
 
-  return rows
+  return limitedRows
     .map((row) => {
       let preview: string | undefined;
       let matchLine: number;
+      const previewSource = previewQuery || row.path;
 
       if (options.includePreview) {
-        // Full preview generation for non-compact mode
-        const previewData = buildPreview(row.content ?? "", query);
+        const previewData = buildPreview(row.content ?? "", previewSource);
         preview = previewData.preview;
         matchLine = previewData.line;
       } else {
-        // Lightweight: extract only line number without preview
-        matchLine = findFirstMatchLine(row.content ?? "", query);
+        matchLine = findFirstMatchLine(row.content ?? "", previewSource);
       }
 
-      const baseScore = row.score ?? 1.0; // FTS時はBM25スコア、ILIKE時は1.0
+      const metadataEntries = metadataMap.get(row.path);
+      const metadataBoost = computeMetadataBoost(metadataEntries, metadataKeywordSet, filterValueSet);
+      const inboundBoost = computeInboundLinkBoost(inboundCounts.get(row.path));
+      const baseScore = (row.score ?? (hasTextQuery ? 1.0 : 0.8)) + metadataBoost + inboundBoost;
       const boostedScore =
         boostProfile === "none"
           ? baseScore
@@ -1676,7 +2195,7 @@ export async function filesSearch(
 
       return result;
     })
-    .sort((a, b) => b.score - a.score); // スコアの高い順に再ソート
+    .sort((a, b) => b.score - a.score);
 }
 
 // snippetsGet has been extracted to ./handlers/snippets-get.ts and re-exported above
@@ -1981,12 +2500,16 @@ export async function contextBundle(
   context.warningManager.startRequest();
 
   const { db, repoId } = context;
-  const goal = params.goal?.trim() ?? "";
-  if (goal.length === 0) {
+  const rawGoal = params.goal?.trim() ?? "";
+  if (rawGoal.length === 0) {
     throw new Error(
       "context_bundle requires a non-empty goal. Describe your objective to receive context."
     );
   }
+  const inlineMetadata = parseInlineMetadataFilters(rawGoal);
+  const paramFilters = normalizeMetadataFiltersParam(params.metadata_filters);
+  const metadataFilters = mergeMetadataFilters([...inlineMetadata.filters, ...paramFilters]);
+  const goal = inlineMetadata.cleanedQuery.length > 0 ? inlineMetadata.cleanedQuery : rawGoal;
 
   const limit = normalizeBundleLimit(params.limit);
   const artifacts = params.artifacts ?? {};
@@ -2025,6 +2548,12 @@ export async function contextBundle(
   if (artifactHints.length > 0) {
     keywordSources.push(artifactHints.join(" "));
   }
+  if (metadataFilters.length > 0) {
+    const filterSeed = metadataFilters
+      .map((filter) => `${filter.source ?? "meta"}:${filter.key}=${filter.values.join(",")}`)
+      .join(" ");
+    keywordSources.push(filterSeed);
+  }
   const semanticSeed = keywordSources.join(" ");
   const queryEmbedding = generateEmbedding(semanticSeed)?.values ?? null;
 
@@ -2048,7 +2577,8 @@ export async function contextBundle(
   const fileCache = new Map<string, FileContentCacheEntry>();
 
   // ✅ Cache boost profile config to avoid redundant lookups in hot path
-  const boostProfile = params.boost_profile ?? "default";
+  const boostProfile: BoostProfileName =
+    params.boost_profile ?? (metadataFilters.length > 0 ? "docs" : "default");
   const profileConfig = getBoostProfile(boostProfile);
 
   // フレーズマッチング（高い重み: textMatch × 2）- 統合クエリでパフォーマンス改善
@@ -2303,30 +2833,74 @@ export async function contextBundle(
     }
   }
 
-  const materializedCandidates: CandidateInfo[] = [];
-  for (const candidate of candidates.values()) {
-    if (!candidate.content) {
-      const cached = fileCache.get(candidate.path);
-      if (cached) {
-        candidate.content = cached.content;
-        candidate.lang = cached.lang;
-        candidate.ext = cached.ext;
-        candidate.totalLines = cached.totalLines;
-        candidate.embedding = cached.embedding;
-      } else {
-        const loaded = await loadFileContent(db, repoId, candidate.path);
-        if (!loaded) {
-          continue;
+  const materializeCandidates = async (): Promise<CandidateInfo[]> => {
+    const result: CandidateInfo[] = [];
+    for (const candidate of candidates.values()) {
+      if (!candidate.content) {
+        const cached = fileCache.get(candidate.path);
+        if (cached) {
+          candidate.content = cached.content;
+          candidate.lang = cached.lang;
+          candidate.ext = cached.ext;
+          candidate.totalLines = cached.totalLines;
+          candidate.embedding = cached.embedding;
+        } else {
+          const loaded = await loadFileContent(db, repoId, candidate.path);
+          if (!loaded) {
+            continue;
+          }
+          candidate.content = loaded.content;
+          candidate.lang = loaded.lang;
+          candidate.ext = loaded.ext;
+          candidate.totalLines = loaded.totalLines;
+          candidate.embedding = loaded.embedding;
+          fileCache.set(candidate.path, loaded);
         }
-        candidate.content = loaded.content;
-        candidate.lang = loaded.lang;
-        candidate.ext = loaded.ext;
-        candidate.totalLines = loaded.totalLines;
-        candidate.embedding = loaded.embedding;
-        fileCache.set(candidate.path, loaded);
       }
+      result.push(candidate);
     }
-    materializedCandidates.push(candidate);
+    return result;
+  };
+
+  const hydrateMetadataFallback = async (): Promise<CandidateInfo[]> => {
+    if (metadataFilters.length === 0) {
+      return [];
+    }
+    const metadataRows = await fetchMetadataOnlyCandidates(
+      db,
+      repoId,
+      metadataFilters,
+      limit * 2
+    );
+    if (metadataRows.length === 0) {
+      return [];
+    }
+    for (const row of metadataRows) {
+      const candidate = ensureCandidate(candidates, row.path);
+      if (row.content) {
+        candidate.content = row.content;
+        candidate.totalLines = row.content.split(/\r?\n/).length;
+        fileCache.set(row.path, {
+          content: row.content,
+          lang: row.lang,
+          ext: row.ext,
+          totalLines: candidate.totalLines,
+          embedding: candidate.embedding,
+        });
+      }
+      candidate.lang ??= row.lang;
+      candidate.ext ??= row.ext;
+      candidate.matchLine ??= 1;
+      candidate.score = Math.max(candidate.score, 1 + metadataFilters.length * 0.2);
+      candidate.reasons.add("metadata:filter");
+    }
+    return materializeCandidates();
+  };
+
+  let materializedCandidates = await materializeCandidates();
+
+  if (materializedCandidates.length === 0) {
+    materializedCandidates = await hydrateMetadataFallback();
   }
 
   if (materializedCandidates.length === 0) {
@@ -2337,6 +2911,79 @@ export async function contextBundle(
       ...(includeTokensEstimate && { tokens_estimate: 0 }),
       ...(warnings.length > 0 && { warnings }),
     };
+  }
+
+  const metadataKeywordSet = new Set(
+    extractedTerms.keywords.map((keyword) => keyword.toLowerCase())
+  );
+  const filterValueSet = new Set(
+    metadataFilters.flatMap((filter) => filter.values.map((value) => value.toLowerCase()))
+  );
+
+  let metadataEntriesMap: Map<string, MetadataEntry[]> | undefined;
+  if (
+    metadataFilters.length > 0 ||
+    metadataKeywordSet.size > 0 ||
+    filterValueSet.size > 0
+  ) {
+    metadataEntriesMap = await loadMetadataForPaths(
+      db,
+      repoId,
+      materializedCandidates.map((candidate) => candidate.path)
+    );
+  }
+
+  if (metadataFilters.length > 0) {
+    metadataEntriesMap ??= new Map();
+    for (let i = materializedCandidates.length - 1; i >= 0; i--) {
+      const candidate = materializedCandidates[i];
+      if (!candidate) {
+        continue; // Skip undefined entries
+      }
+      const entries = metadataEntriesMap.get(candidate.path);
+      if (!candidateMatchesMetadataFilters(entries, metadataFilters)) {
+        materializedCandidates.splice(i, 1);
+      }
+    }
+
+    if (materializedCandidates.length === 0) {
+      materializedCandidates = await hydrateMetadataFallback();
+    }
+
+
+    if (materializedCandidates.length === 0) {
+      const warnings = [...context.warningManager.responseWarnings];
+      return {
+        context: [],
+        ...(includeTokensEstimate && { tokens_estimate: 0 }),
+        ...(warnings.length > 0 && { warnings }),
+      };
+    }
+  }
+
+  const inboundCounts = await loadInboundLinkCounts(
+    db,
+    repoId,
+    materializedCandidates.map((candidate) => candidate.path)
+  );
+
+  if (metadataEntriesMap) {
+    for (const candidate of materializedCandidates) {
+      const entries = metadataEntriesMap.get(candidate.path);
+      const metadataBoost = computeMetadataBoost(entries, metadataKeywordSet, filterValueSet);
+      if (metadataBoost > 0) {
+        candidate.score += metadataBoost;
+        candidate.reasons.add("boost:metadata");
+      }
+    }
+  }
+
+  for (const candidate of materializedCandidates) {
+    const linkBoost = computeInboundLinkBoost(inboundCounts.get(candidate.path));
+    if (linkBoost > 0) {
+      candidate.score += linkBoost;
+      candidate.reasons.add("boost:links");
+    }
   }
 
   applyStructuralScores(materializedCandidates, queryEmbedding, weights.structural);

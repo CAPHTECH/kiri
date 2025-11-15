@@ -413,3 +413,16 @@ mcp:
 - Degrade-first architecture with fallback search
 - Security features including sensitive token masking
 - Daemon mode for persistent background operation
+## [0.10.1] - 2025-11-15
+
+### Added
+
+- **Structured metadata ingestion**: the indexer now parses Markdown Front Matter, YAML, and JSON documents, storing normalized key/value pairs in DuckDB (`document_metadata*` tables) plus a lightweight Markdown link graph (`markdown_link`).
+- **Metadata-aware search parameters**: both `files_search` and `context_bundle` accept `metadata_filters` (and inline syntax like `tag:observability`) so callers can filter/boost on front matter tags, categories, or custom YAML/JSON keys. Metadata-only queries (empty `query`) are supported for dashboards such as “which doc has `tags: sre`?”.
+- **Link-graph ranking signal**: Markdown inline links are resolved to repo-relative paths and their inbound counts boost frequently referenced documentation, improving runbook discovery.
+
+### Changed
+
+- `files_search` merges metadata matches into the candidate set, boosts files whose metadata matches the textual query, and surfaces the new reasons (`boost:metadata`, `boost:links`).
+- `context_bundle` strips metadata filter tokens from `goal`, filters candidates against the metadata tables, boosts structured matches, and records inbound-link bonuses alongside existing why-tags.
+- Added migration guidance for the new tables to `docs/runbook.md` and documented the API surface (`metadata_filters`) in the client guide.
