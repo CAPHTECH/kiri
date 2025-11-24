@@ -1524,7 +1524,14 @@ async function executeQuery(
       : isContextBundleTool
         ? retrieved.some((path) => {
             const tags = whyByPath[path] ?? [];
-            return tags.includes("metadata:filter") || tags.includes("boost:metadata");
+            // metadata:hint はインラインタグフィルタ（tag:xxx）によるメタデータ参照を示す
+            // metadata:filter は strict フィルタ（docmeta.*）によるメタデータ参照を示す
+            // boost:metadata は metadata_filters パラメータによるメタデータ参照を示す
+            return (
+              tags.includes("metadata:filter") ||
+              tags.includes("boost:metadata") ||
+              tags.includes("metadata:hint")
+            );
           })
         : false;
   const inboundSatisfied =
