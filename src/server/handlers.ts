@@ -4199,13 +4199,13 @@ async function contextBundleImpl(
           avgDocLength
         );
 
-        // IDF重み（コード検索ではTFよりIDFが重要）
-        // Note: TF-IDF完全実装を試したが、コード検索では精度低下を確認（Issue #122）
-        // - TF-IDF: P@10=0.245 (-4.1%), Hybrid: P@10=0.254 (-3.2%), IDF-only: P@10=0.257
-        // - 理由: コード検索では定義（1回出現）が呼び出し（複数回出現）より重要
+        // IDF重み（コード検索・ドキュメント検索ともにTFよりIDFが効果的）
+        // Note: TF-IDF完全実装を試したが、精度低下を確認（Issue #122）
+        // - 全体: TF-IDF P@10=0.245, IDF-only P@10=0.257
+        // - ドキュメント: TF-IDF P@10=0.263, IDF-only P@10=0.275
+        // - 理由: 小規模コーパス、メタデータ検索ではTFの効果が限定的
         const dampedIdf = 0.6 + 0.4 * rawIdf; // 最低0.6を保証
         const weightedScore = weights.textMatch * dampedIdf;
-        // normalizedTfは計算済みだがスコアリングには使用しない（デバッグログ用に保持）
         candidate.score += weightedScore;
 
         // デバッグ用: TFとIDFの両方を記録（normalizedTfは将来の分析用）
