@@ -335,8 +335,11 @@ export async function computeCochangeGraph(
 
   console.info(`[Cochange] Processed ${processedCount} new commits`);
 
-  // Update Jaccard confidence scores
-  await updateJaccardConfidence(db, repoId, fileChangeCounts);
+  // Update Jaccard confidence scores only if we processed new commits
+  // Skip when processedCount is 0 to avoid zeroing existing confidence values
+  if (processedCount > 0) {
+    await updateJaccardConfidence(db, repoId, fileChangeCounts);
+  }
 
   // Prune weak edges (CC3)
   const prunedCount = await pruneWeakEdges(db, repoId, cfg.minCochangeCount);

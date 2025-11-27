@@ -118,7 +118,7 @@ describe("scoring", () => {
       expect(profile.graphImportance).toBeCloseTo(0.3, 1);
       expect(profile.graphDecay).toBeCloseTo(0.5, 1);
       expect(profile.graphMaxDepth).toBe(3);
-      expect(profile.cochange).toBe(0); // Disabled by default (Phase 4)
+      expect(profile.cochange).toBe(3); // Enabled by default (v0.15.0+)
     });
 
     it("should allow different graph weights per profile", () => {
