@@ -1,16 +1,16 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { existsSync, unlinkSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 
-import { DuckDBClient } from "../../src/shared/duckdb.js";
-import { ensureBaseSchema, ensureGraphLayerTables } from "../../src/indexer/schema.js";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+
 import {
   computeGraphMetrics,
   computeDegreeCentrality,
   precomputeInboundClosure,
-  computeImportanceScores,
   incrementalGraphUpdate,
 } from "../../src/indexer/graph-metrics.js";
+import { ensureBaseSchema, ensureGraphLayerTables } from "../../src/indexer/schema.js";
+import { DuckDBClient } from "../../src/shared/duckdb.js";
 
 describe("graph-metrics", () => {
   let db: DuckDBClient;

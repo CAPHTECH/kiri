@@ -1,10 +1,9 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect } from "vitest";
 
 import {
   loadScoringProfile,
   coerceProfileName,
   type ScoringProfileName,
-  type ScoringWeights,
 } from "../../src/server/scoring.js";
 
 describe("scoring", () => {
@@ -45,7 +44,7 @@ describe("scoring", () => {
 
     it("should return different weights for different profiles", () => {
       const bugfix = loadScoringProfile("bugfix");
-      const feature = loadScoringProfile("feature");
+      const _feature = loadScoringProfile("feature");
       const testfail = loadScoringProfile("testfail");
 
       // testfail should have higher testPenaltyMultiplier than others

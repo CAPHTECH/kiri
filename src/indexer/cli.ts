@@ -16,8 +16,10 @@ import {
   getRepoPathCandidates,
 } from "../shared/utils/path.js";
 
+import { computeCochangeGraph, incrementalCochangeUpdate } from "./cochange.js";
 import { analyzeSource, buildFallbackSnippet } from "./codeintel.js";
 import { getDefaultBranch, getHeadCommit, gitLsFiles, gitDiffNameOnly } from "./git.js";
+import { computeGraphMetrics, incrementalGraphUpdate } from "./graph-metrics.js";
 import { detectLanguage } from "./language.js";
 import { mergeRepoRecords } from "./migrations/repo-merger.js";
 import { getIndexerQueue } from "./queue.js";
@@ -29,8 +31,6 @@ import {
   ensureRepoMetaColumns,
   rebuildFTSIfNeeded,
 } from "./schema.js";
-import { computeGraphMetrics, incrementalGraphUpdate } from "./graph-metrics.js";
-import { computeCochangeGraph, incrementalCochangeUpdate } from "./cochange.js";
 import { IndexWatcher } from "./watch.js";
 
 interface IndexerOptions {
