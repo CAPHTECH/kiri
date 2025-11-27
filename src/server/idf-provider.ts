@@ -1,11 +1,11 @@
 /**
- * IDF Provider
+ * TF-IDF Provider
  *
- * IDF（逆文書頻度）を計算するプロバイダー。
- * 高頻度語の重みを自動的に減衰させ、検索精度を向上させる。
+ * TF-IDF（Term Frequency - Inverse Document Frequency）を計算するプロバイダー。
+ * BM25スタイルのTF正規化とIDF計算により、検索精度を向上させる。
  *
  * @see Issue #48: Improve context_bundle stop word coverage and configurability
- * @see Phase 2: IDF-based keyword weighting
+ * @see Issue #122: IDF重み付けの改善 - TF-IDF完全実装
  */
 
 import type { DuckDBClient } from "../shared/duckdb.js";
@@ -28,16 +28,52 @@ const MAX_CACHE_SIZE = 10000;
  */
 const SMOOTHING_FACTOR = 0.5;
 
+/**
+ * BM25 TF飽和パラメータ（デフォルト値）
+ * TFの増加に対するスコア上昇を飽和させる。1.2-2.0が典型的。
+ */
+const DEFAULT_K1 = 1.2;
+
+/**
+ * BM25 文書長正規化パラメータ（デフォルト値）
+ * 0.75が標準的。0に近いほど文書長の影響が小さくなる。
+ */
+const DEFAULT_B = 0.75;
+
+/**
+ * TF上限（スパム防止）
+ * 同一語が極端に多く出現するファイルを過度に優遇しない
+ */
+const DEFAULT_MAX_TF_CAP = 10;
+
+// ============================================================
+// TF-IDF設定インターフェース
+// ============================================================
+
+/**
+ * TF-IDF計算のオプション設定
+ */
+export interface TfIdfOptions {
+  /** BM25 TF飽和パラメータ（デフォルト: 1.2） */
+  k1?: number;
+  /** BM25 文書長正規化パラメータ（デフォルト: 0.75） */
+  b?: number;
+  /** TF上限（デフォルト: 10） */
+  maxTfCap?: number;
+}
+
 // ============================================================
 // DuckDbIdfProvider クラス
 // ============================================================
 
 /**
- * DuckDB ベースの IDF プロバイダー
+ * DuckDB ベースの TF-IDF プロバイダー
  *
  * 遅延計算とLRUキャッシュを使用し、クエリ時のパフォーマンスを最適化。
- * BM25スタイルのIDF計算式を使用:
- *   idf = log((N - df + 0.5) / (df + 0.5) + 1)
+ * BM25スタイルのTF-IDF計算式を使用:
+ *   TF: normalizedTf = (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * (docLen / avgDocLen)))
+ *   IDF: idf = log((N - df + 0.5) / (df + 0.5) + 1)
+ *   TF-IDF: tfidf = normalizedTf * idf
  *
  * 正規化された重み(0.0-1.0)を返し、StopWordsService との統合を容易にする。
  */
@@ -45,15 +81,27 @@ export class DuckDbIdfProvider implements IdfProvider {
   private readonly cache = new Map<string, number>();
   private totalDocs: number | null = null;
   private maxIdf: number | null = null;
+  private avgDocLength: number | null = null;
+
+  // BM25パラメータ
+  private readonly k1: number;
+  private readonly b: number;
+  private readonly maxTfCap: number;
 
   /**
    * @param db - DuckDBクライアント
    * @param repoId - リポジトリID
+   * @param options - TF-IDF計算オプション
    */
   constructor(
     private readonly db: DuckDBClient,
-    private readonly repoId: number
-  ) {}
+    private readonly repoId: number,
+    options?: TfIdfOptions
+  ) {
+    this.k1 = options?.k1 ?? DEFAULT_K1;
+    this.b = options?.b ?? DEFAULT_B;
+    this.maxTfCap = options?.maxTfCap ?? DEFAULT_MAX_TF_CAP;
+  }
 
   /**
    * 総ドキュメント数を取得（キャッシュ付き）
@@ -203,6 +251,131 @@ export class DuckDbIdfProvider implements IdfProvider {
     return result;
   }
 
+  // ============================================================
+  // TF計算メソッド（Phase 2: TF-IDF完全実装）
+  // ============================================================
+
+  /**
+   * 平均文書長を取得（キャッシュ付き）
+   *
+   * 文書長は空白で分割した単語数で計算。
+   *
+   * @returns 平均文書長（単語数）
+   */
+  async getAverageDocumentLength(): Promise<number> {
+    if (this.avgDocLength !== null) {
+      return this.avgDocLength;
+    }
+
+    const result = await this.db.all<{ avg_length: number }>(
+      `SELECT AVG(
+        LENGTH(b.content) - LENGTH(REPLACE(b.content, ' ', '')) + 1
+       ) as avg_length
+       FROM file f
+       JOIN blob b ON b.hash = f.blob_hash
+       WHERE f.repo_id = ? AND b.content IS NOT NULL AND LENGTH(b.content) > 0`,
+      [this.repoId]
+    );
+
+    // デフォルト1000（空リポジトリ対策）
+    this.avgDocLength = result[0]?.avg_length ?? 1000;
+    return this.avgDocLength;
+  }
+
+  /**
+   * 生のTerm Frequency（出現回数）を計算
+   *
+   * @param content - ファイルコンテンツ
+   * @param term - 検索語
+   * @returns 出現回数（maxTfCapで上限制限）
+   */
+  computeTf(content: string, term: string): number {
+    const normalized = StopWordsService.normalizeToken(term);
+    if (!normalized || !content) {
+      return 0;
+    }
+
+    // 大文字小文字を区別しないマッチング
+    const escapedTerm = normalized.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const regex = new RegExp(escapedTerm, "gi");
+    const matches = content.match(regex);
+    const rawTf = matches?.length ?? 0;
+
+    // スパム防止: TF上限を適用
+    return Math.min(rawTf, this.maxTfCap);
+  }
+
+  /**
+   * BM25正規化されたTFを計算
+   *
+   * 計算式: normalizedTf = (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * (docLen / avgDocLen)))
+   *
+   * @param content - ファイルコンテンツ
+   * @param term - 検索語
+   * @param docLength - 文書長（単語数）
+   * @param avgDocLength - 平均文書長
+   * @returns 正規化されたTF（0以上）
+   */
+  computeNormalizedTf(
+    content: string,
+    term: string,
+    docLength: number,
+    avgDocLength: number
+  ): number {
+    const tf = this.computeTf(content, term);
+    if (tf === 0) {
+      return 0;
+    }
+
+    // BM25 TF正規化
+    // normalizedTf = (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * (docLen / avgDocLen)))
+    const lengthRatio = docLength / Math.max(avgDocLength, 1);
+    const denominator = tf + this.k1 * (1 - this.b + this.b * lengthRatio);
+    const normalizedTf = (tf * (this.k1 + 1)) / denominator;
+
+    return normalizedTf;
+  }
+
+  /**
+   * 複数キーワードのTFを一括計算（効率化）
+   *
+   * 1回のコンテンツスキャンで全キーワードのTFを計算。
+   *
+   * @param content - ファイルコンテンツ
+   * @param terms - 検索語の配列
+   * @returns 語→TFのマップ
+   */
+  computeTfBatch(content: string, terms: string[]): Map<string, number> {
+    const result = new Map<string, number>();
+
+    if (!content) {
+      return result;
+    }
+
+    for (const term of terms) {
+      const normalized = StopWordsService.normalizeToken(term);
+      if (normalized && !result.has(normalized)) {
+        result.set(normalized, this.computeTf(content, term));
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * 文書長（単語数）を計算
+   *
+   * @param content - ファイルコンテンツ
+   * @returns 単語数
+   */
+  computeDocumentLength(content: string): number {
+    if (!content) {
+      return 0;
+    }
+    // 空白で分割して単語数をカウント
+    return content.split(/\s+/).filter((w) => w.length > 0).length;
+  }
+
   /**
    * キャッシュをクリア
    */
@@ -210,6 +383,7 @@ export class DuckDbIdfProvider implements IdfProvider {
     this.cache.clear();
     this.totalDocs = null;
     this.maxIdf = null;
+    this.avgDocLength = null;
   }
 
   /**
@@ -264,12 +438,17 @@ export class DuckDbIdfProvider implements IdfProvider {
 // ============================================================
 
 /**
- * IdfProvider を作成
+ * TF-IDF Provider を作成
  *
  * @param db - DuckDBクライアント
  * @param repoId - リポジトリID
- * @returns IdfProvider インスタンス
+ * @param options - TF-IDF計算オプション（BM25パラメータなど）
+ * @returns DuckDbIdfProvider インスタンス
  */
-export function createIdfProvider(db: DuckDBClient, repoId: number): DuckDbIdfProvider {
-  return new DuckDbIdfProvider(db, repoId);
+export function createIdfProvider(
+  db: DuckDBClient,
+  repoId: number,
+  options?: TfIdfOptions
+): DuckDbIdfProvider {
+  return new DuckDbIdfProvider(db, repoId, options);
 }

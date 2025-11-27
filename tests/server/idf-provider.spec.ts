@@ -417,3 +417,276 @@ describe("IDF formula verification", () => {
     // Note: db.close() and rm() are handled by afterEach
   });
 });
+
+// ============================================================
+// TF計算テスト（Issue #122: TF-IDF完全実装）
+// ============================================================
+
+describe("TF (Term Frequency) computation", () => {
+  describe("computeTf", () => {
+    it("counts term occurrences correctly", async () => {
+      const provider = createIdfProvider(db, repoId);
+
+      expect(provider.computeTf("hello hello hello world", "hello")).toBe(3);
+      expect(provider.computeTf("hello hello hello world", "world")).toBe(1);
+      expect(provider.computeTf("hello hello hello world", "foo")).toBe(0);
+    });
+
+    it("is case-insensitive", async () => {
+      const provider = createIdfProvider(db, repoId);
+
+      expect(provider.computeTf("Hello HELLO hello", "hello")).toBe(3);
+      expect(provider.computeTf("Hello HELLO hello", "HELLO")).toBe(3);
+    });
+
+    it("respects maxTfCap", async () => {
+      // Default maxTfCap is 10
+      const provider = createIdfProvider(db, repoId);
+      const content = "test ".repeat(20); // 20 occurrences
+
+      expect(provider.computeTf(content, "test")).toBe(10); // Capped at 10
+    });
+
+    it("respects custom maxTfCap", async () => {
+      const provider = createIdfProvider(db, repoId, { maxTfCap: 5 });
+      const content = "test ".repeat(20);
+
+      expect(provider.computeTf(content, "test")).toBe(5); // Capped at 5
+    });
+
+    it("returns 0 for empty content", async () => {
+      const provider = createIdfProvider(db, repoId);
+
+      expect(provider.computeTf("", "test")).toBe(0);
+    });
+
+    it("returns 0 for empty term", async () => {
+      const provider = createIdfProvider(db, repoId);
+
+      expect(provider.computeTf("hello world", "")).toBe(0);
+    });
+
+    it("handles special regex characters in terms", async () => {
+      const provider = createIdfProvider(db, repoId);
+
+      // Terms with regex special characters should be escaped
+      expect(provider.computeTf("test.file test.file", "test.file")).toBe(2);
+      expect(provider.computeTf("foo(bar) foo(bar)", "foo(bar)")).toBe(2);
+    });
+  });
+
+  describe("computeNormalizedTf", () => {
+    it("returns 0 when term is not found", async () => {
+      const provider = createIdfProvider(db, repoId);
+
+      const normalizedTf = provider.computeNormalizedTf("hello world", "foo", 100, 100);
+      expect(normalizedTf).toBe(0);
+    });
+
+    it("returns positive value when term is found", async () => {
+      const provider = createIdfProvider(db, repoId);
+
+      const normalizedTf = provider.computeNormalizedTf("hello world hello", "hello", 100, 100);
+      expect(normalizedTf).toBeGreaterThan(0);
+    });
+
+    it("saturates as TF increases (BM25 behavior)", async () => {
+      const provider = createIdfProvider(db, repoId);
+      const avgDocLen = 100;
+
+      // Same document length but different TF
+      const tf1 = provider.computeNormalizedTf("test", "test", 100, avgDocLen);
+      const tf2 = provider.computeNormalizedTf("test test", "test", 100, avgDocLen);
+      const tf5 = provider.computeNormalizedTf("test test test test test", "test", 100, avgDocLen);
+
+      // Higher TF should give higher normalized TF, but with diminishing returns
+      expect(tf2).toBeGreaterThan(tf1);
+      expect(tf5).toBeGreaterThan(tf2);
+
+      // But the increase should saturate (tf5/tf1 should be less than 5)
+      expect(tf5 / tf1).toBeLessThan(5);
+    });
+
+    it("penalizes longer documents (BM25 behavior)", async () => {
+      const provider = createIdfProvider(db, repoId);
+      const avgDocLen = 100;
+
+      // Same content but different document lengths
+      const shortDoc = provider.computeNormalizedTf("test content", "test", 50, avgDocLen);
+      const avgDoc = provider.computeNormalizedTf("test content", "test", 100, avgDocLen);
+      const longDoc = provider.computeNormalizedTf("test content", "test", 200, avgDocLen);
+
+      // Shorter documents should get higher scores for same TF
+      expect(shortDoc).toBeGreaterThan(avgDoc);
+      expect(avgDoc).toBeGreaterThan(longDoc);
+    });
+  });
+
+  describe("computeTfBatch", () => {
+    it("computes TF for multiple terms", async () => {
+      const provider = createIdfProvider(db, repoId);
+      const content = "hello world hello foo bar foo foo";
+
+      const tfs = provider.computeTfBatch(content, ["hello", "foo", "baz"]);
+
+      expect(tfs.get("hello")).toBe(2);
+      expect(tfs.get("foo")).toBe(3);
+      expect(tfs.get("baz")).toBe(0); // TF is 0 for non-existent terms
+    });
+
+    it("handles empty content", async () => {
+      const provider = createIdfProvider(db, repoId);
+
+      const tfs = provider.computeTfBatch("", ["hello", "world"]);
+
+      expect(tfs.size).toBe(0);
+    });
+
+    it("normalizes terms", async () => {
+      const provider = createIdfProvider(db, repoId);
+      const content = "Hello World";
+
+      const tfs = provider.computeTfBatch(content, ["HELLO", "world"]);
+
+      expect(tfs.get("hello")).toBe(1);
+      expect(tfs.get("world")).toBe(1);
+    });
+  });
+
+  describe("computeDocumentLength", () => {
+    it("counts words correctly", async () => {
+      const provider = createIdfProvider(db, repoId);
+
+      expect(provider.computeDocumentLength("hello world foo bar")).toBe(4);
+      expect(provider.computeDocumentLength("one")).toBe(1);
+      expect(provider.computeDocumentLength("")).toBe(0);
+    });
+
+    it("handles multiple whitespace", async () => {
+      const provider = createIdfProvider(db, repoId);
+
+      expect(provider.computeDocumentLength("hello   world\tfoo\nbar")).toBe(4);
+    });
+  });
+
+  describe("getAverageDocumentLength", () => {
+    it("calculates average document length", async () => {
+      // Create files with different lengths
+      await db.run(`INSERT INTO blob (hash, content) VALUES ('hash1', 'one two three')`); // 3 words
+      await db.run(`INSERT INTO blob (hash, content) VALUES ('hash2', 'one two three four five')`); // 5 words
+      await db.run(`INSERT INTO file (repo_id, path, blob_hash) VALUES (1, 'file1.ts', 'hash1')`);
+      await db.run(`INSERT INTO file (repo_id, path, blob_hash) VALUES (1, 'file2.ts', 'hash2')`);
+
+      const provider = createIdfProvider(db, repoId);
+      const avgLen = await provider.getAverageDocumentLength();
+
+      // Average of (words based on space count) should be reasonable
+      expect(avgLen).toBeGreaterThan(0);
+    });
+
+    it("returns default for empty repository", async () => {
+      const provider = createIdfProvider(db, repoId);
+      const avgLen = await provider.getAverageDocumentLength();
+
+      // Default is 1000
+      expect(avgLen).toBe(1000);
+    });
+
+    it("caches the result", async () => {
+      await db.run(`INSERT INTO blob (hash, content) VALUES ('hash1', 'one two three')`);
+      await db.run(`INSERT INTO file (repo_id, path, blob_hash) VALUES (1, 'file1.ts', 'hash1')`);
+
+      const provider = createIdfProvider(db, repoId);
+
+      const avgLen1 = await provider.getAverageDocumentLength();
+
+      // Add another file
+      await db.run(`INSERT INTO blob (hash, content) VALUES ('hash2', 'a b c d e f g h i j')`);
+      await db.run(`INSERT INTO file (repo_id, path, blob_hash) VALUES (1, 'file2.ts', 'hash2')`);
+
+      const avgLen2 = await provider.getAverageDocumentLength();
+
+      // Should return cached value
+      expect(avgLen1).toBe(avgLen2);
+    });
+
+    it("recalculates after clearCache", async () => {
+      await db.run(`INSERT INTO blob (hash, content) VALUES ('hash1', 'one two three')`);
+      await db.run(`INSERT INTO file (repo_id, path, blob_hash) VALUES (1, 'file1.ts', 'hash1')`);
+
+      const provider = createIdfProvider(db, repoId);
+
+      const avgLen1 = await provider.getAverageDocumentLength();
+
+      provider.clearCache();
+
+      // Add more content
+      await db.run(
+        `INSERT INTO blob (hash, content) VALUES ('hash2', 'a b c d e f g h i j k l m n o p q r s t')`
+      );
+      await db.run(`INSERT INTO file (repo_id, path, blob_hash) VALUES (1, 'file2.ts', 'hash2')`);
+
+      const avgLen2 = await provider.getAverageDocumentLength();
+
+      // Should be different after cache clear and new data
+      expect(avgLen2).not.toBe(avgLen1);
+    });
+  });
+});
+
+describe("TF-IDF integration", () => {
+  it("combines TF and IDF correctly", async () => {
+    // Setup: Create files where "rare" appears once in one file, "common" appears in all
+    for (let i = 0; i < 10; i++) {
+      const content = i === 0 ? "common rare" : "common common common";
+      await db.run(`INSERT INTO blob (hash, content) VALUES (?, ?)`, [`hash${i}`, content]);
+      await db.run(`INSERT INTO file (repo_id, path, blob_hash) VALUES (1, ?, ?)`, [
+        `file${i}.ts`,
+        `hash${i}`,
+      ]);
+    }
+
+    const provider = createIdfProvider(db, repoId);
+
+    // Get IDF weights
+    const rareIdf = await provider.computeIdf("rare");
+    const commonIdf = await provider.computeIdf("common");
+
+    // rare should have higher IDF (appears in fewer docs)
+    expect(rareIdf).toBeGreaterThan(commonIdf);
+
+    // TF-IDF for "rare" in file0
+    const avgDocLen = await provider.getAverageDocumentLength();
+    const file0Content = "common rare";
+    const docLen = provider.computeDocumentLength(file0Content);
+
+    const rareTf = provider.computeNormalizedTf(file0Content, "rare", docLen, avgDocLen);
+    const commonTf = provider.computeNormalizedTf(file0Content, "common", docLen, avgDocLen);
+
+    // Both appear once, so TF should be similar
+    expect(rareTf).toBeCloseTo(commonTf, 1);
+
+    // But TF-IDF should favor rare
+    const rareTfIdf = rareTf * rareIdf;
+    const commonTfIdf = commonTf * commonIdf;
+    expect(rareTfIdf).toBeGreaterThan(commonTfIdf);
+  });
+
+  it("respects custom BM25 parameters", async () => {
+    await db.run(`INSERT INTO blob (hash, content) VALUES ('hash1', 'test test test')`);
+    await db.run(`INSERT INTO file (repo_id, path, blob_hash) VALUES (1, 'file1.ts', 'hash1')`);
+
+    const defaultProvider = createIdfProvider(db, repoId);
+    const customProvider = createIdfProvider(db, repoId, { k1: 2.0, b: 0.5 });
+
+    const avgDocLen = await defaultProvider.getAverageDocumentLength();
+    const content = "test test test";
+    const docLen = defaultProvider.computeDocumentLength(content);
+
+    const defaultTf = defaultProvider.computeNormalizedTf(content, "test", docLen, avgDocLen);
+    const customTf = customProvider.computeNormalizedTf(content, "test", docLen, avgDocLen);
+
+    // Different k1 and b should give different normalized TF
+    expect(defaultTf).not.toBeCloseTo(customTf, 3);
+  });
+});
