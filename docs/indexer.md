@@ -15,10 +15,63 @@
 8. **履歴・blame 更新**: 差分ファイルのみ更新し、フル再計算は週次などバッチで実施する。
 9. **ステージング投入**: 小刻み書き込みを避け、ステージング→バッチマージでトランザクションをまとめる。
 
+## Co-changeグラフ抽出（v0.15.0+）
+
+インデックス作成時にGit履歴を解析し、一緒に変更されることの多いファイルペアを`cochange`テーブルに記録します。
+
+### 動作
+
+- **デフォルト有効**: Co-changeデータはフラグなしで自動的に投入されます
+- **スキップ**: `--no-cochange`フラグでCo-change計算をスキップ可能
+- **インクリメンタル更新**: `--since`モードでも新規コミットのCo-change関係を追加
+
+### 設定パラメータ
+
+| パラメータ          | デフォルト値 | 説明                                 |
+| ------------------- | ------------ | ------------------------------------ |
+| `maxCommits`        | 1000         | 解析する最大コミット数               |
+| `minCochangeCount`  | 2            | 保存する最小Co-change回数            |
+| `maxFilesPerCommit` | 50           | メガコミットを除外するファイル数上限 |
+| `maxAgeDays`        | 365          | 解析対象とする日数                   |
+
+### 不変条件
+
+- **CC1**: 正規順序（file1 < file2 辞書順）
+- **CC2**: 両ファイルがインデックス済み
+- **CC3**: 正の重み（cochange_count > 0）
+- **CC4**: べき等コミット処理（同一コミットは再処理しない）
+
+### スキーマ
+
+```sql
+CREATE TABLE cochange (
+  repo_id INTEGER,
+  file1 TEXT,
+  file2 TEXT,
+  cochange_count INTEGER NOT NULL,
+  confidence FLOAT,  -- Jaccard類似度
+  last_commit TEXT,
+  last_cochange_at TIMESTAMP,
+  PRIMARY KEY (repo_id, file1, file2)
+);
+```
+
 ## 実行モード
 
-- CLI: `kiri index --repo /path/to/repo --db /path/to/index.duckdb [--full | --since <commit>]`
+- CLI: `kiri index --repo /path/to/repo --db /path/to/index.duckdb [--full | --since <commit>] [--no-cochange]`
 - トリガ: pre-commit / post-merge hook / ファイル監視からの自動起動
+
+### CLIオプション
+
+| オプション      | 説明                                                   |
+| --------------- | ------------------------------------------------------ |
+| `--repo`        | インデックス対象のリポジトリパス（デフォルト: `.`）    |
+| `--db`          | DuckDBファイルパス（デフォルト: `var/index.duckdb`）   |
+| `--full`        | 全ファイルを再インデックス                             |
+| `--since`       | 指定コミット以降の変更のみインクリメンタルインデックス |
+| `--watch`       | ファイル監視モードで継続実行                           |
+| `--debounce`    | watchモードのデバウンス時間（ミリ秒、デフォルト: 500） |
+| `--no-cochange` | Co-changeグラフの計算をスキップ                        |
 
 ## 疑似コード（TypeScript）
 

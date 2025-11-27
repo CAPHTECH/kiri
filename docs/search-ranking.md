@@ -643,9 +643,9 @@ graphScore = graphInbound * log(1 + inbound_count) * decay^depth
 
 Co-changeグラフはGit履歴から抽出され、一緒に変更されることの多いファイルペアを識別します:
 
-| パラメータ | デフォルト値 | 説明                                      |
-| ---------- | ------------ | ----------------------------------------- |
-| `cochange` | 0.0          | Co-changeスコアの重み（デフォルトは無効） |
+| パラメータ | デフォルト値 | 説明                                              |
+| ---------- | ------------ | ------------------------------------------------- |
+| `cochange` | 3.0          | Co-changeスコアの重み（v0.15.0+でデフォルト有効） |
 
 **不変条件（Alloy/TLA+仕様より）:**
 
@@ -665,16 +665,18 @@ cochangeScore = cochange * log(1 + count) * confidence
 - `count`: 一緒にコミットされた回数
 - `confidence`: Jaccard類似度 = |A ∩ B| / |A ∪ B|
 
-### Co-changeの有効化
+### Co-changeの動作
 
-`config/scoring-profiles.yml` で `cochange` を正の値に設定:
+Co-changeはv0.15.0以降、デフォルトで有効（`cochange: 3.0`）です。
+
+Co-changeは `editing_path` が指定されている場合にのみ効果があります（編集中のファイルと一緒に変更されることの多いファイルをブースト）。
+
+**無効化する場合**は `config/scoring-profiles.yml` で `cochange: 0.0` に設定:
 
 ```yaml
 default:
-  cochange: 0.3 # Co-changeスコアを有効化
+  cochange: 0.0 # Co-changeスコアを無効化
 ```
-
-Co-changeは `editing_path` が指定されている場合にのみ効果があります（編集中のファイルと一緒に変更されることの多いファイルをブースト）。
 
 ## ハイブリッド検索の融合方式
 

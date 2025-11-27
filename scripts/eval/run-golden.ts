@@ -193,6 +193,11 @@ interface GoldenQuery {
     k?: number;
     timeoutMs?: number;
     scoringProfile?: string;
+    profile?: string;
+    path_prefix?: string;
+    artifacts?: {
+      editing_path?: string;
+    };
   };
   tags: string[];
   notes?: string;
@@ -1335,7 +1340,7 @@ async function executeQuery(
   const isContextBundleTool = tool === "context_bundle";
   const k = query.params?.k || options.k;
   const boostProfile = query.params?.boostProfile || defaultParams.boostProfile;
-  const scoringProfile = query.params?.scoringProfile;
+  const scoringProfile = query.params?.scoringProfile || query.params?.profile;
   const timeoutMs = query.params?.timeoutMs || defaultParams.timeoutMs;
 
   // AdaptiveK: デフォルト有効。categoryベースでK値を決定させるためlimitを省略
@@ -1351,9 +1356,13 @@ async function executeQuery(
     params.category = query.category;
   }
 
-  const artifacts: { hints?: string[] } = {};
+  const artifacts: { hints?: string[]; editing_path?: string } = {};
   if (query.hints && query.hints.length > 0) {
     artifacts.hints = query.hints;
+  }
+  // Pass editing_path from query.params.artifacts for co-change scoring
+  if (query.params?.artifacts?.editing_path) {
+    artifacts.editing_path = query.params.artifacts.editing_path;
   }
 
   if (isContextBundleTool) {
@@ -1362,11 +1371,15 @@ async function executeQuery(
     if (query.category) {
       params.category = query.category;
     }
-    if (artifacts.hints) {
+    if (artifacts.hints || artifacts.editing_path) {
       params.artifacts = artifacts;
     }
     if (scoringProfile) {
       params.profile = scoringProfile;
+    }
+    // Pass path_prefix from query.params for filtering files by path
+    if (query.params?.path_prefix) {
+      params.path_prefix = query.params.path_prefix;
     }
     if (FORCE_COMPACT_MODE) {
       params.compact = true;

@@ -16,7 +16,7 @@ default:
   graphImportance: 0.3 # PageRank-like importance score
   graphDecay: 0.5 # Depth decay factor (score / (depth + 1)^decay)
   graphMaxDepth: 3 # Maximum BFS depth
-  cochange: 0.0 # Co-change boost (Phase 4, disabled by default)
+  cochange: 3.0 # Co-change boost (enabled by default)
 feature:
   textMatch: 1.0
   pathMatch: 1.4
@@ -143,3 +143,40 @@ typeerror:
   graphDecay: 0.5
   graphMaxDepth: 3
   cochange: 0.0
+# Graph Layer A/B comparison profiles
+graph-off:
+  textMatch: 1.0
+  pathMatch: 1.2
+  editingPath: 1.8
+  dependency: 1.0
+  proximity: 0.3
+  structural: 0.9
+  docPenaltyMultiplier: 0.6
+  configPenaltyMultiplier: 0.05
+  implBoostMultiplier: 1.5
+  blacklistPenaltyMultiplier: 0.01
+  testPenaltyMultiplier: 0.02
+  lockPenaltyMultiplier: 0.01
+  graphInbound: 0.0
+  graphImportance: 0.0
+  graphDecay: 0.5
+  graphMaxDepth: 3
+  cochange: 0.0
+graph-on:
+  textMatch: 1.0
+  pathMatch: 1.2
+  editingPath: 1.8
+  dependency: 1.0
+  proximity: 0.3
+  structural: 0.9
+  docPenaltyMultiplier: 0.6
+  configPenaltyMultiplier: 0.05
+  implBoostMultiplier: 1.5
+  blacklistPenaltyMultiplier: 0.01
+  testPenaltyMultiplier: 0.02
+  lockPenaltyMultiplier: 0.01
+  graphInbound: 0.5
+  graphImportance: 0.3
+  graphDecay: 0.5
+  graphMaxDepth: 3
+  cochange: 3.0 # 2.0 → 3.0: further increase to strengthen co-change signal

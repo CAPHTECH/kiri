@@ -803,7 +803,7 @@ const FALLBACK_SNIPPET_WINDOW = serverConfig.features.snippetWindow;
 const MAX_RERANK_LIMIT = 50;
 const MAX_ARTIFACT_HINTS = 8;
 /** Minimum confidence floor for co-change scoring to prevent zero-boost from low Jaccard scores */
-const MIN_COCHANGE_CONFIDENCE_FLOOR = 0.1;
+const MIN_COCHANGE_CONFIDENCE_FLOOR = 0.2;
 const DOMAIN_PATH_HINT_LIMIT = MAX_ARTIFACT_HINTS;
 const SAFE_PATH_PATTERN = /^[a-zA-Z0-9_.\-/]+$/;
 const HINT_PRIORITY_TEXT_MULTIPLIER = serverConfig.hints.priority.textMultiplier;
@@ -870,15 +870,16 @@ const WHY_TAG_PRIORITY: Record<string, number> = {
   substring: 4, // Substring hint expansion
   "path-phrase": 5, // Path contains multi-word phrase
   structural: 6, // Semantic similarity
-  "path-segment": 7, // Path component matches
-  "path-keyword": 8, // Path keyword match
-  dep: 9, // Dependency relationship
-  near: 10, // Proximity to editing file
-  boost: 11, // File type boost
-  recent: 12, // Recently changed
-  symbol: 13, // Symbol match
-  penalty: 14, // Penalty explanations (keep for transparency)
-  keyword: 15, // Generic keyword (deprecated, kept for compatibility)
+  cochange: 7, // Co-change history (files that change together)
+  "path-segment": 8, // Path component matches
+  "path-keyword": 9, // Path keyword match
+  dep: 10, // Dependency relationship
+  near: 11, // Proximity to editing file
+  boost: 12, // File type boost
+  recent: 13, // Recently changed
+  symbol: 14, // Symbol match
+  penalty: 15, // Penalty explanations (keep for transparency)
+  keyword: 16, // Generic keyword (deprecated, kept for compatibility)
 };
 
 // Reserve at least one slot for important structural tags
@@ -2086,11 +2087,7 @@ async function applyCochangeScores(
   }
 
   // Skip if no editing_path provided (co-change needs a reference file)
-  if (!editingPath) {
-    return;
-  }
-
-  if (candidates.length === 0) {
+  if (!editingPath || candidates.length === 0) {
     return;
   }
 

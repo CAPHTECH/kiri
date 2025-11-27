@@ -40,6 +40,7 @@ interface IndexerOptions {
   since?: string;
   changedPaths?: string[]; // For incremental indexing: only reindex these files
   skipLocking?: boolean; // Fix #1: Internal use only - allows caller (e.g., watcher) to manage lock
+  skipCochange?: boolean; // Skip co-change graph computation (use --no-cochange flag)
 }
 
 interface BlobRecord {
@@ -1816,7 +1817,9 @@ export async function runIndexer(options: IndexerOptions): Promise<void> {
         }
 
         // Phase 4: Incremental co-change update (check for new commits)
-        await incrementalCochangeUpdate(dbClient, repoId, repoRoot);
+        if (!options.skipCochange) {
+          await incrementalCochangeUpdate(dbClient, repoId, repoRoot);
+        }
 
         return;
       }
@@ -1894,7 +1897,9 @@ export async function runIndexer(options: IndexerOptions): Promise<void> {
       await computeGraphMetrics(dbClient, repoId);
 
       // Phase 4: Compute co-change graph from git history
-      await computeCochangeGraph(dbClient, repoId, repoRoot);
+      if (!options.skipCochange) {
+        await computeCochangeGraph(dbClient, repoId, repoRoot);
+      }
 
       // Garbage collect orphaned blobs after full reindex
       await garbageCollectBlobs(dbClient);
@@ -1925,8 +1930,9 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
   const since = parseArg("--since");
   const watch = process.argv.includes("--watch");
   const debounceMs = parseInt(parseArg("--debounce") ?? "500", 10);
+  const skipCochange = process.argv.includes("--no-cochange");
 
-  const options: IndexerOptions = { repoRoot, databasePath, full: full || !since };
+  const options: IndexerOptions = { repoRoot, databasePath, full: full || !since, skipCochange };
 
   const main = async (): Promise<void> => {
     if (since) {

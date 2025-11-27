@@ -231,12 +231,23 @@ function loadProfilesFromConfig(): Record<ScoringProfileName, ScoringWeights> {
       "api",
       "editor",
     ];
-    const validated: Partial<Record<ScoringProfileName, ScoringWeights>> = {};
+    const validated: Record<string, ScoringWeights> = {};
     for (const profile of requiredProfiles) {
       if (!parsed[profile]) {
         throw new Error(`Missing required scoring profile: ${profile}`);
       }
       validated[profile] = validateWeights(parsed[profile], profile);
+    }
+
+    // 追加プロファイル（graph-off, graph-onなど）もロード
+    for (const profileName of Object.keys(parsed)) {
+      if (!validated[profileName]) {
+        try {
+          validated[profileName] = validateWeights(parsed[profileName], profileName);
+        } catch (err) {
+          console.warn(`[KIRI] Skipping invalid optional profile '${profileName}':`, err);
+        }
+      }
     }
 
     profilesCache = validated as Record<ScoringProfileName, ScoringWeights>;

@@ -488,3 +488,278 @@ queries:
       - "validation"
       - "dataset"
       - "loader"
+
+  # Graph Layer A/B comparison queries (kiri-docs with co-change data)
+  # Key: use path_prefix to exclude external/ and focus on kiri core files
+  # Co-change data from var/index.duckdb:
+  #   handlers.ts ↔ scoring.ts: conf=0.19
+  #   handlers.ts ↔ rpc.ts: conf=0.20
+  #   cli.ts ↔ schema.ts (checked via indexer)
+
+  # Graph-ON tests (cochange enabled)
+  - id: kiri-graph-on-server-scoring
+    query: "server scoring weight calculation profile"
+    tool: "context_bundle"
+    intent: "Find scoring module from handlers context (co-change: handlers.ts ↔ scoring.ts, conf=0.19)"
+    category: "graph-test"
+    repo: "kiri-docs"
+    params:
+      boostProfile: "default"
+      profile: "graph-on"
+      path_prefix: "src/"
+      artifacts:
+        editing_path: "src/server/handlers.ts"
+    expected:
+      paths:
+        # NOTE: editing_path (handlers.ts) is EXCLUDED - only cochange targets
+        - "src/server/scoring.ts"       # cochange:17, conf=0.19
+        - "src/server/rpc.ts"           # cochange:22, conf=0.20
+        - "src/indexer/schema.ts"       # cochange:15, conf=0.14
+        - "src/server/main.ts"          # cochange:9, conf=0.08
+    tags: ["graph", "cochange", "graph-on"]
+    notes: "Co-change should boost scoring.ts, rpc.ts when editing handlers.ts"
+
+  - id: kiri-graph-on-server-rpc
+    query: "rpc json handler creation request"
+    tool: "context_bundle"
+    intent: "Find RPC module from handlers context (co-change: handlers.ts ↔ rpc.ts, conf=0.20)"
+    category: "graph-test"
+    repo: "kiri-docs"
+    params:
+      boostProfile: "default"
+      profile: "graph-on"
+      path_prefix: "src/"
+      artifacts:
+        editing_path: "src/server/handlers.ts"
+    expected:
+      paths:
+        # NOTE: editing_path (handlers.ts) is EXCLUDED - only cochange targets
+        - "src/server/rpc.ts"           # cochange:22, conf=0.20
+        - "src/server/scoring.ts"       # cochange:17, conf=0.19
+        - "src/server/runtime.ts"       # cochange:8, conf=0.07
+        - "src/server/main.ts"          # cochange:9, conf=0.08
+    tags: ["graph", "cochange", "graph-on"]
+    notes: "Co-change should boost rpc.ts when editing handlers.ts"
+
+  - id: kiri-graph-on-indexer-schema
+    query: "indexer database schema table create"
+    tool: "context_bundle"
+    intent: "Find indexer schema from CLI context (co-change: cli.ts ↔ schema.ts)"
+    category: "graph-test"
+    repo: "kiri-docs"
+    params:
+      boostProfile: "default"
+      profile: "graph-on"
+      path_prefix: "src/"
+      artifacts:
+        editing_path: "src/indexer/cli.ts"
+    expected:
+      paths:
+        # NOTE: editing_path (cli.ts) is EXCLUDED - only cochange targets
+        - "src/indexer/schema.ts"       # cochange with cli.ts
+        - "src/server/handlers.ts"      # cochange:16
+        - "src/server/scoring.ts"       # cochange:4
+    tags: ["graph", "cochange", "graph-on"]
+    notes: "Co-change should boost schema.ts when editing cli.ts"
+
+  # Graph-OFF tests (baseline without cochange)
+  - id: kiri-graph-off-server-scoring
+    query: "server scoring weight calculation profile"
+    tool: "context_bundle"
+    intent: "Baseline: Find scoring module WITHOUT co-change boost"
+    category: "graph-test-baseline"
+    repo: "kiri-docs"
+    params:
+      boostProfile: "default"
+      profile: "graph-off"
+      path_prefix: "src/"
+      artifacts:
+        editing_path: "src/server/handlers.ts"
+    expected:
+      paths:
+        # Same expected as graph-on for fair comparison
+        - "src/server/scoring.ts"
+        - "src/server/rpc.ts"
+        - "src/indexer/schema.ts"
+        - "src/server/main.ts"
+    tags: ["graph", "baseline", "graph-off"]
+    notes: "Baseline WITHOUT cochange - compare against graph-on"
+
+  - id: kiri-graph-off-server-rpc
+    query: "rpc json handler creation request"
+    tool: "context_bundle"
+    intent: "Baseline: Find RPC module WITHOUT co-change boost"
+    category: "graph-test-baseline"
+    repo: "kiri-docs"
+    params:
+      boostProfile: "default"
+      profile: "graph-off"
+      path_prefix: "src/"
+      artifacts:
+        editing_path: "src/server/handlers.ts"
+    expected:
+      paths:
+        # Same expected as graph-on for fair comparison
+        - "src/server/rpc.ts"
+        - "src/server/scoring.ts"
+        - "src/server/runtime.ts"
+        - "src/server/main.ts"
+    tags: ["graph", "baseline", "graph-off"]
+    notes: "Baseline WITHOUT cochange - compare against graph-on"
+
+  - id: kiri-graph-off-indexer-schema
+    query: "indexer database schema table create"
+    tool: "context_bundle"
+    intent: "Baseline: Find indexer schema WITHOUT co-change boost"
+    category: "graph-test-baseline"
+    repo: "kiri-docs"
+    params:
+      boostProfile: "default"
+      profile: "graph-off"
+      path_prefix: "src/"
+      artifacts:
+        editing_path: "src/indexer/cli.ts"
+    expected:
+      paths:
+        # Same expected as graph-on for fair comparison
+        - "src/indexer/schema.ts"
+        - "src/server/handlers.ts"
+        - "src/server/scoring.ts"
+    tags: ["graph", "baseline", "graph-off"]
+    notes: "Baseline WITHOUT cochange - compare against graph-on"
+
+  # =================================================================
+  # VS Code Graph Layer A/B comparison queries
+  # =================================================================
+  # Co-change data from external/vscode/.kiri/index.duckdb (1,428 pairs):
+  #   chatService.ts ↔ chatServiceImpl.ts: count=11, conf=0.58
+  #   chat.contribution.ts ↔ constants.ts: count=8, conf=0.31
+  #   commands.ts ↔ repository.ts (git ext): count=6, conf=0.67
+  #   chatModel.ts ↔ chatService.ts: count=6, conf=0.32
+  #   terminal.ts ↔ terminalChatService.ts: count=6, conf=0.75
+
+  # Graph-ON tests (cochange enabled) for VS Code
+  - id: vscode-graph-on-chat-service
+    query: "chat service implementation request response"
+    tool: "context_bundle"
+    intent: "Find chat service impl from service interface context (co-change: 11 commits, conf=0.58)"
+    category: "graph-test"
+    repo: "vscode"
+    params:
+      boostProfile: "default"
+      profile: "graph-on"
+      path_prefix: "src/vs/workbench/contrib/chat/"
+      artifacts:
+        editing_path: "src/vs/workbench/contrib/chat/common/chatService.ts"
+    expected:
+      paths:
+        # NOTE: editing_path (chatService.ts) is EXCLUDED - only cochange targets
+        - "src/vs/workbench/contrib/chat/common/chatServiceImpl.ts"  # cochange:11, conf=0.58
+        - "src/vs/workbench/contrib/chat/common/chatModel.ts"        # cochange:6, conf=0.32
+        - "src/vs/workbench/contrib/chat/test/common/mockChatService.ts"  # cochange:6, conf=0.40
+    tags: ["graph", "cochange", "graph-on", "vscode"]
+    notes: "Co-change should boost chatServiceImpl.ts when editing chatService.ts"
+
+  - id: vscode-graph-on-git-commands
+    query: "git repository stage commit commands"
+    tool: "context_bundle"
+    intent: "Find git repository from commands context (co-change: 6 commits, conf=0.67)"
+    category: "graph-test"
+    repo: "vscode"
+    params:
+      boostProfile: "default"
+      profile: "graph-on"
+      path_prefix: "extensions/git/src/"
+      artifacts:
+        editing_path: "extensions/git/src/commands.ts"
+    expected:
+      paths:
+        # NOTE: editing_path (commands.ts) is EXCLUDED - only cochange targets
+        - "extensions/git/src/repository.ts"  # cochange:6, conf=0.67
+        - "extensions/git/src/git.ts"         # cochange:5, conf=0.56
+        - "extensions/git/src/operation.ts"   # cochange:3, conf=0.38
+    tags: ["graph", "cochange", "graph-on", "vscode"]
+    notes: "Co-change should boost repository.ts when editing commands.ts"
+
+  - id: vscode-graph-on-terminal-chat
+    query: "terminal chat service integration"
+    tool: "context_bundle"
+    intent: "Find terminal chat service from terminal context (co-change: 6 commits, conf=0.75)"
+    category: "graph-test"
+    repo: "vscode"
+    params:
+      boostProfile: "default"
+      profile: "graph-on"
+      path_prefix: "src/vs/workbench/contrib/"
+      artifacts:
+        editing_path: "src/vs/workbench/contrib/terminal/browser/terminal.ts"
+    expected:
+      paths:
+        # NOTE: editing_path (terminal.ts) is EXCLUDED - only cochange targets
+        - "src/vs/workbench/contrib/terminalContrib/chat/browser/terminalChatService.ts"  # cochange:6, conf=0.75
+        - "src/vs/workbench/contrib/terminalContrib/chat/browser/terminalChatWidget.ts"   # cochange:4, conf=0.50
+    tags: ["graph", "cochange", "graph-on", "vscode"]
+    notes: "Co-change should boost terminalChatService.ts when editing terminal.ts"
+
+  # Graph-OFF tests (baseline without cochange) for VS Code
+  - id: vscode-graph-off-chat-service
+    query: "chat service implementation request response"
+    tool: "context_bundle"
+    intent: "Baseline: Find chat service impl WITHOUT co-change boost"
+    category: "graph-test-baseline"
+    repo: "vscode"
+    params:
+      boostProfile: "default"
+      profile: "graph-off"
+      path_prefix: "src/vs/workbench/contrib/chat/"
+      artifacts:
+        editing_path: "src/vs/workbench/contrib/chat/common/chatService.ts"
+    expected:
+      paths:
+        # Same expected as graph-on for fair comparison
+        - "src/vs/workbench/contrib/chat/common/chatServiceImpl.ts"
+        - "src/vs/workbench/contrib/chat/common/chatModel.ts"
+        - "src/vs/workbench/contrib/chat/test/common/mockChatService.ts"
+    tags: ["graph", "baseline", "graph-off", "vscode"]
+    notes: "Baseline WITHOUT cochange - compare against graph-on"
+
+  - id: vscode-graph-off-git-commands
+    query: "git repository stage commit commands"
+    tool: "context_bundle"
+    intent: "Baseline: Find git repository WITHOUT co-change boost"
+    category: "graph-test-baseline"
+    repo: "vscode"
+    params:
+      boostProfile: "default"
+      profile: "graph-off"
+      path_prefix: "extensions/git/src/"
+      artifacts:
+        editing_path: "extensions/git/src/commands.ts"
+    expected:
+      paths:
+        # Same expected as graph-on for fair comparison
+        - "extensions/git/src/repository.ts"
+        - "extensions/git/src/git.ts"
+        - "extensions/git/src/operation.ts"
+    tags: ["graph", "baseline", "graph-off", "vscode"]
+    notes: "Baseline WITHOUT cochange - compare against graph-on"
+
+  - id: vscode-graph-off-terminal-chat
+    query: "terminal chat service integration"
+    tool: "context_bundle"
+    intent: "Baseline: Find terminal chat service WITHOUT co-change boost"
+    category: "graph-test-baseline"
+    repo: "vscode"
+    params:
+      boostProfile: "default"
+      profile: "graph-off"
+      path_prefix: "src/vs/workbench/contrib/"
+      artifacts:
+        editing_path: "src/vs/workbench/contrib/terminal/browser/terminal.ts"
+    expected:
+      paths:
+        # Same expected as graph-on for fair comparison
+        - "src/vs/workbench/contrib/terminalContrib/chat/browser/terminalChatService.ts"
+        - "src/vs/workbench/contrib/terminalContrib/chat/browser/terminalChatWidget.ts"
+    tags: ["graph", "baseline", "graph-off", "vscode"]
+    notes: "Baseline WITHOUT cochange - compare against graph-on"
