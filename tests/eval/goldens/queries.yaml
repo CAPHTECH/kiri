@@ -456,10 +456,9 @@ queries:
       boostProfile: "default"
     expected:
       paths:
-        - "src/plugins/registry.ts"
-        - "src/plugins/types.ts"
-        - "src/plugins/logger.ts"
-        - "src/plugins/dependencies.ts"
+        - "packages/assay-kit/src/plugins/registry.ts"
+        - "packages/assay-kit/src/plugins/logger.ts"
+        - "packages/assay-kit/src/plugins/dependencies.ts"
     tags: ["plugin", "registry", "assay-kit"]
     hints:
       - "PluginRegistry"
@@ -475,14 +474,14 @@ queries:
       boostProfile: "default"
     expected:
       paths:
-        - "src/dataset/loader.ts"
-        - "src/dataset/schemas/dataset.schema.ts"
-        - "src/dataset/schemas/query.schema.ts"
+        - "packages/assay-kit/src/dataset/loader.ts"
+        - "packages/assay-kit/src/dataset/schemas/dataset.schema.ts"
+        - "packages/assay-kit/src/dataset/schemas/query.schema.ts"
     tags: ["dataset", "schema", "assay-kit"]
     hints:
-      - "src/dataset/loader.ts"
-      - "src/dataset/schemas/dataset.schema.ts"
-      - "src/dataset/schemas/query.schema.ts"
+      - "packages/assay-kit/src/dataset/loader.ts"
+      - "packages/assay-kit/src/dataset/schemas/dataset.schema.ts"
+      - "packages/assay-kit/src/dataset/schemas/query.schema.ts"
       - "loadDatasetFromYAML"
       - "schema"
       - "validation"
