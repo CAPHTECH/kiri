@@ -33,6 +33,18 @@ export interface ScoringWeights {
   testPenaltyMultiplier: number;
   /** Lockファイルへの乗算的ペナルティ（0.0-1.0、デフォルト: 0.01 = 99%削減） */
   lockPenaltyMultiplier: number;
+
+  // Graph Layer parameters (Phase 3.2)
+  /** インバウンド依存関係ブースト（デフォルト: 0.5） */
+  graphInbound: number;
+  /** PageRank的重要度スコアの重み（デフォルト: 0.3） */
+  graphImportance: number;
+  /** 深度減衰係数（score / (depth + 1)^decay、デフォルト: 0.5） */
+  graphDecay: number;
+  /** BFS最大深度（デフォルト: 3） */
+  graphMaxDepth: number;
+  /** Co-changeブースト（Phase 4、デフォルト: 0.0 = 無効） */
+  cochange: number;
 }
 
 export type ScoringProfileName =
@@ -70,6 +82,12 @@ function validateWeights(weights: unknown, profileName: string): ScoringWeights 
     "blacklistPenaltyMultiplier",
     "testPenaltyMultiplier",
     "lockPenaltyMultiplier",
+    // Graph Layer parameters (Phase 3.2)
+    "graphInbound",
+    "graphImportance",
+    "graphDecay",
+    "graphMaxDepth",
+    "cochange",
   ];
   const obj = weights as Record<string, unknown>;
 
@@ -91,6 +109,23 @@ function validateWeights(weights: unknown, profileName: string): ScoringWeights 
       `[KIRI] Profile '${profileName}' missing lockPenaltyMultiplier, using default 0.01`
     );
     obj.lockPenaltyMultiplier = 0.01;
+  }
+
+  // Graph Layer parameters (Phase 3.2): Provide default values for backward compatibility
+  if (obj.graphInbound === undefined) {
+    obj.graphInbound = 0.5;
+  }
+  if (obj.graphImportance === undefined) {
+    obj.graphImportance = 0.3;
+  }
+  if (obj.graphDecay === undefined) {
+    obj.graphDecay = 0.5;
+  }
+  if (obj.graphMaxDepth === undefined) {
+    obj.graphMaxDepth = 3;
+  }
+  if (obj.cochange === undefined) {
+    obj.cochange = 0.0;
   }
 
   for (const key of required) {
@@ -223,6 +258,11 @@ function loadProfilesFromConfig(): Record<ScoringProfileName, ScoringWeights> {
         blacklistPenaltyMultiplier: 0.01,
         testPenaltyMultiplier: 0.02,
         lockPenaltyMultiplier: 0.01,
+        graphInbound: 0.5,
+        graphImportance: 0.3,
+        graphDecay: 0.5,
+        graphMaxDepth: 3,
+        cochange: 0.0,
       },
       debug: {
         textMatch: 1.0,
@@ -237,6 +277,11 @@ function loadProfilesFromConfig(): Record<ScoringProfileName, ScoringWeights> {
         blacklistPenaltyMultiplier: 0.01,
         testPenaltyMultiplier: 0.02,
         lockPenaltyMultiplier: 0.01,
+        graphInbound: 0.55,
+        graphImportance: 0.35,
+        graphDecay: 0.5,
+        graphMaxDepth: 3,
+        cochange: 0.0,
       },
       api: {
         textMatch: 1.0,
@@ -251,6 +296,11 @@ function loadProfilesFromConfig(): Record<ScoringProfileName, ScoringWeights> {
         blacklistPenaltyMultiplier: 0.01,
         testPenaltyMultiplier: 0.02,
         lockPenaltyMultiplier: 0.01,
+        graphInbound: 0.5,
+        graphImportance: 0.3,
+        graphDecay: 0.5,
+        graphMaxDepth: 3,
+        cochange: 0.0,
       },
       editor: {
         textMatch: 1.0,
@@ -265,6 +315,11 @@ function loadProfilesFromConfig(): Record<ScoringProfileName, ScoringWeights> {
         blacklistPenaltyMultiplier: 0.01,
         testPenaltyMultiplier: 0.02,
         lockPenaltyMultiplier: 0.01,
+        graphInbound: 0.45,
+        graphImportance: 0.25,
+        graphDecay: 0.5,
+        graphMaxDepth: 3,
+        cochange: 0.0,
       },
       bugfix: {
         textMatch: 1.0,
@@ -279,6 +334,11 @@ function loadProfilesFromConfig(): Record<ScoringProfileName, ScoringWeights> {
         blacklistPenaltyMultiplier: 0.01,
         testPenaltyMultiplier: 0.02,
         lockPenaltyMultiplier: 0.01,
+        graphInbound: 0.6,
+        graphImportance: 0.4,
+        graphDecay: 0.5,
+        graphMaxDepth: 3,
+        cochange: 0.0,
       },
       testfail: {
         textMatch: 1.0,
@@ -293,6 +353,11 @@ function loadProfilesFromConfig(): Record<ScoringProfileName, ScoringWeights> {
         blacklistPenaltyMultiplier: 0.01,
         testPenaltyMultiplier: 0.2,
         lockPenaltyMultiplier: 0.01,
+        graphInbound: 0.4,
+        graphImportance: 0.3,
+        graphDecay: 0.5,
+        graphMaxDepth: 3,
+        cochange: 0.0,
       },
       typeerror: {
         textMatch: 1.0,
@@ -307,6 +372,11 @@ function loadProfilesFromConfig(): Record<ScoringProfileName, ScoringWeights> {
         blacklistPenaltyMultiplier: 0.01,
         testPenaltyMultiplier: 0.02,
         lockPenaltyMultiplier: 0.01,
+        graphInbound: 0.35,
+        graphImportance: 0.25,
+        graphDecay: 0.5,
+        graphMaxDepth: 3,
+        cochange: 0.0,
       },
       feature: {
         textMatch: 1.0,
@@ -321,6 +391,11 @@ function loadProfilesFromConfig(): Record<ScoringProfileName, ScoringWeights> {
         blacklistPenaltyMultiplier: 0.01,
         testPenaltyMultiplier: 0.02,
         lockPenaltyMultiplier: 0.01,
+        graphInbound: 0.5,
+        graphImportance: 0.35,
+        graphDecay: 0.5,
+        graphMaxDepth: 3,
+        cochange: 0.0,
       },
     };
     return profilesCache;

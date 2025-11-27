@@ -405,9 +405,12 @@ contextBundle({ goal: "feature guide" });
 baseScore = textMatch * (keyword_matches + phrase_matches * 2.0)  -- テキストマッチ（フレーズは2倍）
           + pathMatch * path_boost                                 -- パスベースブースト
           + editingPath * editing_boost                            -- 編集中ファイル
-          + dependency * dep_score                                 -- 依存関係
+          + dependency * dep_score                                 -- 依存関係（静的解析）
           + proximity * proximity_score                            -- 近接度（同ディレクトリ）
           + structural * semantic_sim                              -- 構造的類似度（LSHベース）
+          + graphInbound * log(1 + inbound_count) * decay^depth   -- グラフ被参照度（v0.15.0+）
+          + graphImportance * importance_score                     -- グラフ重要度（v0.15.0+）
+          + cochange * log(1 + count) * confidence                 -- Co-change（v0.15.0+、editing_path使用時のみ）
 ```
 
 ### フェーズ2: 乗算的ペナルティ/ブースト（Multiplicative Penalties/Boosts）
@@ -616,7 +619,107 @@ SELECT DISTINCT path FROM walk;
 4. **断片化**: シンボル境界で行範囲を最小化し重複を統合する。
 5. **出力生成**: why（根拠タグ、最大10件）を付与し、`includeTokensEstimate: true` が指定されたときのみ tokens_estimate を添えて返却する。
 
+## グラフレイヤー統合（v0.15.0+）
+
+### 依存グラフスコアリング
+
+依存関係グラフは静的解析により抽出され、以下のメトリクスをスコアリングに活用します:
+
+| パラメータ        | デフォルト値 | 説明                                                                   |
+| ----------------- | ------------ | ---------------------------------------------------------------------- |
+| `graphInbound`    | 0.5          | 被参照度スコア（このファイルを参照しているファイル数に基づくブースト） |
+| `graphImportance` | 0.3          | PageRank風重要度スコア（依存グラフの中心性に基づくブースト）           |
+| `graphDecay`      | 0.5          | 深さ減衰係数（深いノードほどスコアが減衰）                             |
+| `graphMaxDepth`   | 3            | BFSトラバーサルの最大深度                                              |
+
+**スコア計算:**
+
+```
+graphScore = graphInbound * log(1 + inbound_count) * decay^depth
+           + graphImportance * importance_score
+```
+
+### Co-changeグラフスコアリング
+
+Co-changeグラフはGit履歴から抽出され、一緒に変更されることの多いファイルペアを識別します:
+
+| パラメータ | デフォルト値 | 説明                                      |
+| ---------- | ------------ | ----------------------------------------- |
+| `cochange` | 0.0          | Co-changeスコアの重み（デフォルトは無効） |
+
+**不変条件（Alloy/TLA+仕様より）:**
+
+- **CC1**: 正規順序（file1 < file2 辞書順）
+- **CC2**: 両ファイルがインデックス済み
+- **CC3**: 正の重み（cochange_count > 0）
+- **CC4**: べき等コミット処理
+
+**スコア計算:**
+
+```
+cochangeScore = cochange * log(1 + count) * confidence
+```
+
+ここで:
+
+- `count`: 一緒にコミットされた回数
+- `confidence`: Jaccard類似度 = |A ∩ B| / |A ∪ B|
+
+### Co-changeの有効化
+
+`config/scoring-profiles.yml` で `cochange` を正の値に設定:
+
+```yaml
+default:
+  cochange: 0.3 # Co-changeスコアを有効化
+```
+
+Co-changeは `editing_path` が指定されている場合にのみ効果があります（編集中のファイルと一緒に変更されることの多いファイルをブースト）。
+
+## ハイブリッド検索の融合方式
+
+KIRI は**加重線形結合（Weighted Linear Combination）**方式を採用しています。
+
+### 採用方式: 加重線形結合
+
+```
+finalScore = Σ (weight_i × signal_i)
+```
+
+各シグナル（textMatch, pathMatch, graphInbound, cochange など）にプロファイル固有の重みを適用し、合計スコアを計算します。
+
+**メリット:**
+
+- シンプルで解釈しやすい
+- 重みの調整でドメイン知識を反映可能
+- 計算コストが低い
+- プロファイルによる柔軟な切り替え
+
+**デメリット:**
+
+- 最適な重み設定にチューニングが必要
+- シグナル間のスケール正規化が必要
+
+### 代替方式との比較
+
+| 方式                             | 説明                                                             | トレードオフ                                      |
+| -------------------------------- | ---------------------------------------------------------------- | ------------------------------------------------- |
+| **RRF (Reciprocal Rank Fusion)** | `1/(k + rank_i)` の合計でランキングを統合                        | パラメータ `k` の設定が難しい、スコア情報を捨てる |
+| **Query Expansion**              | クエリを関連語で拡張してから検索                                 | Recall向上するがPrecision低下のリスク             |
+| **Two-Stage Reranking**          | 第1段階で候補収集、第2段階でLLM/クロスエンコーダーで再ランキング | 高精度だがレイテンシ・コスト増加                  |
+
+### なぜ加重線形結合を選択したか
+
+1. **解釈可能性**: 各シグナルの寄与が明確
+2. **チューニング容易性**: YAMLで重みを調整可能
+3. **低レイテンシ**: 追加のモデル呼び出しが不要
+4. **段階的改善**: 新シグナル（VSS、グラフなど）を追加しやすい
+
+VSS（ベクトル類似度検索）はオプションの二次再ランキングとして提供されており、`semantic_rerank` で Two-Stage アプローチも可能です。
+
 ## 運用メモ（Precision調整の注意）
 
 - path_penalties は `.kiri/config.yml` または `config/kiri.yml` で上書き可能。拡張ディレクトリや fixtures/datasets を強く減衰させるときは Recall 影響を確認すること。
 - fallback:path の候補は text evidence が無い場合に除外されるよう設定してある（KEEP=8）。TRACE で `penalty:fallback-no-text` が多いときはパスヒントを追加するのが効果的。
+- **グラフレイヤー**: `graphInbound` や `cochange` の重みを高くすると、依存関係の深いファイルが優先される。実装詳細を探す場合に有効。
+- **Co-change注意点**: Co-changeはGit履歴に依存するため、新規ファイルや履歴の浅いリポジトリでは効果が限定的。

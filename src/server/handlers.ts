@@ -802,6 +802,8 @@ const CLAMP_SNIPPETS_ENABLED = serverConfig.features.clampSnippets;
 const FALLBACK_SNIPPET_WINDOW = serverConfig.features.snippetWindow;
 const MAX_RERANK_LIMIT = 50;
 const MAX_ARTIFACT_HINTS = 8;
+/** Minimum confidence floor for co-change scoring to prevent zero-boost from low Jaccard scores */
+const MIN_COCHANGE_CONFIDENCE_FLOOR = 0.1;
 const DOMAIN_PATH_HINT_LIMIT = MAX_ARTIFACT_HINTS;
 const SAFE_PATH_PATTERN = /^[a-zA-Z0-9_.\-/]+$/;
 const HINT_PRIORITY_TEXT_MULTIPLIER = serverConfig.hints.priority.textMultiplier;
@@ -1973,6 +1975,181 @@ function applyStructuralScores(
     candidate.semanticSimilarity = similarity;
     candidate.score += structuralWeight * similarity;
     candidate.reasons.add(`structural:${similarity.toFixed(2)}`);
+  }
+}
+
+/**
+ * Graph Layer: Apply graph-based scoring boosts (Phase 3.2)
+ *
+ * Uses precomputed metrics from graph_metrics table:
+ * - inbound_count: Number of files that import this file (PageRank-like importance)
+ * - importance_score: Normalized PageRank score [0, 1]
+ *
+ * Boosts are additive and scaled by profile weights.
+ */
+async function applyGraphLayerScores(
+  db: DuckDBClient,
+  repoId: number,
+  candidates: CandidateInfo[],
+  weights: ScoringWeights
+): Promise<void> {
+  // Skip if both weights are zero (disabled)
+  if (weights.graphInbound <= 0 && weights.graphImportance <= 0) {
+    return;
+  }
+
+  if (candidates.length === 0) {
+    return;
+  }
+
+  // Fetch graph metrics for all candidate paths
+  const paths = candidates.map((c) => c.path);
+  const placeholders = paths.map(() => "?").join(", ");
+
+  const metrics = await db.all<{
+    path: string;
+    inbound_count: number;
+    importance_score: number;
+  }>(
+    `
+    SELECT path, inbound_count, importance_score
+    FROM graph_metrics
+    WHERE repo_id = ? AND path IN (${placeholders})
+    `,
+    [repoId, ...paths]
+  );
+
+  // Build lookup map
+  const metricsMap = new Map<string, { inbound: number; importance: number }>();
+  for (const m of metrics) {
+    metricsMap.set(m.path, {
+      inbound: m.inbound_count,
+      importance: m.importance_score,
+    });
+  }
+
+  // Compute max inbound for normalization (log scale)
+  let maxInbound = 1;
+  for (const m of metrics) {
+    if (m.inbound_count > maxInbound) {
+      maxInbound = m.inbound_count;
+    }
+  }
+
+  // Apply boosts
+  for (const candidate of candidates) {
+    const graphMetrics = metricsMap.get(candidate.path);
+    if (!graphMetrics) {
+      continue;
+    }
+
+    // Inbound dependency boost (log-scaled to dampen very high values)
+    if (weights.graphInbound > 0 && graphMetrics.inbound > 0) {
+      // Log-scale normalization: log(1 + count) / log(1 + max)
+      const normalizedInbound = Math.log(1 + graphMetrics.inbound) / Math.log(1 + maxInbound);
+      const inboundBoost = weights.graphInbound * normalizedInbound;
+      candidate.score += inboundBoost;
+      candidate.reasons.add(`graph:inbound:${graphMetrics.inbound}`);
+    }
+
+    // Importance score boost (already normalized to [0, 1])
+    if (weights.graphImportance > 0 && graphMetrics.importance > 0) {
+      const importanceBoost = weights.graphImportance * graphMetrics.importance;
+      candidate.score += importanceBoost;
+      candidate.reasons.add(`graph:importance:${graphMetrics.importance.toFixed(2)}`);
+    }
+  }
+}
+
+/**
+ * Apply co-change scores based on git history.
+ * Files that frequently change together with editing_path get boosted.
+ *
+ * Phase 4: Co-change graph integration.
+ *
+ * @param db - DuckDB client
+ * @param repoId - Repository ID
+ * @param candidates - Candidate files to score
+ * @param weights - Scoring weights (uses cochange weight)
+ * @param editingPath - Currently edited file path (optional)
+ */
+async function applyCochangeScores(
+  db: DuckDBClient,
+  repoId: number,
+  candidates: CandidateInfo[],
+  weights: ScoringWeights,
+  editingPath?: string
+): Promise<void> {
+  // Skip if cochange weight is zero (disabled by default)
+  if (weights.cochange <= 0) {
+    return;
+  }
+
+  // Skip if no editing_path provided (co-change needs a reference file)
+  if (!editingPath) {
+    return;
+  }
+
+  if (candidates.length === 0) {
+    return;
+  }
+
+  // Query co-change edges involving editing_path
+  // Both directions: editing_path can be file1 or file2 (canonical ordering)
+  const cochangeEdges = await db.all<{
+    neighbor: string;
+    cochange_count: number;
+    confidence: number;
+  }>(
+    `
+    SELECT
+      CASE WHEN file1 = ? THEN file2 ELSE file1 END as neighbor,
+      cochange_count,
+      confidence
+    FROM cochange
+    WHERE repo_id = ? AND (file1 = ? OR file2 = ?)
+    `,
+    [editingPath, repoId, editingPath, editingPath]
+  );
+
+  if (cochangeEdges.length === 0) {
+    return;
+  }
+
+  // Build lookup map: neighbor path -> (count, confidence)
+  const cochangeMap = new Map<string, { count: number; confidence: number }>();
+  for (const edge of cochangeEdges) {
+    cochangeMap.set(edge.neighbor, {
+      count: edge.cochange_count,
+      confidence: edge.confidence ?? 0,
+    });
+  }
+
+  // Compute max count for normalization
+  let maxCount = 1;
+  for (const edge of cochangeEdges) {
+    if (edge.cochange_count > maxCount) {
+      maxCount = edge.cochange_count;
+    }
+  }
+
+  // Apply cochange boost to candidates
+  for (const candidate of candidates) {
+    const cochange = cochangeMap.get(candidate.path);
+    if (!cochange || cochange.count <= 0) {
+      continue;
+    }
+
+    // Normalize cochange count using log scale (similar to inbound boost)
+    const normalizedCount = Math.log(1 + cochange.count) / Math.log(1 + maxCount);
+
+    // Weight the boost by confidence (Jaccard similarity) for quality
+    // Final boost = weight * normalized_count * confidence
+    const confidenceFactor = Math.max(cochange.confidence, MIN_COCHANGE_CONFIDENCE_FLOOR);
+    const cochangeBoost = weights.cochange * normalizedCount * confidenceFactor;
+
+    candidate.score += cochangeBoost;
+    candidate.reasons.add(`cochange:${cochange.count}:${(cochange.confidence * 100).toFixed(0)}%`);
   }
 }
 
@@ -4493,6 +4670,12 @@ async function contextBundleImpl(
   }
 
   applyStructuralScores(materializedCandidates, queryEmbedding, weights.structural);
+
+  // Phase 3.2: Apply graph layer scoring (inbound dependencies, PageRank importance)
+  await applyGraphLayerScores(db, repoId, materializedCandidates, weights);
+
+  // Phase 4: Apply co-change scores (files that change together with editing_path)
+  await applyCochangeScores(db, repoId, materializedCandidates, weights, artifacts.editing_path);
 
   // ✅ CRITICAL SAFETY: Apply multipliers AFTER all additive scoring (v0.7.0)
   // Only apply to positive scores to prevent negative score inversion

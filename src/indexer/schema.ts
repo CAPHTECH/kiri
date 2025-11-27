@@ -248,6 +248,9 @@ export async function ensureBaseSchema(db: DuckDBClient): Promise<void> {
   // Document metadata tables (delegated to dedicated migration function)
   await ensureDocumentMetadataTables(db);
 
+  // Graph layer tables (Phase 3.2: Graph Layer for hybrid search)
+  await ensureGraphLayerTables(db);
+
   await db.run(`
     CREATE TABLE IF NOT EXISTS markdown_link (
       repo_id INTEGER,
@@ -892,4 +895,97 @@ export async function setFTSDirty(db: DuckDBClient, repoId: number): Promise<voi
      WHERE id = ?`,
     [repoId]
   );
+}
+
+/**
+ * Graph Layer tables for hybrid search (Phase 3.2 of Issue #82)
+ *
+ * This function creates tables for:
+ * 1. graph_metrics - Precomputed graph centrality metrics per file
+ * 2. inbound_edges - Precomputed inbound closure (BFS up to depth 3)
+ * 3. cochange - Co-change graph from git history analysis
+ *
+ * Invariants (verified by Alloy/TLA+ specs in specs/):
+ * - DG1-DG3: Dependency graph structural invariants
+ * - CC1-CC4: Co-change graph invariants (canonical ordering, positive weight)
+ *
+ * @param db - DuckDB client
+ */
+export async function ensureGraphLayerTables(db: DuckDBClient): Promise<void> {
+  // 1. graph_metrics table - Precomputed centrality metrics
+  await db.run(`
+    CREATE TABLE IF NOT EXISTS graph_metrics (
+      repo_id INTEGER,
+      path TEXT,
+      inbound_count INTEGER DEFAULT 0,
+      outbound_count INTEGER DEFAULT 0,
+      importance_score FLOAT DEFAULT 0.0,
+      computed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (repo_id, path)
+    )
+  `);
+
+  // Index for fast importance lookup during scoring
+  await db.run(`
+    CREATE INDEX IF NOT EXISTS idx_graph_importance
+      ON graph_metrics(repo_id, importance_score DESC)
+  `);
+
+  // 2. inbound_edges table - Precomputed BFS closure
+  await db.run(`
+    CREATE TABLE IF NOT EXISTS inbound_edges (
+      repo_id INTEGER,
+      target_path TEXT,
+      source_path TEXT,
+      depth INTEGER,
+      PRIMARY KEY (repo_id, target_path, source_path)
+    )
+  `);
+
+  // Index for fast inbound lookup by target
+  await db.run(`
+    CREATE INDEX IF NOT EXISTS idx_inbound_target
+      ON inbound_edges(repo_id, target_path)
+  `);
+
+  // 3. cochange table - Co-change graph from git history
+  // Invariants enforced:
+  // - CC1: Canonical ordering (file1 < file2) via CHECK constraint
+  // - CC3: Positive weight via CHECK constraint
+  await db.run(`
+    CREATE TABLE IF NOT EXISTS cochange (
+      repo_id INTEGER,
+      file1 TEXT,
+      file2 TEXT,
+      cochange_count INTEGER NOT NULL,
+      confidence FLOAT,
+      last_commit TEXT,
+      last_cochange_at TIMESTAMP,
+      PRIMARY KEY (repo_id, file1, file2)
+    )
+  `);
+
+  // Note: CHECK constraints are validated at application level for DuckDB compatibility
+  // CC1 (file1 < file2) and CC3 (cochange_count > 0) are enforced in cochange.ts
+
+  // Indexes for fast co-change lookup (bidirectional)
+  await db.run(`
+    CREATE INDEX IF NOT EXISTS idx_cochange_file1
+      ON cochange(repo_id, file1)
+  `);
+
+  await db.run(`
+    CREATE INDEX IF NOT EXISTS idx_cochange_file2
+      ON cochange(repo_id, file2)
+  `);
+
+  // 4. processed_commits table - Track processed commits for idempotency (CC4)
+  await db.run(`
+    CREATE TABLE IF NOT EXISTS processed_commits (
+      repo_id INTEGER,
+      commit_hash TEXT,
+      processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (repo_id, commit_hash)
+    )
+  `);
 }

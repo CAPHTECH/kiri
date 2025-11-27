@@ -24,10 +24,13 @@ import { getIndexerQueue } from "./queue.js";
 import {
   ensureBaseSchema,
   ensureDocumentMetadataTables,
+  ensureGraphLayerTables,
   ensureNormalizedRootColumn,
   ensureRepoMetaColumns,
   rebuildFTSIfNeeded,
 } from "./schema.js";
+import { computeGraphMetrics, incrementalGraphUpdate } from "./graph-metrics.js";
+import { computeCochangeGraph, incrementalCochangeUpdate } from "./cochange.js";
 import { IndexWatcher } from "./watch.js";
 
 interface IndexerOptions {
@@ -1583,6 +1586,8 @@ export async function runIndexer(options: IndexerOptions): Promise<void> {
       await ensureNormalizedRootColumn(dbClient);
       // Phase 3: Ensure FTS metadata columns exist for existing DBs (migration)
       await ensureRepoMetaColumns(dbClient);
+      // Phase 3.2: Ensure graph layer tables exist (graph_metrics, inbound_edges, cochange)
+      await ensureGraphLayerTables(dbClient);
 
       const [headCommit, defaultBranch] = await Promise.all([
         getHeadCommit(repoRoot),
@@ -1803,6 +1808,16 @@ export async function runIndexer(options: IndexerOptions): Promise<void> {
 
         // Phase 2+3: Rebuild FTS index after incremental updates (dirty=true triggers rebuild)
         await rebuildFTSIfNeeded(dbClient, repoId);
+
+        // Phase 3.2: Incremental graph metrics update (only if files were actually changed)
+        if (processedCount > 0) {
+          const changedFilePaths = changedFiles.map((f) => f.path);
+          await incrementalGraphUpdate(dbClient, repoId, changedFilePaths);
+        }
+
+        // Phase 4: Incremental co-change update (check for new commits)
+        await incrementalCochangeUpdate(dbClient, repoId, repoRoot);
+
         return;
       }
 
@@ -1874,6 +1889,12 @@ export async function runIndexer(options: IndexerOptions): Promise<void> {
 
       // Phase 2+3: Force rebuild FTS index after full reindex
       await rebuildFTSIfNeeded(dbClient, repoId, true);
+
+      // Phase 3.2: Compute graph metrics (PageRank, inbound closure) after dependencies are persisted
+      await computeGraphMetrics(dbClient, repoId);
+
+      // Phase 4: Compute co-change graph from git history
+      await computeCochangeGraph(dbClient, repoId, repoRoot);
 
       // Garbage collect orphaned blobs after full reindex
       await garbageCollectBlobs(dbClient);
