@@ -58,6 +58,15 @@ documents:
   - doc_id: GUIDE-005
     path: docs/dev/node-version.md
     title: "Node Version Requirements"
+  - doc_id: GUIDE-006
+    path: docs/setup.md
+    title: "Setup Guide"
+  - doc_id: GUIDE-007
+    path: docs/tools-reference.md
+    title: "MCP Tools Reference"
+  - doc_id: GUIDE-008
+    path: docs/configuration.md
+    title: "Configuration Guide"
 
   # Security - セキュリティドキュメント
   - doc_id: SEC-001
