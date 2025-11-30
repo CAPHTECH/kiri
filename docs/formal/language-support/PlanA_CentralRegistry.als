@@ -5,7 +5,7 @@ module PlanA_CentralRegistry
 
 -- Core signatures
 abstract sig Language {}
-one sig TypeScript, Swift, PHP, Java, Dart, Python, Go extends Language {}
+one sig TypeScript, Swift, PHP, Java, Dart, Python, Go, Rust extends Language {}
 
 abstract sig BackendType {}
 one sig TreeSitter, CompilerAPI, LSP extends BackendType {}

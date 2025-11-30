@@ -5,7 +5,7 @@ module PlanB_HierarchicalBackend
 
 -- Core signatures
 abstract sig Language {}
-one sig TypeScript, Swift, PHP, Java, Dart extends Language {}
+one sig TypeScript, Swift, PHP, Java, Dart, Rust extends Language {}
 
 abstract sig BackendType {}
 one sig TreeSitter, CompilerAPI, LSP extends BackendType {}

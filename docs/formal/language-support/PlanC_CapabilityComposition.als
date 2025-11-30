@@ -5,7 +5,7 @@ module PlanC_CapabilityComposition
 
 -- Core signatures
 abstract sig Language {}
-one sig TypeScript, Swift, PHP, Java, Dart extends Language {}
+one sig TypeScript, Swift, PHP, Java, Dart, Rust extends Language {}
 
 abstract sig Capability {}
 one sig SymbolExtraction, TypeInference, DocComment, SignatureFormat extends Capability {}

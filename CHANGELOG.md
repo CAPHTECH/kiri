@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Rust code intelligence**: tree-sitter-rust based analyzer extracts symbols/snippets (struct/enum/trait/impl/fn/mod/const/static/type/macro) and resolves imports, module files, and extern crates for dependency graph integration.
+
 ## [0.17.0] - 2025-11-29
 
 ### Added

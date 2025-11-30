@@ -154,7 +154,9 @@ export function offsetToLine(lineStarts: number[], offset: number): number {
 export function cleanDocComment(text: string): string {
   return text
     .replace(/^\/\/\/\s?/gm, "") // Swift /// コメント
+    .replace(/^\/\/!\s?/gm, "") // Rust //! コメント
     .replace(/^\/\*\*\s?|\s?\*\/$/g, "") // /** ... */ の開始/終了
+    .replace(/^\/\*!\s?|\s?\*\/$/g, "") // /*! ... */ の開始/終了
     .replace(/^\s*\*\s?/gm, "") // 中間の * プレフィックス
     .trim();
 }

@@ -52,3 +52,4 @@ export { SwiftAnalyzer, createSwiftAnalyzer } from "./swift/index.js";
 export { PHPAnalyzer, createPHPAnalyzer } from "./php/index.js";
 export { JavaAnalyzer, createJavaAnalyzer } from "./java/index.js";
 export { DartAnalyzer, createDartAnalyzer } from "./dart/index.js";
+export { RustAnalyzer, createRustAnalyzer } from "./rust/index.js";

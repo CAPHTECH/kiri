@@ -51,7 +51,8 @@
   },
   "scripts": {
     "bootstrap": "pnpm install",
-    "build": "tsc --project tsconfig.build.json && pnpm run build:copy-assets",
+    "clean": "rm -rf dist",
+    "build": "pnpm run clean && tsc --project tsconfig.build.json && pnpm run build:copy-assets",
     "build:copy-assets": "tsx scripts/build/copy-assets.ts",
     "dev": "tsx src/server/main.ts --port 8765",
     "lint": "eslint \"{src,tests,scripts}/**/*.{ts,tsx}\" && prettier --check \"**/*.{ts,tsx,json,md,yml}\"",
@@ -87,6 +88,7 @@
     "tree-sitter": "^0.22.0",
     "tree-sitter-java": "^0.23.2",
     "tree-sitter-php": "^0.22.8",
+    "tree-sitter-rust": "^0.23.0",
     "tree-sitter-swift": "0.7.1",
     "typescript": "^5.6.3",
     "yaml": "^2.8.1",

@@ -28,6 +28,7 @@ import { createDartAnalyzer } from "./codeintel/dart/index.js";
 import { createJavaAnalyzer } from "./codeintel/java/index.js";
 import { createPHPAnalyzer } from "./codeintel/php/index.js";
 import { LanguageRegistry } from "./codeintel/registry.js";
+import { createRustAnalyzer } from "./codeintel/rust/index.js";
 import { createSwiftAnalyzer } from "./codeintel/swift/index.js";
 import type { AnalysisResult } from "./codeintel/types.js";
 import { createTypeScriptAnalyzer } from "./codeintel/typescript/index.js";
@@ -41,6 +42,7 @@ registry.register(createSwiftAnalyzer());
 registry.register(createPHPAnalyzer());
 registry.register(createJavaAnalyzer());
 registry.register(createDartAnalyzer());
+registry.register(createRustAnalyzer());
 
 /**
  * ソースコードを解析してシンボル、スニペット、依存関係を抽出
