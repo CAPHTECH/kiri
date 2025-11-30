@@ -1,4 +1,5 @@
 ---
+doc_id: "GUIDE-002"
 title: "Path Penalties User Guide"
 category: "configuration"
 tags:

@@ -1,4 +1,16 @@
-# ADR 002: Graduated Penalty System for Path-Based Scoring
+---
+doc_id: "ADR-001"
+title: "Graduated Penalty System for Path-Based Scoring"
+category: "adr"
+tags:
+  - adr
+  - penalty
+  - scoring
+  - path-matching
+service: "kiri"
+---
+
+# ADR 001: Graduated Penalty System for Path-Based Scoring
 
 **Status**: Accepted
 **Date**: 2025-11-12 (Proposed), 2025-11-12 (Accepted)

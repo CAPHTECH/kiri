@@ -1,3 +1,14 @@
+---
+doc_id: "PLAN-001"
+title: "実装マイルストーンと依存関係"
+category: "planning"
+tags:
+  - roadmap
+  - milestone
+  - planning
+service: "kiri"
+---
+
 # 実装マイルストーンと依存関係
 
 ## マイルストーン

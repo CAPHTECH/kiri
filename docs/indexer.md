@@ -1,3 +1,14 @@
+---
+doc_id: "ARCH-003"
+title: "取り込みパイプライン（Indexer）"
+category: "architecture"
+tags:
+  - indexer
+  - pipeline
+  - tree-sitter
+service: "kiri"
+---
+
 # 取り込みパイプライン（Indexer）
 
 ## ステップ概要

@@ -1,3 +1,14 @@
+---
+doc_id: "ARCH-002"
+title: "データモデル（DuckDB スキーマ）"
+category: "architecture"
+tags:
+  - schema
+  - duckdb
+  - data-model
+service: "kiri"
+---
+
 # データモデル（DuckDB スキーマ）
 
 > ポイント: **blob/tree 分離**でリネームに強く重複本文を排除。VSS/FTS はオプションで、Degrade 運転時は無効でも成立する設計とする。

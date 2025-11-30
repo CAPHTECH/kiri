@@ -1,3 +1,14 @@
+---
+doc_id: "GUIDE-005"
+title: "Node バージョンとツールチェーン"
+category: "development"
+tags:
+  - node
+  - toolchain
+  - setup
+service: "kiri"
+---
+
 # Node バージョンとツールチェーン
 
 - 推奨 Node: **20.x (LTS)**

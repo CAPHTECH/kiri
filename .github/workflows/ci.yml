@@ -6,6 +6,29 @@ on:
   pull_request:
 
 jobs:
+  # ドキュメントID検証（ASSAY_KIT_TOKEN不要）
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # shirushi lint --base で差分検出に必要
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Enable corepack
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Lint documentation IDs
+        run: pnpm docs:lint
+
   build:
     runs-on: ubuntu-latest
     env:

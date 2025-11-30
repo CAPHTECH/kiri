@@ -1,4 +1,5 @@
 ---
+doc_id: "SEC-001"
 title: "セキュリティとコンプライアンス"
 category: "security"
 tags:

@@ -1,4 +1,5 @@
 ---
+doc_id: "TEST-001"
 title: "テストと評価"
 category: "testing"
 tags:

@@ -1,4 +1,5 @@
 ---
+doc_id: "ARCH-001"
 title: "KIRI 概要"
 category: "architecture"
 tags:

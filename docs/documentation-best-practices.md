@@ -1,4 +1,5 @@
 ---
+doc_id: "GUIDE-001"
 title: "Authoring Docs for KIRI Search"
 category: "docs"
 tags:

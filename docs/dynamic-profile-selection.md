@@ -1,3 +1,14 @@
+---
+doc_id: "ARCH-007"
+title: "動的プロファイル選択機能"
+category: "architecture"
+tags:
+  - profile
+  - selection
+  - ranking
+service: "kiri"
+---
+
 # 動的プロファイル選択機能
 
 **導入日**: 2025-11-17  

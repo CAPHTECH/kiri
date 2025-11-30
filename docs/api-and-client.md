@@ -1,3 +1,14 @@
+---
+doc_id: "ARCH-004"
+title: "MCP API and Client Configuration"
+category: "architecture"
+tags:
+  - api
+  - mcp
+  - client
+service: "kiri"
+---
+
 # MCP API and Client Configuration
 
 ## Overview

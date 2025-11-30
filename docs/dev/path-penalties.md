@@ -1,4 +1,5 @@
 ---
+doc_id: "GUIDE-004"
 title: "Path Penalties Developer Notes"
 category: "configuration"
 tags:

@@ -1,4 +1,5 @@
 ---
+doc_id: "RUN-001"
 title: "運用 Runbook"
 category: "operations"
 tags:

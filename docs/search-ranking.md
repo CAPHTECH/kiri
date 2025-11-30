@@ -1,4 +1,5 @@
 ---
+doc_id: "ARCH-005"
 title: "検索とランキング"
 category: "search"
 tags:

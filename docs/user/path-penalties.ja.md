@@ -1,4 +1,5 @@
 ---
+doc_id: "GUIDE-003"
 title: "Path Penalties ユーザーガイド"
 category: "configuration"
 tags:
