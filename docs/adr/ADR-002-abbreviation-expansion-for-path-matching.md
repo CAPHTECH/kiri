@@ -1,13 +1,25 @@
-# ADR 003: Abbreviation Expansion for Path Matching
+---
+doc_id: "ADR-002"
+title: "Abbreviation Expansion for Path Matching"
+category: "adr"
+tags:
+  - adr
+  - path-matching
+  - abbreviation
+  - scoring
+service: "kiri"
+---
+
+# ADR 002: Abbreviation Expansion for Path Matching
 
 **Status**: Accepted
 **Date**: 2025-11-12
 **Deciders**: Issue #68 investigation team
-**Related**: ADR 002 (Graduated Penalty System)
+**Related**: ADR 001 (Graduated Penalty System)
 
 ## Context
 
-After implementing the graduated penalty system (ADR 002), telemetry analysis revealed:
+After implementing the graduated penalty system (ADR 001), telemetry analysis revealed:
 
 - **90.1% of candidates have zero path matches** (pathMatchHits === 0)
 - P@10 improvement was only +4.2% (0.189 → 0.197)
@@ -297,7 +309,7 @@ Verify pathMatchHits distribution improves after abbreviation expansion.
 
 ## Evaluation Results (2025-11-12)
 
-Implemented and evaluated per ADR 003 recommendations. Results showed:
+Implemented and evaluated per ADR 002 recommendations. Results showed:
 
 1. ✅ **Implementation quality**: LDE-compliant, 19/19 property tests passing
 2. ✅ **Performance**: <1ms overhead, well within budget
@@ -347,6 +359,6 @@ Path-based matching has reached practical limits with current approach. For sign
 ## References
 
 - Issue #68: Path and Large File Penalty System
-- ADR 002: Graduated Penalty System
+- ADR 001: Graduated Penalty System
 - Telemetry analysis: `/var/eval/issue-68-investigation-final.md`
 - Critical review: `/tmp/fuzzy-path-critical-review.md`

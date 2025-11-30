@@ -1,3 +1,14 @@
+---
+doc_id: "PLAN-002"
+title: "開発原則と未解決課題"
+category: "planning"
+tags:
+  - principles
+  - guidelines
+  - issues
+service: "kiri"
+---
+
 # 開発原則と未解決課題
 
 ## 開発上の決めごと

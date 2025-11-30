@@ -1,3 +1,14 @@
+---
+doc_id: "SEC-002"
+title: "セキュリティレビュー手順"
+category: "security"
+tags:
+  - security
+  - review
+  - process
+service: "kiri"
+---
+
 # セキュリティレビュー手順
 
 ## 週次レビューの目的

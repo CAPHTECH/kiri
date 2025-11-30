@@ -1,0 +1,81 @@
+# KIRI Document Index
+# shirushi によって管理されるドキュメントID一覧
+# 形式: {KIND}-{SER3} (例: ARCH-001)
+
+documents:
+  # Architecture - コア設計とリファレンス
+  - doc_id: ARCH-001
+    path: docs/overview.md
+    title: "KIRI 概要"
+  - doc_id: ARCH-002
+    path: docs/data-model.md
+    title: "データモデル（DuckDB スキーマ）"
+  - doc_id: ARCH-003
+    path: docs/indexer.md
+    title: "Indexer"
+  - doc_id: ARCH-004
+    path: docs/api-and-client.md
+    title: "API & Client"
+  - doc_id: ARCH-005
+    path: docs/search-ranking.md
+    title: "検索とランキング"
+  - doc_id: ARCH-006
+    path: docs/schema-migrations.md
+    title: "Schema Migrations"
+  - doc_id: ARCH-007
+    path: docs/dynamic-profile-selection.md
+    title: "Dynamic Profile Selection"
+
+  # ADR - Architecture Decision Records
+  - doc_id: ADR-001
+    path: docs/adr/ADR-001-graduated-penalty-system.md
+    title: "Graduated Penalty System"
+  - doc_id: ADR-002
+    path: docs/adr/ADR-002-abbreviation-expansion-for-path-matching.md
+    title: "Abbreviation Expansion for Path Matching"
+
+  # Runbook - 運用手順
+  - doc_id: RUN-001
+    path: docs/runbook.md
+    title: "運用 Runbook"
+  - doc_id: RUN-002
+    path: docs/operations.md
+    title: "Operations"
+
+  # Guide - ユーザー/開発者向けガイド
+  - doc_id: GUIDE-001
+    path: docs/documentation-best-practices.md
+    title: "Documentation Best Practices"
+  - doc_id: GUIDE-002
+    path: docs/user/path-penalties.md
+    title: "Path Penalties User Guide"
+  - doc_id: GUIDE-003
+    path: docs/user/path-penalties.ja.md
+    title: "Path Penalties ユーザーガイド（日本語）"
+  - doc_id: GUIDE-004
+    path: docs/dev/path-penalties.md
+    title: "Path Penalties Developer Guide"
+  - doc_id: GUIDE-005
+    path: docs/dev/node-version.md
+    title: "Node Version Requirements"
+
+  # Security - セキュリティドキュメント
+  - doc_id: SEC-001
+    path: docs/security.md
+    title: "セキュリティとコンプライアンス"
+  - doc_id: SEC-002
+    path: docs/processes/security-review.md
+    title: "Security Review Process"
+
+  # Testing - テスト戦略
+  - doc_id: TEST-001
+    path: docs/testing.md
+    title: "テストと評価"
+
+  # Planning - ロードマップと計画
+  - doc_id: PLAN-001
+    path: docs/roadmap.md
+    title: "Roadmap"
+  - doc_id: PLAN-002
+    path: docs/principles.md
+    title: "開発原則と未解決課題"

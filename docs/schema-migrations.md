@@ -1,3 +1,14 @@
+---
+doc_id: "ARCH-006"
+title: "DuckDB Schema Migrations"
+category: "architecture"
+tags:
+  - schema
+  - migration
+  - duckdb
+service: "kiri"
+---
+
 # DuckDB Schema Migrations
 
 > KIRIは自動スキーママイグレーションを使用します。既存のデータベースに対して新しいテーブルやカラムが自動的に追加されます。

@@ -1,4 +1,5 @@
 ---
+doc_id: "RUN-002"
 title: "運用と可観測性"
 category: "operations"
 tags:

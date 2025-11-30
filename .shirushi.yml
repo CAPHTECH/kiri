@@ -1,0 +1,33 @@
+# Shirushi Document ID Configuration for KIRI
+#
+# ID形式: {KIND}-{SER3} (例: ARCH-001, ADR-001, RUN-001)
+# ドキュメントの一意識別子を管理し、変更を検出する
+
+doc_globs:
+  - "docs/**/*.md"
+  - "!docs/formal/**" # TLA+/Alloy formal specs を除外
+  - "!docs/eval-*.md" # 評価レポートを除外
+  - "!docs/refactoring-analysis-*.md" # 分析レポートを除外
+
+index_file: "docs/doc_index.yaml"
+id_field: "doc_id"
+id_format: "{KIND}-{SER3}"
+
+dimensions:
+  KIND:
+    type: enum
+    values:
+      - ARCH # Architecture - コア設計とリファレンス
+      - ADR # Architecture Decision Record - 設計決定
+      - RUN # Runbook - 運用手順
+      - GUIDE # Guide - ユーザー/開発者向けガイド
+      - SEC # Security - セキュリティドキュメント
+      - TEST # Testing - テスト戦略
+      - PLAN # Planning - ロードマップと計画
+  SER3:
+    type: serial
+    digits: 3
+    scope: ["KIND"]
+
+forbid_id_change: true
+allow_missing_id_in_new_files: false
