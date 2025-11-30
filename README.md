@@ -2,7 +2,7 @@
 
 > Intelligent code context extraction for LLMs via Model Context Protocol
 
-[![Version](https://img.shields.io/badge/version-0.17.0-blue.svg)](package.json)
+[![Version](https://img.shields.io/badge/version-0.18.0-blue.svg)](package.json)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.6-blue.svg)](https://www.typescriptlang.org/)
 [![MCP](https://img.shields.io/badge/MCP-Compatible-green.svg)](https://modelcontextprotocol.io/)
@@ -20,19 +20,25 @@
 - **📝 Phrase-Aware**: Recognizes compound terms (kebab-case, snake_case) for precise matching
 - **🔒 Concurrency-Safe** _(v0.9.7+)_: Per-database queues, canonicalized DuckDB paths, and bootstrap-safe locking prevent FTS rebuild conflicts and keep locks consistent across symlinks—even on first run
 
-## 🆕 What's New in v0.17.0
+## 🆕 What's New in v0.18.0
 
 ### ✨ New Features
 
-- **`code` boost_profile**: New boost profile that strongly deprioritizes documentation and config files (95% penalty) to focus search results on actual implementation code
-  - Use `boost_profile: "code"` when you want to find implementation files only
+- **Rust code intelligence**: tree-sitter-rust based analyzer extracts symbols/snippets (struct/enum/trait/impl/fn/mod/const/static/type/macro) and resolves imports, module files, and extern crates for dependency graph integration
+- **shirushi document ID management**: Document ID uniqueness validation and management via shirushi linting
+
+### 🔧 Improvements
+
+- **Clean Architecture refactoring**: Reorganized language analyzers using Clean Architecture for improved extensibility and maintainability
 
 ### 🐛 Bug Fixes
 
-- **Graph metrics retry logic**: Added retry logic for transient DuckDB errors during graph metrics computation
+- **Rust imports resolution**: Fixed resolution of Rust imports ending with items
+- **Build cleanup**: Clean dist directory before build to prevent stale files from persisting
 
 ### Previous Releases
 
+- **v0.17.0**: `code` boost_profile, graph metrics retry logic
 - **v0.16.1**: Graceful degradation for graph layer tables
 - **v0.16.0**: DuckDB client migration to `@duckdb/node-api`
 - **v0.15.0**: `snippets_get` view parameter, co-change scoring, stop words & IDF weighting

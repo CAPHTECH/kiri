@@ -7,9 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0] - 2025-12-01
+
 ### Added
 
-- **Rust code intelligence**: tree-sitter-rust based analyzer extracts symbols/snippets (struct/enum/trait/impl/fn/mod/const/static/type/macro) and resolves imports, module files, and extern crates for dependency graph integration.
+- **Rust code intelligence**: tree-sitter-rust based analyzer extracts symbols/snippets (struct/enum/trait/impl/fn/mod/const/static/type/macro) and resolves imports, module files, and extern crates for dependency graph integration
+- **shirushi document ID management**: Introduced document ID uniqueness validation and management via shirushi linting
+
+### Changed
+
+- **Clean Architecture refactoring**: Reorganized language analyzers using Clean Architecture for improved extensibility and maintainability
+
+### Fixed
+
+- **Rust imports resolution**: Fixed resolution of Rust imports ending with items (`use foo::bar::item`)
+- **TypeScript build error**: Fixed TypeScript build errors and improved test coverage
+- **Build cleanup**: Clean dist directory before build to prevent stale files from persisting
 
 ## [0.17.0] - 2025-11-29
 
