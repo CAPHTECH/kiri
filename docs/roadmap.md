@@ -52,6 +52,38 @@ service: "kiri"
    - 運用 runbook (`docs/runbook.md`) に Degrade 発生時の復旧手順と観測項目の確認方法を追加する。
    - 週次レビュー向けに `docs/processes/security-review.md` を作成し、エクスポートログのチェックリストを整理する。
 
+## リファクタリング候補 (Technical Debt)
+
+以下は 2025-01-13 の分析で特定された技術的負債です。
+
+### P1 (High Priority)
+
+1. **handlers.ts 分割** - God file (2861 lines)
+   - 現状: 30+ 関数が混在（handlers, helpers, utils, repo logic）
+   - 提案: `src/server/handlers/`, `src/server/services/`, `src/server/utils/` に分割
+   - 対象: context-bundle, files-search, snippets-get, deps-closure, semantic-rerank
+
+2. **rpc.ts ハンドラレジストリ化** - Switch statement (15 cases)
+   - 現状: `createRpcHandler` 内の大規模 switch 文が OCP 違反
+   - 提案: Handler Registry パターンで拡張可能な設計に変更
+
+3. **resolveRepoId 責務分離** - Multiple responsibilities
+   - 現状: パス正規化 + DB検索 + 更新 + エラーハンドリングが混在
+   - 提案: `RepoPathNormalizer`, `RepoRepository`, `RepoResolver` に分離
+
+### P2 (Medium Priority)
+
+4. **depsClosure メソッド分割** - Long method (86 lines)
+   - 提案: `buildDependencyGraph()`, `traverseInbound()`, `traverseOutbound()` に分割
+
+5. **CLI 引数パース共通化** - Duplicate code
+   - 現状: proxy.ts, daemon.ts, main.ts で類似ロジックが重複
+   - 提案: `src/shared/cli/args.ts` への統合完了
+
+6. **CONFIG_FILES 定数移動** - Misplaced constant
+   - 現状: handlers.ts 内の 100+ 行の定数
+   - 提案: `src/server/utils/config-files.ts` または shared へ移動
+
 ## 依存関係
 
 - **ランタイム**: Node.js 20+（TypeScript ESM / pnpm 管理 / MCP サーバーも同言語で統一）。
