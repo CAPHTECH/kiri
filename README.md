@@ -13,6 +13,7 @@
 
 - **MCP Native**: Plug-and-play with Claude Desktop, Codex CLI, and other MCP clients
 - **Smart Context**: Extract minimal, relevant code fragments based on task goals
+- **Accurate**: MRR 1.0 — the most relevant file always ranks first
 - **Fast**: Sub-second response time for most queries
 - **Semantic Search**: Multi-word queries, dependency analysis, BM25 ranking
 - **Auto-Sync**: Watch mode automatically re-indexes on file changes
