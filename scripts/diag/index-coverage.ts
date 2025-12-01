@@ -239,10 +239,11 @@ async function analyzeCoverage(options: CliOptions): Promise<CoverageSummary> {
 
   try {
     for (const record of records) {
-      const [{ count }] = await db.all<{ count: number }>(
+      const result = await db.all<{ count: number }>(
         "SELECT COUNT(*) as count FROM file WHERE path = ?",
         [record.path]
       );
+      const count = result[0]?.count ?? 0;
       record.indexedInDb = count > 0;
     }
   } finally {

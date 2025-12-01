@@ -25,6 +25,8 @@ const createHandler = () => {
       hasLinkTable: true,
       hasHintLog: true,
       hasHintDictionary: true,
+      hasGraphMetrics: true,
+      hasCochange: true,
     },
     warningManager,
   };

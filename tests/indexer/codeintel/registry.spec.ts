@@ -16,7 +16,7 @@ function createMockAnalyzer(
   result?: Partial<AnalysisResult>,
   dispose?: () => Promise<void>
 ): LanguageAnalyzer {
-  return {
+  const analyzer: LanguageAnalyzer = {
     language,
     analyze: vi.fn().mockResolvedValue({
       symbols: [],
@@ -24,8 +24,11 @@ function createMockAnalyzer(
       dependencies: [],
       ...result,
     }),
-    dispose,
   };
+  if (dispose !== undefined) {
+    analyzer.dispose = dispose;
+  }
+  return analyzer;
 }
 
 describe("LanguageRegistry", () => {

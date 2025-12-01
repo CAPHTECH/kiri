@@ -146,9 +146,11 @@ function main(): void {
     if (!byQuery.has(missing.queryId)) {
       byQuery.set(missing.queryId, []);
     }
-    byQuery
-      .get(missing.queryId)!
-      .push({ repo: missing.repo, path: missing.path, reason: missing.reason });
+    byQuery.get(missing.queryId)!.push({
+      repo: missing.repo,
+      path: missing.path,
+      ...(missing.reason !== undefined && { reason: missing.reason }),
+    });
   }
 
   for (const [queryId, paths] of byQuery.entries()) {

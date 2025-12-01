@@ -37,10 +37,12 @@ function parseArgs(): CliOptions {
       options.datasetPath = process.argv[i + 1] ?? options.datasetPath;
       i += 1;
     } else if (arg === "--repo") {
-      options.repoFilter = process.argv[i + 1];
+      const value = process.argv[i + 1];
+      if (value !== undefined) options.repoFilter = value;
       i += 1;
     } else if (arg === "--id") {
-      options.idFilter = process.argv[i + 1];
+      const value = process.argv[i + 1];
+      if (value !== undefined) options.idFilter = value;
       i += 1;
     }
   }

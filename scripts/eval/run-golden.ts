@@ -371,7 +371,7 @@ function parseArgs(): BenchmarkOptions {
     categoryFilter: new Set(),
     minR5: null,
     maxStartupMs: null,
-    inspectQuery: undefined,
+    // inspectQuery is intentionally not set (optional property)
     inspectTop: 10,
   };
 
@@ -422,9 +422,11 @@ function parseArgs(): BenchmarkOptions {
           options.maxStartupMs = null;
         }
         break;
-      case "--inspect-query":
-        options.inspectQuery = args[++i];
+      case "--inspect-query": {
+        const value = args[++i];
+        if (value !== undefined) options.inspectQuery = value;
         break;
+      }
       case "--inspect-top":
         options.inspectTop = Number.parseInt(args[++i] ?? "10", 10) || 10;
         break;

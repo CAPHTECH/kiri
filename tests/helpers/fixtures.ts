@@ -14,6 +14,7 @@ export interface FileRecord {
   lang: string;
   is_binary: boolean;
   mtime: string;
+  [key: string]: string | number | boolean; // Index signature for buildInsertStatement compatibility
 }
 
 /**
@@ -24,6 +25,7 @@ export interface DocumentMetadataRecord {
   path: string;
   source: string;
   data: string;
+  [key: string]: string | number; // Index signature for buildInsertStatement compatibility
 }
 
 /**

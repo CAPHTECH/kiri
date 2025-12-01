@@ -981,16 +981,14 @@ describe("Unified Boosting Logic (v0.7.0+)", () => {
     // - src/lib/ → 1.2x path → impl(1.4) * path(1.2) = 1.68
     // - src/ → 1.0x path (baseline) → impl(1.4) only = 1.4
     //
-    // NOTE: Project's .kiri/config.yaml may override src/ to 1.4x, making
-    // indexFile score equal to appFile. Test verifies relative ordering of
-    // paths with explicitly different multipliers (app > components > lib).
+    // NOTE: src/index.ts uses baseline 1.0x path multiplier, while
+    // src/lib/utils.ts uses 1.2x. So libFile.score > indexFile.score.
     if (appFile && componentFile && libFile && indexFile) {
       // Verify the ordering for paths with explicitly different multipliers
       expect(appFile.score).toBeGreaterThan(componentFile.score);
       expect(componentFile.score).toBeGreaterThan(libFile.score);
-      // Note: indexFile may equal appFile if src/ is overridden in config
-      // So we verify it's at least >= libFile (the lowest explicit path multiplier)
-      expect(indexFile.score).toBeGreaterThanOrEqual(libFile.score);
+      // indexFile uses baseline (1.0x) while libFile uses 1.2x, so libFile should be higher
+      expect(libFile.score).toBeGreaterThan(indexFile.score);
     }
   });
 
