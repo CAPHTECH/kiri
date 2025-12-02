@@ -25,6 +25,12 @@ documents:
   - doc_id: ARCH-007
     path: docs/dynamic-profile-selection.md
     title: "Dynamic Profile Selection"
+  - doc_id: ARCH-008
+    path: docs/dcca/detailed-design-ja.md
+    title: "詳細設計書"
+  - doc_id: ARCH-009
+    path: docs/dcca/semantic-graph.md
+    title: "KIRI Semantic Graph"
 
   # ADR - Architecture Decision Records
   - doc_id: ADR-001

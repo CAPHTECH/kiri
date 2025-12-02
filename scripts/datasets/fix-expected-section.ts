@@ -7,7 +7,7 @@
 
 import { readFileSync, writeFileSync } from "node:fs";
 
-import { load, dump } from "js-yaml";
+import { parse, stringify } from "yaml";
 
 interface Query {
   id: string;
@@ -44,7 +44,7 @@ async function main(): Promise<void> {
 
   console.log(`📖 Reading ${inputPath}...`);
   const content = readFileSync(inputPath, "utf-8");
-  const dataset = load(content) as Dataset;
+  const dataset = parse(content) as Dataset;
 
   console.log(`📝 Processing ${dataset.queries.length} queries...`);
 
@@ -84,10 +84,9 @@ async function main(): Promise<void> {
   console.log(`✅ Generated expected section with ${expected.length} entries`);
 
   // Write output
-  const output = dump(fixedDataset, {
+  const output = stringify(fixedDataset, {
     indent: 2,
     lineWidth: 120,
-    noRefs: true,
   });
 
   writeFileSync(outputPath, output, "utf-8");

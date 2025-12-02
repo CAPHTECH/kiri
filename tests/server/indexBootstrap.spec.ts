@@ -108,9 +108,11 @@ describe("ensureDatabaseIndexed", () => {
 
     beforeEach(() => {
       // Mock process.exit to prevent test runner from terminating
-      processExitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
-        throw new Error(`process.exit(${code ?? 0}) called`);
-      }) as never);
+      processExitSpy = vi
+        .spyOn(process, "exit")
+        .mockImplementation((code?: string | number | null) => {
+          throw new Error(`process.exit(${code ?? 0}) called`);
+        }) as unknown as ReturnType<typeof vi.spyOn>;
     });
 
     afterEach(() => {
