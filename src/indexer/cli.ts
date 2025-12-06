@@ -628,6 +628,10 @@ async function persistMarkdownLinks(
   }));
 }
 
+/** 孤立したサロゲートを検出する正規表現パターン */
+const ISOLATED_SURROGATE_PATTERN =
+  /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+
 /**
  * 不正なUnicodeサロゲートペアを除去する
  *
@@ -638,12 +642,19 @@ async function persistMarkdownLinks(
  * 孤立したサロゲート（ペアになっていない）はJSONシリアライズ時に
  * DuckDBでエラーを引き起こすため、事前に除去する必要がある。
  *
+ * @param str - サニタイズ対象の文字列
+ * @param context - ログ出力用のコンテキスト情報（省略可）
+ * @returns 孤立したサロゲートを除去した文字列
  * @see Issue #141: DuckDB JSON検証エラーの修正
  */
-function sanitizeSurrogates(str: string): string {
+function sanitizeSurrogates(str: string, context?: string): string {
   // 孤立したHigh Surrogate（後ろにLow Surrogateがない）または
   // 孤立したLow Surrogate（前にHigh Surrogateがない）を除去
-  return str.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "");
+  const result = str.replace(ISOLATED_SURROGATE_PATTERN, "");
+  if (result.length !== str.length && context) {
+    console.warn(`Removed ${str.length - result.length} isolated surrogate(s) from ${context}`);
+  }
+  return result;
 }
 
 function sanitizeMetadataTree(value: unknown, depth = 0): MetadataTree | null {
@@ -663,7 +674,7 @@ function sanitizeMetadataTree(value: unknown, depth = 0): MetadataTree | null {
 
   if (typeof value === "string") {
     // 不正なサロゲートペアを除去してからトリム (Issue #141)
-    const sanitized = sanitizeSurrogates(value);
+    const sanitized = sanitizeSurrogates(value, "metadata value");
     const trimmed = sanitized.trim();
     if (trimmed.length === 0) {
       return null;
@@ -673,7 +684,7 @@ function sanitizeMetadataTree(value: unknown, depth = 0): MetadataTree | null {
       // slice()はコードユニット単位のため、絵文字等のサロゲートペアを分断する可能性がある
       const codePoints = [...trimmed];
       const sliced = codePoints.slice(0, MAX_METADATA_VALUE_LENGTH).join("");
-      return sanitizeSurrogates(sliced);
+      return sanitizeSurrogates(sliced, "truncated metadata value");
     }
     return trimmed;
   }
@@ -723,7 +734,7 @@ function sanitizeMetadataTree(value: unknown, depth = 0): MetadataTree | null {
     for (const [key, child] of entries.slice(0, MAX_METADATA_OBJECT_KEYS)) {
       if (!key) continue;
       // キーにも不正なサロゲートが含まれる可能性があるためサニタイズ (Issue #141)
-      const sanitizedKey = sanitizeSurrogates(key).trim();
+      const sanitizedKey = sanitizeSurrogates(key, "metadata key").trim();
       if (!sanitizedKey) continue;
       const sanitizedChild = sanitizeMetadataTree(child, depth + 1);
       if (sanitizedChild !== null) {
@@ -767,7 +778,10 @@ function collectMetadataPairsFromValue(
     if (normalized.length > MAX_METADATA_VALUE_LENGTH) {
       // コードポイント単位で切り詰めてからサロゲートを再サニタイズ (Issue #141)
       const codePoints = [...normalized];
-      normalized = sanitizeSurrogates(codePoints.slice(0, MAX_METADATA_VALUE_LENGTH).join(""));
+      normalized = sanitizeSurrogates(
+        codePoints.slice(0, MAX_METADATA_VALUE_LENGTH).join(""),
+        "truncated pair value"
+      );
     }
     const dedupeKey = `${source}:${key}:${normalized.toLowerCase()}`;
     if (state.seen.has(dedupeKey)) {

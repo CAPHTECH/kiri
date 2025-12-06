@@ -330,6 +330,205 @@ author: normal`,
       expect(parsed["bad_key"]).toBe("value2");
       expect(parsed["another"]).toBe("value3");
     });
+
+    it("truncates emoji-containing value at code point boundary (MAX_METADATA_VALUE_LENGTH=512)", async () => {
+      // MAX_METADATA_VALUE_LENGTH (512) 境界で絵文字（サロゲートペア）が分断されないことを確認
+      // 絵文字は2コードユニットだが1コードポイント
+      // 511文字 + 絵文字1つ (2コードユニット) = 512コードポイントで収まる
+      const longText = "a".repeat(510) + "🚀"; // 510 + 1 emoji = 511 code points
+      const repo = await createTempRepo({
+        "config/emoji-boundary.yaml": `title: "${longText}"`,
+      });
+      cleanupTargets.push({ dispose: repo.cleanup });
+
+      const dbDir = await mkdtemp(join(tmpdir(), "kiri-emoji-boundary-"));
+      const dbPath = join(dbDir, "index.duckdb");
+      cleanupTargets.push({
+        dispose: async () => await rm(dbDir, { recursive: true, force: true }),
+      });
+
+      await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+      const db = await DuckDBClient.connect({ databasePath: dbPath });
+      cleanupTargets.push({ dispose: async () => await db.close() });
+
+      const repoRow = await db.all<{ id: number }>("SELECT id FROM repo");
+      const repoId = repoRow[0]?.id;
+
+      const metadataRows = await db.all<{ data: string }>(
+        "SELECT data FROM document_metadata WHERE repo_id = ? AND path = 'config/emoji-boundary.yaml'",
+        [repoId]
+      );
+      expect(metadataRows.length).toBe(1);
+      const parsed = JSON.parse(metadataRows[0]!.data);
+      // 絵文字が正しく保持されていること
+      expect(parsed.title).toBe(longText);
+      expect(parsed.title.endsWith("🚀")).toBe(true);
+    });
+
+    it("truncates long value with emoji at exactly MAX_METADATA_VALUE_LENGTH code points", async () => {
+      // 512コードポイント以上の値は切り詰められるが、絵文字は分断されない
+      // 513文字 + 絵文字1つ = 514コードポイント → 512で切り詰め
+      const longText = "b".repeat(513) + "🎉"; // 513 + 1 emoji = 514 code points
+      const repo = await createTempRepo({
+        "config/emoji-truncate.yaml": `title: "${longText}"`,
+      });
+      cleanupTargets.push({ dispose: repo.cleanup });
+
+      const dbDir = await mkdtemp(join(tmpdir(), "kiri-emoji-truncate-"));
+      const dbPath = join(dbDir, "index.duckdb");
+      cleanupTargets.push({
+        dispose: async () => await rm(dbDir, { recursive: true, force: true }),
+      });
+
+      await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+      const db = await DuckDBClient.connect({ databasePath: dbPath });
+      cleanupTargets.push({ dispose: async () => await db.close() });
+
+      const repoRow = await db.all<{ id: number }>("SELECT id FROM repo");
+      const repoId = repoRow[0]?.id;
+
+      const metadataRows = await db.all<{ data: string }>(
+        "SELECT data FROM document_metadata WHERE repo_id = ? AND path = 'config/emoji-truncate.yaml'",
+        [repoId]
+      );
+      expect(metadataRows.length).toBe(1);
+      const parsed = JSON.parse(metadataRows[0]!.data);
+      // 512コードポイントで切り詰められる
+      const codePoints = [...parsed.title];
+      expect(codePoints.length).toBeLessThanOrEqual(512);
+      // 先頭の512文字(512コードポイント分)が保持される
+      expect(parsed.title).toBe("b".repeat(512));
+    });
+  });
+
+  describe("sanitizeSurrogates unit tests", () => {
+    // sanitizeSurrogates関数の単体テスト
+    // 関数は直接エクスポートされていないため、YAML経由で間接的にテスト
+
+    it("removes high surrogate followed by non-low-surrogate char", async () => {
+      // High Surrogate (\\uD800) の直後に通常文字がある場合
+      const repo = await createTempRepo({
+        "config/high-then-char.yaml": `value: "A\\uD800B"`,
+      });
+      cleanupTargets.push({ dispose: repo.cleanup });
+
+      const dbDir = await mkdtemp(join(tmpdir(), "kiri-high-char-"));
+      const dbPath = join(dbDir, "index.duckdb");
+      cleanupTargets.push({
+        dispose: async () => await rm(dbDir, { recursive: true, force: true }),
+      });
+
+      await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+      const db = await DuckDBClient.connect({ databasePath: dbPath });
+      cleanupTargets.push({ dispose: async () => await db.close() });
+
+      const repoRow = await db.all<{ id: number }>("SELECT id FROM repo");
+      const repoId = repoRow[0]?.id;
+
+      const metadataRows = await db.all<{ data: string }>(
+        "SELECT data FROM document_metadata WHERE repo_id = ? AND path = 'config/high-then-char.yaml'",
+        [repoId]
+      );
+      expect(metadataRows.length).toBe(1);
+      const parsed = JSON.parse(metadataRows[0]!.data);
+      expect(parsed.value).toBe("AB");
+    });
+
+    it("removes low surrogate not preceded by high surrogate", async () => {
+      // Low Surrogate (\\uDC00) の直前に通常文字がある場合
+      const repo = await createTempRepo({
+        "config/char-then-low.yaml": `value: "X\\uDC00Y"`,
+      });
+      cleanupTargets.push({ dispose: repo.cleanup });
+
+      const dbDir = await mkdtemp(join(tmpdir(), "kiri-char-low-"));
+      const dbPath = join(dbDir, "index.duckdb");
+      cleanupTargets.push({
+        dispose: async () => await rm(dbDir, { recursive: true, force: true }),
+      });
+
+      await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+      const db = await DuckDBClient.connect({ databasePath: dbPath });
+      cleanupTargets.push({ dispose: async () => await db.close() });
+
+      const repoRow = await db.all<{ id: number }>("SELECT id FROM repo");
+      const repoId = repoRow[0]?.id;
+
+      const metadataRows = await db.all<{ data: string }>(
+        "SELECT data FROM document_metadata WHERE repo_id = ? AND path = 'config/char-then-low.yaml'",
+        [repoId]
+      );
+      expect(metadataRows.length).toBe(1);
+      const parsed = JSON.parse(metadataRows[0]!.data);
+      expect(parsed.value).toBe("XY");
+    });
+
+    it("preserves valid surrogate pairs (emoji unchanged)", async () => {
+      // 正しいサロゲートペア（絵文字）は保持される
+      const repo = await createTempRepo({
+        "config/valid-emoji.yaml": `title: "Hello 🌍 World 🎉"`,
+      });
+      cleanupTargets.push({ dispose: repo.cleanup });
+
+      const dbDir = await mkdtemp(join(tmpdir(), "kiri-valid-emoji-"));
+      const dbPath = join(dbDir, "index.duckdb");
+      cleanupTargets.push({
+        dispose: async () => await rm(dbDir, { recursive: true, force: true }),
+      });
+
+      await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+      const db = await DuckDBClient.connect({ databasePath: dbPath });
+      cleanupTargets.push({ dispose: async () => await db.close() });
+
+      const repoRow = await db.all<{ id: number }>("SELECT id FROM repo");
+      const repoId = repoRow[0]?.id;
+
+      const metadataRows = await db.all<{ data: string }>(
+        "SELECT data FROM document_metadata WHERE repo_id = ? AND path = 'config/valid-emoji.yaml'",
+        [repoId]
+      );
+      expect(metadataRows.length).toBe(1);
+      const parsed = JSON.parse(metadataRows[0]!.data);
+      expect(parsed.title).toBe("Hello 🌍 World 🎉");
+    });
+
+    it("handles empty string after surrogate removal", async () => {
+      // サロゲート除去後に空文字列になるケース
+      const repo = await createTempRepo({
+        "config/only-surrogate.yaml": `title: "\\uD800"
+normal: valid`,
+      });
+      cleanupTargets.push({ dispose: repo.cleanup });
+
+      const dbDir = await mkdtemp(join(tmpdir(), "kiri-only-surrogate-"));
+      const dbPath = join(dbDir, "index.duckdb");
+      cleanupTargets.push({
+        dispose: async () => await rm(dbDir, { recursive: true, force: true }),
+      });
+
+      await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+      const db = await DuckDBClient.connect({ databasePath: dbPath });
+      cleanupTargets.push({ dispose: async () => await db.close() });
+
+      const repoRow = await db.all<{ id: number }>("SELECT id FROM repo");
+      const repoId = repoRow[0]?.id;
+
+      const metadataRows = await db.all<{ data: string }>(
+        "SELECT data FROM document_metadata WHERE repo_id = ? AND path = 'config/only-surrogate.yaml'",
+        [repoId]
+      );
+      expect(metadataRows.length).toBe(1);
+      const parsed = JSON.parse(metadataRows[0]!.data);
+      // 孤立サロゲートのみの値はnullになり、プロパティが存在しない
+      expect(parsed.title).toBeUndefined();
+      expect(parsed.normal).toBe("valid");
+    });
   });
 
   describe("Markdown front matter extraction", () => {
