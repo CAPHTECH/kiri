@@ -628,6 +628,24 @@ async function persistMarkdownLinks(
   }));
 }
 
+/**
+ * 不正なUnicodeサロゲートペアを除去する
+ *
+ * サロゲートペアは2つのコードユニットで1つの文字を表す:
+ * - High Surrogate: \uD800-\uDBFF
+ * - Low Surrogate: \uDC00-\uDFFF
+ *
+ * 孤立したサロゲート（ペアになっていない）はJSONシリアライズ時に
+ * DuckDBでエラーを引き起こすため、事前に除去する必要がある。
+ *
+ * @see Issue #141: DuckDB JSON検証エラーの修正
+ */
+function sanitizeSurrogates(str: string): string {
+  // 孤立したHigh Surrogate（後ろにLow Surrogateがない）または
+  // 孤立したLow Surrogate（前にHigh Surrogateがない）を除去
+  return str.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "");
+}
+
 function sanitizeMetadataTree(value: unknown, depth = 0): MetadataTree | null {
   // Depth check at the beginning to prevent stack overflow
   if (depth > MAX_METADATA_DEPTH) {
@@ -644,13 +662,20 @@ function sanitizeMetadataTree(value: unknown, depth = 0): MetadataTree | null {
   }
 
   if (typeof value === "string") {
-    const trimmed = value.trim();
+    // 不正なサロゲートペアを除去してからトリム (Issue #141)
+    const sanitized = sanitizeSurrogates(value);
+    const trimmed = sanitized.trim();
     if (trimmed.length === 0) {
       return null;
     }
-    return trimmed.length > MAX_METADATA_VALUE_LENGTH
-      ? trimmed.slice(0, MAX_METADATA_VALUE_LENGTH)
-      : trimmed;
+    if (trimmed.length > MAX_METADATA_VALUE_LENGTH) {
+      // コードポイント単位で切り詰めてからサロゲートを再サニタイズ
+      // slice()はコードユニット単位のため、絵文字等のサロゲートペアを分断する可能性がある
+      const codePoints = [...trimmed];
+      const sliced = codePoints.slice(0, MAX_METADATA_VALUE_LENGTH).join("");
+      return sanitizeSurrogates(sliced);
+    }
+    return trimmed;
   }
 
   if (typeof value === "number") {
@@ -697,9 +722,12 @@ function sanitizeMetadataTree(value: unknown, depth = 0): MetadataTree | null {
 
     for (const [key, child] of entries.slice(0, MAX_METADATA_OBJECT_KEYS)) {
       if (!key) continue;
+      // キーにも不正なサロゲートが含まれる可能性があるためサニタイズ (Issue #141)
+      const sanitizedKey = sanitizeSurrogates(key).trim();
+      if (!sanitizedKey) continue;
       const sanitizedChild = sanitizeMetadataTree(child, depth + 1);
       if (sanitizedChild !== null) {
-        result[key] = sanitizedChild;
+        result[sanitizedKey] = sanitizedChild;
       }
     }
     return Object.keys(result).length > 0 ? result : null;
@@ -737,7 +765,9 @@ function collectMetadataPairsFromValue(
       return;
     }
     if (normalized.length > MAX_METADATA_VALUE_LENGTH) {
-      normalized = normalized.slice(0, MAX_METADATA_VALUE_LENGTH);
+      // コードポイント単位で切り詰めてからサロゲートを再サニタイズ (Issue #141)
+      const codePoints = [...normalized];
+      normalized = sanitizeSurrogates(codePoints.slice(0, MAX_METADATA_VALUE_LENGTH).join(""));
     }
     const dedupeKey = `${source}:${key}:${normalized.toLowerCase()}`;
     if (state.seen.has(dedupeKey)) {

@@ -193,6 +193,143 @@ emoji: "🚀"
       expect(parsed.farewell).toBe("再见");
       expect(parsed.emoji).toBe("🚀");
     });
+
+    it("handles isolated high surrogate in YAML via escape sequence (no crash)", async () => {
+      // YAMLのUnicodeエスケープシーケンス \uD800 がパース時にサロゲート文字に変換される
+      // Issue #141: 不正なサロゲートペアによるインデックス失敗
+      // Note: YAMLでは二重引用符内の \uXXXX エスケープがUnicode文字に変換される
+      const repo = await createTempRepo({
+        "config/invalid-surrogate.yaml": `title: "test\\uD800value"
+description: normal text`,
+      });
+      cleanupTargets.push({ dispose: repo.cleanup });
+
+      const dbDir = await mkdtemp(join(tmpdir(), "kiri-surrogate-high-"));
+      const dbPath = join(dbDir, "index.duckdb");
+      cleanupTargets.push({
+        dispose: async () => await rm(dbDir, { recursive: true, force: true }),
+      });
+
+      // インデクサーがクラッシュしないことを確認
+      await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+      const db = await DuckDBClient.connect({ databasePath: dbPath });
+      cleanupTargets.push({ dispose: async () => await db.close() });
+
+      const repoRow = await db.all<{ id: number }>("SELECT id FROM repo");
+      const repoId = repoRow[0]?.id;
+
+      const metadataRows = await db.all<{ data: string }>(
+        "SELECT data FROM document_metadata WHERE repo_id = ? AND path = 'config/invalid-surrogate.yaml'",
+        [repoId]
+      );
+      // メタデータが保存されていること
+      expect(metadataRows.length).toBe(1);
+      const parsed = JSON.parse(metadataRows[0]!.data);
+      // 孤立したサロゲートが除去され、前後の文字が連結されていること
+      expect(parsed.title).toBe("testvalue");
+      expect(parsed.description).toBe("normal text");
+    });
+
+    it("handles isolated low surrogate in YAML via escape sequence (no crash)", async () => {
+      // YAMLのUnicodeエスケープシーケンス \uDC00 (Low Surrogate)
+      const repo = await createTempRepo({
+        "config/low-surrogate.yaml": `key: "before\\uDC00after"
+normal: text`,
+      });
+      cleanupTargets.push({ dispose: repo.cleanup });
+
+      const dbDir = await mkdtemp(join(tmpdir(), "kiri-surrogate-low-"));
+      const dbPath = join(dbDir, "index.duckdb");
+      cleanupTargets.push({
+        dispose: async () => await rm(dbDir, { recursive: true, force: true }),
+      });
+
+      await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+      const db = await DuckDBClient.connect({ databasePath: dbPath });
+      cleanupTargets.push({ dispose: async () => await db.close() });
+
+      const repoRow = await db.all<{ id: number }>("SELECT id FROM repo");
+      const repoId = repoRow[0]?.id;
+
+      const metadataRows = await db.all<{ data: string }>(
+        "SELECT data FROM document_metadata WHERE repo_id = ? AND path = 'config/low-surrogate.yaml'",
+        [repoId]
+      );
+      expect(metadataRows.length).toBe(1);
+      const parsed = JSON.parse(metadataRows[0]!.data);
+      expect(parsed.key).toBe("beforeafter");
+      expect(parsed.normal).toBe("text");
+    });
+
+    it("handles multiple isolated surrogates in YAML via escape sequences", async () => {
+      // 複数の孤立したサロゲートが混在するケース
+      const repo = await createTempRepo({
+        "config/mixed-surrogates.yaml": `title: "\\uD800start\\uDC00middle\\uDBFFend"
+author: normal`,
+      });
+      cleanupTargets.push({ dispose: repo.cleanup });
+
+      const dbDir = await mkdtemp(join(tmpdir(), "kiri-surrogate-mixed-"));
+      const dbPath = join(dbDir, "index.duckdb");
+      cleanupTargets.push({
+        dispose: async () => await rm(dbDir, { recursive: true, force: true }),
+      });
+
+      await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+      const db = await DuckDBClient.connect({ databasePath: dbPath });
+      cleanupTargets.push({ dispose: async () => await db.close() });
+
+      const repoRow = await db.all<{ id: number }>("SELECT id FROM repo");
+      const repoId = repoRow[0]?.id;
+
+      const metadataRows = await db.all<{ data: string }>(
+        "SELECT data FROM document_metadata WHERE repo_id = ? AND path = 'config/mixed-surrogates.yaml'",
+        [repoId]
+      );
+      expect(metadataRows.length).toBe(1);
+      const parsed = JSON.parse(metadataRows[0]!.data);
+      // すべての孤立したサロゲートが除去される
+      expect(parsed.title).toBe("startmiddleend");
+      expect(parsed.author).toBe("normal");
+    });
+
+    it("handles isolated surrogate in YAML object key (no crash)", async () => {
+      // キーに孤立したサロゲートが含まれるケース
+      const repo = await createTempRepo({
+        "config/surrogate-key.yaml": `"normal_key": value1
+"\\uD800bad_key": value2
+"another": value3`,
+      });
+      cleanupTargets.push({ dispose: repo.cleanup });
+
+      const dbDir = await mkdtemp(join(tmpdir(), "kiri-surrogate-key-"));
+      const dbPath = join(dbDir, "index.duckdb");
+      cleanupTargets.push({
+        dispose: async () => await rm(dbDir, { recursive: true, force: true }),
+      });
+
+      await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+      const db = await DuckDBClient.connect({ databasePath: dbPath });
+      cleanupTargets.push({ dispose: async () => await db.close() });
+
+      const repoRow = await db.all<{ id: number }>("SELECT id FROM repo");
+      const repoId = repoRow[0]?.id;
+
+      const metadataRows = await db.all<{ data: string }>(
+        "SELECT data FROM document_metadata WHERE repo_id = ? AND path = 'config/surrogate-key.yaml'",
+        [repoId]
+      );
+      expect(metadataRows.length).toBe(1);
+      const parsed = JSON.parse(metadataRows[0]!.data);
+      // キーから孤立したサロゲートが除去される
+      expect(parsed["normal_key"]).toBe("value1");
+      expect(parsed["bad_key"]).toBe("value2");
+      expect(parsed["another"]).toBe("value3");
+    });
   });
 
   describe("Markdown front matter extraction", () => {
