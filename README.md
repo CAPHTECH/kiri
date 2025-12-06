@@ -2,7 +2,7 @@
 
 > Intelligent code context extraction for LLMs via Model Context Protocol
 
-[![Version](https://img.shields.io/badge/version-0.18.0-blue.svg)](package.json)
+[![Version](https://img.shields.io/badge/version-0.18.1-blue.svg)](package.json)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.6-blue.svg)](https://www.typescriptlang.org/)
 [![MCP](https://img.shields.io/badge/MCP-Compatible-green.svg)](https://modelcontextprotocol.io/)
@@ -139,9 +139,9 @@ See [CHANGELOG.md](CHANGELOG.md) for release notes.
 
 **Recent highlights:**
 
+- **v0.18.1**: Unicode surrogate fix, DCCA analysis documentation
 - **v0.18.0**: Rust code intelligence, shirushi document ID management
 - **v0.17.0**: `code` boost_profile for implementation-focused search
-- **v0.16.0**: DuckDB client migration to `@duckdb/node-api`
 
 ---
 
@@ -220,4 +220,4 @@ Built with [Model Context Protocol](https://modelcontextprotocol.io/), [DuckDB](
 
 ---
 
-**Status**: v0.18.0 (Beta) - Production-ready for MCP clients
+**Status**: v0.18.1 (Beta) - Production-ready for MCP clients

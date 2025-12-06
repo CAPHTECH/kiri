@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.1] - 2025-12-06
+
+### Fixed
+
+- **Unicodeサロゲートペア修正**: 不正なUnicodeサロゲートペアを含むファイルのインデックスが失敗する問題を修正 (Issue #141)
+  - サロゲート処理の改善とテスト強化
+
+### Added
+
+- **DCCA分析と意味グラフ**: KIRIプロジェクトのDCCA（Dual-Channel Context Analysis）分析と意味グラフを追加
+- **READMEにMRR 1.0の実績を追加**
+
+### Changed
+
+- **ドキュメント再編成**: DCCAドキュメントを`docs/dcca/`へ再編成
+- **作業記録整理**: 作業記録ドキュメントを整理
+- **README構成のリファクタリング**: 詳細ドキュメントを分離
+
 ## [0.18.0] - 2025-12-01
 
 ### Added
