@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.2] - 2025-12-06
+
+### Fixed
+
+- **Defensive JSON sanitization**: Added surrogate sanitization to `JSON.stringify` output in `persistDocumentMetadata` (Issue #141)
+  - Complements v0.18.1 fix for more robust error prevention
+
 ## [0.18.1] - 2025-12-06
 
 ### Fixed
