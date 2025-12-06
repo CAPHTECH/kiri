@@ -582,7 +582,8 @@ async function persistDocumentMetadata(
       repoId,
       record.path,
       record.source,
-      JSON.stringify(record.data),
+      // 防御的サニタイズ: JSON.stringify結果に孤立サロゲートが含まれる可能性に対応 (Issue #141)
+      sanitizeSurrogates(JSON.stringify(record.data), "document_metadata JSON"),
     ]),
   }));
 }
