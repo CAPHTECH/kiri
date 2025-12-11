@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.2] - 2025-12-12
+
+### Fixed
+
+- **Build artifact fix**: Rebuilt dist/ with English MCP Prompts (v0.20.1 was published with stale Japanese text)
+
 ## [0.20.1] - 2025-12-12
 
 ### Fixed
