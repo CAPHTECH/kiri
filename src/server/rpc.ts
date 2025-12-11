@@ -26,6 +26,7 @@ import {
 } from "./handlers.js";
 import { MetricsRegistry } from "./observability/metrics.js";
 import { withSpan } from "./observability/tracing.js";
+import { OUTPUT_SCHEMAS } from "./output-schemas.js";
 import { selectProfileFromQuery } from "./profile-selector.js";
 
 const RESPONSE_MASK_SKIP_KEYS = ["path"];
@@ -196,6 +197,7 @@ interface ToolDescriptor {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
+  outputSchema?: Record<string, unknown>; // MCP 2025-06-18: Structured Output対応
 }
 
 const SERVER_INFO = {
@@ -310,6 +312,7 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
         },
       },
     },
+    outputSchema: OUTPUT_SCHEMAS.context_bundle,
   },
   {
     name: "semantic_rerank",
@@ -339,6 +342,7 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
         profile: { type: "string" },
       },
     },
+    outputSchema: OUTPUT_SCHEMAS.semantic_rerank,
   },
   {
     name: "files_search",
@@ -401,6 +405,7 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
         },
       },
     },
+    outputSchema: OUTPUT_SCHEMAS.files_search,
   },
   {
     name: "snippets_get",
@@ -442,6 +447,7 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
         },
       },
     },
+    outputSchema: OUTPUT_SCHEMAS.snippets_get,
   },
   {
     name: "deps_closure",
@@ -463,6 +469,7 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
         include_packages: { type: "boolean" },
       },
     },
+    outputSchema: OUTPUT_SCHEMAS.deps_closure,
   },
 ];
 
@@ -816,12 +823,13 @@ export function validateJsonRpcRequest(payload: JsonRpcRequest): string | null {
   return null;
 }
 
-// MCP standard tool result format
+// MCP standard tool result format (MCP 2025-06-18: Structured Output対応)
 interface McpToolResult {
   content: Array<{
     type: "text";
     text: string;
   }>;
+  structuredContent?: unknown; // MCP 2025-06-18: 構造化レスポンス
   isError?: boolean;
 }
 
@@ -967,7 +975,7 @@ export function createRpcHandler(
               allowDegrade
             );
 
-            // Convert to MCP standard format
+            // Convert to MCP standard format (MCP 2025-06-18: Structured Output対応)
             const mcpResult: McpToolResult = {
               content: [
                 {
@@ -975,6 +983,7 @@ export function createRpcHandler(
                   text: JSON.stringify(toolResult, null, 2),
                 },
               ],
+              structuredContent: toolResult, // MCP 2025-06-18: 構造化レスポンス
               isError: false,
             };
             result = mcpResult;
