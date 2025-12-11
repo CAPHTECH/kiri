@@ -39,7 +39,7 @@ describe("MCP Prompts", () => {
     it("should include debug-error prompt", () => {
       const prompt = PRESET_PROMPTS.find((p) => p.name === "debug-error");
       expect(prompt).toBeDefined();
-      expect(prompt?.description).toBe("エラーメッセージから関連コードを検索");
+      expect(prompt?.description).toBe("Search for related code from an error message");
       expect(prompt?.arguments).toHaveLength(1);
       expect(prompt?.arguments?.[0]?.name).toBe("error_message");
       expect(prompt?.arguments?.[0]?.required).toBe(true);
@@ -218,7 +218,7 @@ describe("MCP Prompts", () => {
       );
 
       expect(result).not.toBeNull();
-      expect(result?.description).toBe("エラーメッセージから関連コードを検索");
+      expect(result?.description).toBe("Search for related code from an error message");
       expect(result?.messages).toHaveLength(1);
       expect(result?.messages[0]?.role).toBe("user");
       expect(result?.messages[0]?.content.type).toBe("text");
