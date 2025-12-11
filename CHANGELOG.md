@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.0] - 2025-12-12
+
+### Added
+
+- **MCP Prompts/Resources対応** (Issue #145)
+  - MCP仕様のPrompts機能に対応（`kiri-overview`プロンプト）
+  - MCP仕様のResources機能に対応
+  - `AGENTS.md`をResourcesとして公開
+
+### Changed
+
+- **リファクタリング**: `fileExists`関数を共通化、YAML型ガードを追加
+
 ## [0.19.0] - 2025-12-11
 
 ### Added
