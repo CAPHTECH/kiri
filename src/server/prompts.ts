@@ -8,6 +8,8 @@ import path from "node:path";
 
 import { parse as parseYaml } from "yaml";
 
+import { fileExistsAsync } from "../shared/utils/path.js";
+
 // =============================================================================
 // 型定義
 // =============================================================================
@@ -250,15 +252,30 @@ ${direction === "both" ? "双方向（inbound + outbound）" : direction}
 // =============================================================================
 
 /**
- * ファイルが存在するかチェック
+ * PromptsConfigの型ガード
+ * YAML解析結果が期待する形式かを検証
  */
-async function fileExists(filePath: string): Promise<boolean> {
-  try {
-    await readFile(filePath);
-    return true;
-  } catch {
+function isValidPromptsConfig(value: unknown): value is PromptsConfig {
+  if (typeof value !== "object" || value === null) {
     return false;
   }
+  const obj = value as Record<string, unknown>;
+  // prompts が存在しないか、配列であることを確認
+  if (obj.prompts === undefined) {
+    return true;
+  }
+  if (!Array.isArray(obj.prompts)) {
+    return false;
+  }
+  // 各プロンプト定義の基本的な検証
+  return obj.prompts.every((item: unknown) => {
+    if (typeof item !== "object" || item === null) {
+      return false;
+    }
+    const prompt = item as Record<string, unknown>;
+    // 必須フィールド: name (string)
+    return typeof prompt.name === "string";
+  });
 }
 
 /**
@@ -270,14 +287,23 @@ async function fileExists(filePath: string): Promise<boolean> {
 export async function loadCustomPrompts(repoRoot: string): Promise<CustomPromptDefinition[]> {
   const configPath = path.join(repoRoot, ".kiri", "prompts.yaml");
 
-  if (!(await fileExists(configPath))) {
+  if (!(await fileExistsAsync(configPath))) {
     return [];
   }
 
   try {
     const content = await readFile(configPath, "utf-8");
-    const config = parseYaml(content) as PromptsConfig;
-    return config.prompts ?? [];
+    const parsed = parseYaml(content);
+
+    // 型ガードで検証
+    if (!isValidPromptsConfig(parsed)) {
+      console.warn(
+        `Invalid prompts config format in ${configPath}. Expected { prompts: [...] } structure.`
+      );
+      return [];
+    }
+
+    return parsed.prompts ?? [];
   } catch (error) {
     // YAML解析エラー等は警告を出してスキップ
     console.warn(

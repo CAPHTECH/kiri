@@ -3,10 +3,11 @@
  *
  * MCP仕様: https://modelcontextprotocol.io/specification/2025-06-18/server/resources
  */
-import { readFile, stat } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 import { DuckDBClient } from "../shared/duckdb.js";
+import { fileExistsAsync } from "../shared/utils/path.js";
 
 // =============================================================================
 // 型定義
@@ -51,18 +52,6 @@ interface ProjectStats {
 // =============================================================================
 // ヘルパー関数
 // =============================================================================
-
-/**
- * ファイルが存在するかチェック
- */
-async function fileExists(filePath: string): Promise<boolean> {
-  try {
-    await stat(filePath);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 /**
  * プロジェクト統計を取得
@@ -126,7 +115,7 @@ export async function listResources(repoRoot: string): Promise<ResourceDescripto
 
   // CLAUDE.md
   const claudeMdPath = path.join(repoRoot, "CLAUDE.md");
-  if (await fileExists(claudeMdPath)) {
+  if (await fileExistsAsync(claudeMdPath)) {
     resources.push({
       uri: "kiri://project/claude-md",
       name: "CLAUDE.md",
@@ -137,7 +126,7 @@ export async function listResources(repoRoot: string): Promise<ResourceDescripto
 
   // README.md
   const readmePath = path.join(repoRoot, "README.md");
-  if (await fileExists(readmePath)) {
+  if (await fileExistsAsync(readmePath)) {
     resources.push({
       uri: "kiri://project/readme",
       name: "README.md",
@@ -180,7 +169,7 @@ export async function readResource(
   switch (uri) {
     case "kiri://project/claude-md": {
       const filePath = path.join(repoRoot, "CLAUDE.md");
-      if (!(await fileExists(filePath))) {
+      if (!(await fileExistsAsync(filePath))) {
         throw new Error(`Resource not found: ${uri}. CLAUDE.md does not exist in project root.`);
       }
       const text = await readFile(filePath, "utf-8");
@@ -197,7 +186,7 @@ export async function readResource(
 
     case "kiri://project/readme": {
       const filePath = path.join(repoRoot, "README.md");
-      if (!(await fileExists(filePath))) {
+      if (!(await fileExistsAsync(filePath))) {
         throw new Error(`Resource not found: ${uri}. README.md does not exist in project root.`);
       }
       const text = await readFile(filePath, "utf-8");
