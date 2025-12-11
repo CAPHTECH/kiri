@@ -2,7 +2,7 @@
 
 > Intelligent code context extraction for LLMs via Model Context Protocol
 
-[![Version](https://img.shields.io/badge/version-0.20.0-blue.svg)](package.json)
+[![Version](https://img.shields.io/badge/version-0.20.1-blue.svg)](package.json)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.6-blue.svg)](https://www.typescriptlang.org/)
 [![MCP](https://img.shields.io/badge/MCP-Compatible-green.svg)](https://modelcontextprotocol.io/)
@@ -139,10 +139,10 @@ See [CHANGELOG.md](CHANGELOG.md) for release notes.
 
 **Recent highlights:**
 
-- **v0.20.0**: MCP Prompts/Resources対応
-- **v0.19.0**: MCP Structured Output対応（outputSchemaフィールド追加）
+- **v0.20.1**: MCP Prompts translation fix (Japanese to English)
+- **v0.20.0**: MCP Prompts/Resources support
+- **v0.19.0**: MCP Structured Output support (outputSchema field)
 - **v0.18.2**: Defensive JSON sanitization for metadata persistence
-- **v0.18.1**: Unicode surrogate fix, DCCA analysis documentation
 
 ---
 
@@ -221,4 +221,4 @@ Built with [Model Context Protocol](https://modelcontextprotocol.io/), [DuckDB](
 
 ---
 
-**Status**: v0.20.0 (Beta) - Production-ready for MCP clients
+**Status**: v0.20.1 (Beta) - Production-ready for MCP clients
