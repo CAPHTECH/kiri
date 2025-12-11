@@ -673,4 +673,235 @@ describe("MCP標準エンドポイント", () => {
       expect(searchResults.every((item) => item.preview === undefined)).toBe(true);
     });
   });
+
+  // MCP 2025-06-18 Structured Output 対応テスト
+  describe("MCP 2025-06-18 Structured Output", () => {
+    it("tools/list の全ツールに outputSchema が含まれる", async () => {
+      const repo = await createTempRepo({
+        "src/app.ts": "export const app = () => 1;\n",
+      });
+      cleanupTargets.push({ dispose: repo.cleanup });
+
+      const dbDir = await mkdtemp(join(tmpdir(), "kiri-mcp-output-schema-"));
+      cleanupTargets.push({
+        dispose: async () => await rm(dbDir, { recursive: true, force: true }),
+      });
+
+      const dbPath = join(dbDir, "index.duckdb");
+      const lockPath = join(dbDir, "security.lock");
+      const { hash } = loadSecurityConfig();
+      updateSecurityLock(hash, lockPath);
+
+      await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+      const runtime = await createServerRuntime({
+        repoRoot: repo.path,
+        databasePath: dbPath,
+        securityLockPath: lockPath,
+      });
+      cleanupTargets.push({ dispose: async () => await runtime.close() });
+
+      const handler = createRpcHandler(runtime);
+      const request: JsonRpcRequest = { jsonrpc: "2.0", id: 200, method: "tools/list" };
+      const response = ensureResponse(await handler(request));
+
+      expect(response.statusCode).toBe(200);
+      const payload = response.response as JsonRpcSuccess;
+      const tools = (payload.result as Record<string, unknown>).tools as unknown[];
+      expect(Array.isArray(tools)).toBe(true);
+
+      // 全5ツールにoutputSchemaが含まれることを検証
+      const expectedTools = [
+        "context_bundle",
+        "semantic_rerank",
+        "files_search",
+        "snippets_get",
+        "deps_closure",
+      ];
+
+      for (const expectedToolName of expectedTools) {
+        const tool = tools.find(
+          (t) =>
+            t && typeof t === "object" && (t as Record<string, unknown>).name === expectedToolName
+        ) as Record<string, unknown> | undefined;
+
+        expect(tool).toBeDefined();
+        expect(tool?.outputSchema).toBeDefined();
+        expect(typeof tool?.outputSchema).toBe("object");
+        expect((tool?.outputSchema as Record<string, unknown>)?.type).toBeDefined();
+      }
+    });
+
+    it("tools/call が structuredContent を含むレスポンスを返す", async () => {
+      const repo = await createTempRepo({
+        "src/main.ts": "export function hello() {\n  return 'world';\n}\n",
+      });
+      cleanupTargets.push({ dispose: repo.cleanup });
+
+      const dbDir = await mkdtemp(join(tmpdir(), "kiri-mcp-structured-content-"));
+      cleanupTargets.push({
+        dispose: async () => await rm(dbDir, { recursive: true, force: true }),
+      });
+
+      const dbPath = join(dbDir, "index.duckdb");
+      const lockPath = join(dbDir, "security.lock");
+      const { hash } = loadSecurityConfig();
+      updateSecurityLock(hash, lockPath);
+
+      await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+      const runtime = await createServerRuntime({
+        repoRoot: repo.path,
+        databasePath: dbPath,
+        securityLockPath: lockPath,
+      });
+      cleanupTargets.push({ dispose: async () => await runtime.close() });
+
+      const handler = createRpcHandler(runtime);
+      const request: JsonRpcRequest = {
+        jsonrpc: "2.0",
+        id: 201,
+        method: "tools/call",
+        params: {
+          name: "files_search",
+          arguments: {
+            query: "hello",
+          },
+        },
+      };
+
+      const response = ensureResponse(await handler(request));
+      expect(response.statusCode).toBe(200);
+
+      const payload = response.response as JsonRpcSuccess;
+      const result = payload.result as Record<string, unknown>;
+
+      // MCP 2025-06-18: structuredContent フィールドが含まれることを検証
+      expect(result).toHaveProperty("content");
+      expect(result).toHaveProperty("structuredContent");
+      expect(result).toHaveProperty("isError");
+      expect(result.isError).toBe(false);
+
+      // structuredContent と content の整合性を検証
+      const content = result.content as Array<{ type: string; text: string }>;
+      const firstContent = content[0];
+      if (!firstContent) throw new Error("Content array is empty");
+
+      const contentParsed = JSON.parse(firstContent.text);
+      expect(result.structuredContent).toEqual(contentParsed);
+    });
+
+    it("tools/call エラー時は structuredContent を含まない", async () => {
+      const repo = await createTempRepo({
+        "src/app.ts": "export const app = () => 1;\n",
+      });
+      cleanupTargets.push({ dispose: repo.cleanup });
+
+      const dbDir = await mkdtemp(join(tmpdir(), "kiri-mcp-structured-error-"));
+      cleanupTargets.push({
+        dispose: async () => await rm(dbDir, { recursive: true, force: true }),
+      });
+
+      const dbPath = join(dbDir, "index.duckdb");
+      const lockPath = join(dbDir, "security.lock");
+      const { hash } = loadSecurityConfig();
+      updateSecurityLock(hash, lockPath);
+
+      await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+      const runtime = await createServerRuntime({
+        repoRoot: repo.path,
+        databasePath: dbPath,
+        securityLockPath: lockPath,
+      });
+      cleanupTargets.push({ dispose: async () => await runtime.close() });
+
+      const handler = createRpcHandler(runtime);
+      const request: JsonRpcRequest = {
+        jsonrpc: "2.0",
+        id: 202,
+        method: "tools/call",
+        params: {
+          name: "unknown_tool",
+          arguments: {},
+        },
+      };
+
+      const response = ensureResponse(await handler(request));
+      expect(response.statusCode).toBe(200);
+
+      const payload = response.response as JsonRpcSuccess;
+      const result = payload.result as Record<string, unknown>;
+
+      // エラー時はisError=trueでstructuredContentは含まれない
+      expect(result.isError).toBe(true);
+      expect(result).toHaveProperty("content");
+      expect(result.structuredContent).toBeUndefined();
+    });
+
+    it("context_bundle の structuredContent が正しい構造を持つ", async () => {
+      const repo = await createTempRepo({
+        "src/auth.ts": "export function login() { return true; }\n",
+        "src/app.ts": "import { login } from './auth';\nexport const app = login;\n",
+      });
+      cleanupTargets.push({ dispose: repo.cleanup });
+
+      const dbDir = await mkdtemp(join(tmpdir(), "kiri-mcp-bundle-structured-"));
+      cleanupTargets.push({
+        dispose: async () => await rm(dbDir, { recursive: true, force: true }),
+      });
+
+      const dbPath = join(dbDir, "index.duckdb");
+      const lockPath = join(dbDir, "security.lock");
+      const { hash } = loadSecurityConfig();
+      updateSecurityLock(hash, lockPath);
+
+      await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+      const runtime = await createServerRuntime({
+        repoRoot: repo.path,
+        databasePath: dbPath,
+        securityLockPath: lockPath,
+      });
+      cleanupTargets.push({ dispose: async () => await runtime.close() });
+
+      const handler = createRpcHandler(runtime);
+      const request: JsonRpcRequest = {
+        jsonrpc: "2.0",
+        id: 203,
+        method: "tools/call",
+        params: {
+          name: "context_bundle",
+          arguments: {
+            goal: "login authentication",
+            limit: 5,
+          },
+        },
+      };
+
+      const response = ensureResponse(await handler(request));
+      expect(response.statusCode).toBe(200);
+
+      const payload = response.response as JsonRpcSuccess;
+      const result = payload.result as Record<string, unknown>;
+
+      expect(result.structuredContent).toBeDefined();
+      const structured = result.structuredContent as Record<string, unknown>;
+
+      // context_bundle の構造を検証
+      expect(structured).toHaveProperty("context");
+      expect(Array.isArray(structured.context)).toBe(true);
+
+      const context = structured.context as Array<Record<string, unknown>>;
+      if (context.length > 0) {
+        const firstItem = context[0];
+        expect(firstItem).toHaveProperty("path");
+        expect(firstItem).toHaveProperty("range");
+        expect(firstItem).toHaveProperty("why");
+        expect(firstItem).toHaveProperty("score");
+        expect(Array.isArray(firstItem?.range)).toBe(true);
+        expect(Array.isArray(firstItem?.why)).toBe(true);
+      }
+    });
+  });
 });
