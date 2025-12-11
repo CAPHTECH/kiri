@@ -135,6 +135,17 @@ export async function listResources(repoRoot: string): Promise<ResourceDescripto
     });
   }
 
+  // AGENTS.md（Codex、Copilot Workspace等のエージェント向け）
+  const agentsMdPath = path.join(repoRoot, "AGENTS.md");
+  if (await fileExistsAsync(agentsMdPath)) {
+    resources.push({
+      uri: "kiri://project/agents-md",
+      name: "AGENTS.md",
+      description: "AIエージェント向けリポジトリガイドライン",
+      mimeType: "text/markdown",
+    });
+  }
+
   // プロジェクト統計（常に利用可能）
   resources.push({
     uri: "kiri://project/stats",
@@ -188,6 +199,23 @@ export async function readResource(
       const filePath = path.join(repoRoot, "README.md");
       if (!(await fileExistsAsync(filePath))) {
         throw new Error(`Resource not found: ${uri}. README.md does not exist in project root.`);
+      }
+      const text = await readFile(filePath, "utf-8");
+      return {
+        contents: [
+          {
+            uri,
+            mimeType: "text/markdown",
+            text,
+          },
+        ],
+      };
+    }
+
+    case "kiri://project/agents-md": {
+      const filePath = path.join(repoRoot, "AGENTS.md");
+      if (!(await fileExistsAsync(filePath))) {
+        throw new Error(`Resource not found: ${uri}. AGENTS.md does not exist in project root.`);
       }
       const text = await readFile(filePath, "utf-8");
       return {

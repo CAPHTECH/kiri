@@ -73,6 +73,22 @@ describe("MCP Resources", () => {
       expect(resources.some((r) => r.uri === "kiri://project/readme")).toBe(true);
     });
 
+    it("should include AGENTS.md when it exists", async () => {
+      const tempDir = await mkdtemp(join(tmpdir(), "kiri-resources-"));
+      cleanupTargets.push({
+        dispose: async () => await rm(tempDir, { recursive: true, force: true }),
+      });
+
+      await writeFile(join(tempDir, "AGENTS.md"), "# Repository Guidelines");
+
+      const resources = await listResources(tempDir);
+
+      expect(resources.some((r) => r.uri === "kiri://project/agents-md")).toBe(true);
+      const agentsMd = resources.find((r) => r.uri === "kiri://project/agents-md");
+      expect(agentsMd?.name).toBe("AGENTS.md");
+      expect(agentsMd?.mimeType).toBe("text/markdown");
+    });
+
     it("should include all resources when both files exist", async () => {
       const tempDir = await mkdtemp(join(tmpdir(), "kiri-resources-"));
       cleanupTargets.push({
