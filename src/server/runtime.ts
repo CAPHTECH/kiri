@@ -115,6 +115,7 @@ export async function createServerRuntime(options: CommonServerOptions): Promise
       repoId,
       services,
       databasePath: options.databasePath,
+      repoPath: repoRoot,
       features: {
         fts: hasFTS,
       },

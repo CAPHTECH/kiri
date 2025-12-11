@@ -219,9 +219,11 @@ describe("MCP標準エンドポイント", () => {
     expect(toolsWithInvalidSchema).toEqual([]);
   });
 
-  it("resources/list が空配列を返しクライアント互換性を保つ", async () => {
+  it("resources/list がプロジェクトリソースを返す", async () => {
     const repo = await createTempRepo({
       "src/app.ts": "export const app = () => 1;\n",
+      "CLAUDE.md": "# AI Instructions\n",
+      "README.md": "# Project\n",
     });
     cleanupTargets.push({ dispose: repo.cleanup });
 
@@ -250,7 +252,13 @@ describe("MCP標準エンドポイント", () => {
     const payload = response.response as JsonRpcSuccess;
     const resources = (payload.result as Record<string, unknown>).resources as unknown[];
     expect(Array.isArray(resources)).toBe(true);
-    expect(resources.length).toBe(0);
+    // CLAUDE.md + README.md + stats = 3
+    expect(resources.length).toBe(3);
+
+    const uris = resources.map((r) => (r as Record<string, unknown>).uri);
+    expect(uris).toContain("kiri://project/claude-md");
+    expect(uris).toContain("kiri://project/readme");
+    expect(uris).toContain("kiri://project/stats");
   });
 
   it("tools/call が files.search を実行して MCP 標準形式で結果を返す", async () => {
@@ -902,6 +910,333 @@ describe("MCP標準エンドポイント", () => {
         expect(Array.isArray(firstItem?.range)).toBe(true);
         expect(Array.isArray(firstItem?.why)).toBe(true);
       }
+    });
+  });
+
+  // MCP 2025-06-18 Prompts/Resources 対応テスト
+  describe("MCP 2025-06-18 Prompts/Resources", () => {
+    it("prompts/list がプリセットプロンプトを返す", async () => {
+      const repo = await createTempRepo({
+        "src/app.ts": "export const app = () => 1;\n",
+      });
+      cleanupTargets.push({ dispose: repo.cleanup });
+
+      const dbDir = await mkdtemp(join(tmpdir(), "kiri-mcp-prompts-list-"));
+      cleanupTargets.push({
+        dispose: async () => await rm(dbDir, { recursive: true, force: true }),
+      });
+
+      const dbPath = join(dbDir, "index.duckdb");
+      const lockPath = join(dbDir, "security.lock");
+      const { hash } = loadSecurityConfig();
+      updateSecurityLock(hash, lockPath);
+
+      await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+      const runtime = await createServerRuntime({
+        repoRoot: repo.path,
+        databasePath: dbPath,
+        securityLockPath: lockPath,
+      });
+      cleanupTargets.push({ dispose: async () => await runtime.close() });
+
+      const handler = createRpcHandler(runtime);
+      const request: JsonRpcRequest = { jsonrpc: "2.0", id: 300, method: "prompts/list" };
+      const response = ensureResponse(await handler(request));
+
+      expect(response.statusCode).toBe(200);
+      const payload = response.response as JsonRpcSuccess;
+      const prompts = (payload.result as Record<string, unknown>).prompts as unknown[];
+      expect(Array.isArray(prompts)).toBe(true);
+      expect(prompts.length).toBe(5);
+
+      const promptNames = prompts.map((p) => (p as Record<string, unknown>).name);
+      expect(promptNames).toContain("debug-error");
+      expect(promptNames).toContain("find-tests");
+      expect(promptNames).toContain("explain-function");
+      expect(promptNames).toContain("find-implementations");
+      expect(promptNames).toContain("trace-dependency");
+    });
+
+    it("prompts/get が有効なプロンプトでメッセージを返す", async () => {
+      const repo = await createTempRepo({
+        "src/app.ts": "export const app = () => 1;\n",
+      });
+      cleanupTargets.push({ dispose: repo.cleanup });
+
+      const dbDir = await mkdtemp(join(tmpdir(), "kiri-mcp-prompts-get-"));
+      cleanupTargets.push({
+        dispose: async () => await rm(dbDir, { recursive: true, force: true }),
+      });
+
+      const dbPath = join(dbDir, "index.duckdb");
+      const lockPath = join(dbDir, "security.lock");
+      const { hash } = loadSecurityConfig();
+      updateSecurityLock(hash, lockPath);
+
+      await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+      const runtime = await createServerRuntime({
+        repoRoot: repo.path,
+        databasePath: dbPath,
+        securityLockPath: lockPath,
+      });
+      cleanupTargets.push({ dispose: async () => await runtime.close() });
+
+      const handler = createRpcHandler(runtime);
+      const request: JsonRpcRequest = {
+        jsonrpc: "2.0",
+        id: 301,
+        method: "prompts/get",
+        params: {
+          name: "debug-error",
+          arguments: {
+            error_message: "TypeError: Cannot read property 'foo' of undefined",
+          },
+        },
+      };
+      const response = ensureResponse(await handler(request));
+
+      expect(response.statusCode).toBe(200);
+      const payload = response.response as JsonRpcSuccess;
+      const result = payload.result as Record<string, unknown>;
+
+      expect(result).toHaveProperty("messages");
+      expect(result).toHaveProperty("description");
+
+      const messages = result.messages as Array<Record<string, unknown>>;
+      expect(messages.length).toBe(1);
+      expect(messages[0]?.role).toBe("user");
+
+      const content = messages[0]?.content as Record<string, unknown>;
+      expect(content?.type).toBe("text");
+      expect(content?.text as string).toContain(
+        "TypeError: Cannot read property 'foo' of undefined"
+      );
+    });
+
+    it("prompts/get が不明なプロンプトでエラーを返す", async () => {
+      const repo = await createTempRepo({
+        "src/app.ts": "export const app = () => 1;\n",
+      });
+      cleanupTargets.push({ dispose: repo.cleanup });
+
+      const dbDir = await mkdtemp(join(tmpdir(), "kiri-mcp-prompts-get-error-"));
+      cleanupTargets.push({
+        dispose: async () => await rm(dbDir, { recursive: true, force: true }),
+      });
+
+      const dbPath = join(dbDir, "index.duckdb");
+      const lockPath = join(dbDir, "security.lock");
+      const { hash } = loadSecurityConfig();
+      updateSecurityLock(hash, lockPath);
+
+      await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+      const runtime = await createServerRuntime({
+        repoRoot: repo.path,
+        databasePath: dbPath,
+        securityLockPath: lockPath,
+      });
+      cleanupTargets.push({ dispose: async () => await runtime.close() });
+
+      const handler = createRpcHandler(runtime);
+      const request: JsonRpcRequest = {
+        jsonrpc: "2.0",
+        id: 302,
+        method: "prompts/get",
+        params: {
+          name: "unknown-prompt",
+        },
+      };
+      const response = ensureResponse(await handler(request));
+
+      expect(response.statusCode).toBe(404);
+      const payload = response.response;
+      expect(payload).toHaveProperty("error");
+    });
+
+    it("resources/read が CLAUDE.md を返す", async () => {
+      const repo = await createTempRepo({
+        "src/app.ts": "export const app = () => 1;\n",
+        "CLAUDE.md": "# AI Instructions\n\nTest content here.\n",
+      });
+      cleanupTargets.push({ dispose: repo.cleanup });
+
+      const dbDir = await mkdtemp(join(tmpdir(), "kiri-mcp-resources-read-"));
+      cleanupTargets.push({
+        dispose: async () => await rm(dbDir, { recursive: true, force: true }),
+      });
+
+      const dbPath = join(dbDir, "index.duckdb");
+      const lockPath = join(dbDir, "security.lock");
+      const { hash } = loadSecurityConfig();
+      updateSecurityLock(hash, lockPath);
+
+      await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+      const runtime = await createServerRuntime({
+        repoRoot: repo.path,
+        databasePath: dbPath,
+        securityLockPath: lockPath,
+      });
+      cleanupTargets.push({ dispose: async () => await runtime.close() });
+
+      const handler = createRpcHandler(runtime);
+      const request: JsonRpcRequest = {
+        jsonrpc: "2.0",
+        id: 303,
+        method: "resources/read",
+        params: {
+          uri: "kiri://project/claude-md",
+        },
+      };
+      const response = ensureResponse(await handler(request));
+
+      expect(response.statusCode).toBe(200);
+      const payload = response.response as JsonRpcSuccess;
+      const result = payload.result as Record<string, unknown>;
+
+      expect(result).toHaveProperty("contents");
+      const contents = result.contents as Array<Record<string, unknown>>;
+      expect(contents.length).toBe(1);
+      expect(contents[0]?.uri).toBe("kiri://project/claude-md");
+      expect(contents[0]?.mimeType).toBe("text/markdown");
+      expect(contents[0]?.text as string).toContain("# AI Instructions");
+    });
+
+    it("resources/read がプロジェクト統計を返す", async () => {
+      const repo = await createTempRepo({
+        "src/app.ts": "export const app = () => 1;\n",
+        "src/utils.ts": "export const utils = () => 2;\n",
+      });
+      cleanupTargets.push({ dispose: repo.cleanup });
+
+      const dbDir = await mkdtemp(join(tmpdir(), "kiri-mcp-resources-stats-"));
+      cleanupTargets.push({
+        dispose: async () => await rm(dbDir, { recursive: true, force: true }),
+      });
+
+      const dbPath = join(dbDir, "index.duckdb");
+      const lockPath = join(dbDir, "security.lock");
+      const { hash } = loadSecurityConfig();
+      updateSecurityLock(hash, lockPath);
+
+      await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+      const runtime = await createServerRuntime({
+        repoRoot: repo.path,
+        databasePath: dbPath,
+        securityLockPath: lockPath,
+      });
+      cleanupTargets.push({ dispose: async () => await runtime.close() });
+
+      const handler = createRpcHandler(runtime);
+      const request: JsonRpcRequest = {
+        jsonrpc: "2.0",
+        id: 304,
+        method: "resources/read",
+        params: {
+          uri: "kiri://project/stats",
+        },
+      };
+      const response = ensureResponse(await handler(request));
+
+      expect(response.statusCode).toBe(200);
+      const payload = response.response as JsonRpcSuccess;
+      const result = payload.result as Record<string, unknown>;
+
+      expect(result).toHaveProperty("contents");
+      const contents = result.contents as Array<Record<string, unknown>>;
+      expect(contents.length).toBe(1);
+      expect(contents[0]?.mimeType).toBe("application/json");
+
+      const stats = JSON.parse(contents[0]?.text as string);
+      expect(stats).toHaveProperty("totalFiles");
+      expect(stats).toHaveProperty("totalLines");
+      expect(stats).toHaveProperty("languages");
+      expect(stats.totalFiles).toBeGreaterThan(0);
+    });
+
+    it("resources/read が不明なリソースでエラーを返す", async () => {
+      const repo = await createTempRepo({
+        "src/app.ts": "export const app = () => 1;\n",
+      });
+      cleanupTargets.push({ dispose: repo.cleanup });
+
+      const dbDir = await mkdtemp(join(tmpdir(), "kiri-mcp-resources-read-error-"));
+      cleanupTargets.push({
+        dispose: async () => await rm(dbDir, { recursive: true, force: true }),
+      });
+
+      const dbPath = join(dbDir, "index.duckdb");
+      const lockPath = join(dbDir, "security.lock");
+      const { hash } = loadSecurityConfig();
+      updateSecurityLock(hash, lockPath);
+
+      await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+      const runtime = await createServerRuntime({
+        repoRoot: repo.path,
+        databasePath: dbPath,
+        securityLockPath: lockPath,
+      });
+      cleanupTargets.push({ dispose: async () => await runtime.close() });
+
+      const handler = createRpcHandler(runtime);
+      const request: JsonRpcRequest = {
+        jsonrpc: "2.0",
+        id: 305,
+        method: "resources/read",
+        params: {
+          uri: "kiri://unknown/resource",
+        },
+      };
+      const response = ensureResponse(await handler(request));
+
+      expect(response.statusCode).toBe(404);
+      const payload = response.response;
+      expect(payload).toHaveProperty("error");
+    });
+
+    it("initialize が capabilities に prompts を含む", async () => {
+      const repo = await createTempRepo({
+        "src/app.ts": "export const app = () => 1;\n",
+      });
+      cleanupTargets.push({ dispose: repo.cleanup });
+
+      const dbDir = await mkdtemp(join(tmpdir(), "kiri-mcp-capabilities-"));
+      cleanupTargets.push({
+        dispose: async () => await rm(dbDir, { recursive: true, force: true }),
+      });
+
+      const dbPath = join(dbDir, "index.duckdb");
+      const lockPath = join(dbDir, "security.lock");
+      const { hash } = loadSecurityConfig();
+      updateSecurityLock(hash, lockPath);
+
+      await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+      const runtime = await createServerRuntime({
+        repoRoot: repo.path,
+        databasePath: dbPath,
+        securityLockPath: lockPath,
+      });
+      cleanupTargets.push({ dispose: async () => await runtime.close() });
+
+      const handler = createRpcHandler(runtime);
+      const request: JsonRpcRequest = { jsonrpc: "2.0", id: 306, method: "initialize" };
+      const response = ensureResponse(await handler(request));
+
+      expect(response.statusCode).toBe(200);
+      const payload = response.response as JsonRpcSuccess;
+      const result = payload.result as Record<string, unknown>;
+
+      expect(result).toHaveProperty("capabilities");
+      const capabilities = result.capabilities as Record<string, unknown>;
+      expect(capabilities).toHaveProperty("tools");
+      expect(capabilities).toHaveProperty("resources");
+      expect(capabilities).toHaveProperty("prompts");
     });
   });
 });
