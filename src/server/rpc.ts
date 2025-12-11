@@ -28,6 +28,8 @@ import { MetricsRegistry } from "./observability/metrics.js";
 import { withSpan } from "./observability/tracing.js";
 import { OUTPUT_SCHEMAS } from "./output-schemas.js";
 import { selectProfileFromQuery } from "./profile-selector.js";
+import { generatePromptMessages, listPrompts } from "./prompts.js";
+import { listResources, readResource } from "./resources.js";
 
 const RESPONSE_MASK_SKIP_KEYS = ["path"];
 
@@ -479,6 +481,7 @@ const INITIALIZE_PAYLOAD = {
   capabilities: {
     tools: {},
     resources: {},
+    prompts: {},
   },
 } as const;
 
@@ -930,7 +933,144 @@ export function createRpcHandler(
         }
         case "resources/list": {
           // MCP standard format: resources array without pagination
-          result = { resources: [] };
+          const repoPath = context.repoPath ?? "";
+          const resources = repoPath ? await listResources(repoPath) : [];
+          result = { resources };
+          break;
+        }
+        case "resources/read": {
+          // MCP standard format: resource contents
+          const repoPath = context.repoPath ?? "";
+          if (!repoPath) {
+            return hasResponseId
+              ? {
+                  statusCode: 500,
+                  response: errorResponse(
+                    payload.id as string | number,
+                    "Repository path is not configured. Cannot read resources.",
+                    -32603
+                  ),
+                }
+              : null;
+          }
+
+          const paramsRecord = payload.params as Record<string, unknown> | null | undefined;
+          if (!paramsRecord || typeof paramsRecord !== "object") {
+            return hasResponseId
+              ? {
+                  statusCode: 400,
+                  response: errorResponse(
+                    payload.id as string | number,
+                    "Invalid params for resources/read. Provide uri parameter.",
+                    -32602
+                  ),
+                }
+              : null;
+          }
+
+          const resourceUri = paramsRecord.uri;
+          if (typeof resourceUri !== "string") {
+            return hasResponseId
+              ? {
+                  statusCode: 400,
+                  response: errorResponse(
+                    payload.id as string | number,
+                    "Invalid params for resources/read. Resource uri must be a string.",
+                    -32602
+                  ),
+                }
+              : null;
+          }
+
+          try {
+            const resourceResult = await readResource(
+              resourceUri,
+              repoPath,
+              context.db,
+              context.repoId
+            );
+            result = resourceResult;
+          } catch (error) {
+            const errorMessage =
+              error instanceof Error ? error.message : "Failed to read resource.";
+            return hasResponseId
+              ? {
+                  statusCode: 404,
+                  response: errorResponse(payload.id as string | number, errorMessage, -32602),
+                }
+              : null;
+          }
+          break;
+        }
+        case "prompts/list": {
+          // MCP standard format: prompts array
+          // repoPathが未設定の場合は空配列を返す
+          const repoPath = context.repoPath ?? "";
+          const prompts = repoPath ? await listPrompts(repoPath) : [];
+          result = { prompts };
+          break;
+        }
+        case "prompts/get": {
+          // MCP standard format: prompt messages
+          const repoPath = context.repoPath ?? "";
+          if (!repoPath) {
+            return hasResponseId
+              ? {
+                  statusCode: 500,
+                  response: errorResponse(
+                    payload.id as string | number,
+                    "Repository path is not configured. Cannot retrieve prompts.",
+                    -32603
+                  ),
+                }
+              : null;
+          }
+
+          const paramsRecord = payload.params as Record<string, unknown> | null | undefined;
+          if (!paramsRecord || typeof paramsRecord !== "object") {
+            return hasResponseId
+              ? {
+                  statusCode: 400,
+                  response: errorResponse(
+                    payload.id as string | number,
+                    "Invalid params for prompts/get. Provide name parameter.",
+                    -32602
+                  ),
+                }
+              : null;
+          }
+
+          const promptName = paramsRecord.name;
+          if (typeof promptName !== "string") {
+            return hasResponseId
+              ? {
+                  statusCode: 400,
+                  response: errorResponse(
+                    payload.id as string | number,
+                    "Invalid params for prompts/get. Prompt name must be a string.",
+                    -32602
+                  ),
+                }
+              : null;
+          }
+
+          const promptArgs = (paramsRecord.arguments ?? {}) as Record<string, string>;
+          const promptResult = await generatePromptMessages(promptName, promptArgs, repoPath);
+
+          if (!promptResult) {
+            return hasResponseId
+              ? {
+                  statusCode: 404,
+                  response: errorResponse(
+                    payload.id as string | number,
+                    `Prompt '${promptName}' not found. Use prompts/list to see available prompts.`,
+                    -32602
+                  ),
+                }
+              : null;
+          }
+
+          result = promptResult;
           break;
         }
         case "tools/call": {

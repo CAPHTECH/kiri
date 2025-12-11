@@ -1,6 +1,21 @@
 import { existsSync, realpathSync } from "node:fs";
-import { mkdir } from "node:fs/promises";
+import { mkdir, stat } from "node:fs/promises";
 import { dirname, basename, join, resolve } from "node:path";
+
+/**
+ * ファイルが存在するかを非同期でチェック
+ *
+ * @param filePath - チェック対象のファイルパス
+ * @returns ファイルが存在すればtrue、存在しなければfalse
+ */
+export async function fileExistsAsync(filePath: string): Promise<boolean> {
+  try {
+    await stat(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Normalizes a database path by resolving to its canonical form.
