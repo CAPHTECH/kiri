@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.0] - 2025-12-11
+
+### Added
+
+- **MCP Structured Output対応**: MCP仕様（2025-06-18）の`outputSchema`フィールドに対応 (Issue #144)
+  - 全6つのMCPツール（context_bundle, files_search, snippets_get, deps_closure, semantic_rerank）にJSON Schema出力スキーマを追加
+  - LLMが型安全に結果をパースできるように
+
 ## [0.18.2] - 2025-12-06
 
 ### Fixed
