@@ -1,0 +1,12 @@
+{
+  "text": "KIRI セキュリティとコンプライアンス\n\n## Denylist（自動除外）\nsecrets/**, **/*.pem, **/*.key, **/.env*, **/config/*.prod.*, **/node_modules/**\n\n## 機密検出\n- 高エントロピー文字列検知\n- 既知の鍵パターン検出\n- 格納拒否またはマスキング\n\n## MCP応答マスキング\n- src/shared/security/masker.ts\n- 機密パスを *** へ置換\n- ReDoS対策（パターン長・複雑度制限）\n\n## セキュリティ検証\n```bash\npnpm exec tsx src/client/cli.ts security verify --db <path> --write-lock\n```\n- security.lockでSHA-256ハッシュ照合\n- 差分があればサーバー起動ブロック\n\n## プラットフォーム考慮\n- Unix/macOS: Unixドメインソケット（0600パーミッション）\n- Windows: 名前付きパイプ（マルチユーザー環境では注意必要）\n- 推奨: WSL2またはDockerコンテナ内で実行",
+  "kind": "policy_hint",
+  "scope": "project",
+  "boundary_class": "internal",
+  "content_hash": "sha256:4802c47a26cd118fc1184cea2f478a2df73be9ba41dc87fb9cd1a716fe9035af",
+  "provenance": {
+    "at": "2025-12-11T00:00:00Z",
+    "actor": "claude",
+    "note": "PCE Collection - セキュリティ収集"
+  }
+}

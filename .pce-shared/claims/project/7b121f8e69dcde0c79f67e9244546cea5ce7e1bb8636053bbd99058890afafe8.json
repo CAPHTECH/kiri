@@ -1,0 +1,13 @@
+{
+  "text": "PR #115 [MERGED]: 適応的K値戦略 (AdaptiveK)\n\n機能: クエリカテゴリに基づいてK値（返却数）を動的に調整\n自動カテゴリ検出:\n- artifacts.failing_tests → debug (K=15)\n- profile=bugfix/testfail/typeerror → debug (K=15)\n- profile=refactor → api (K=15)\n- profile=feature → feature (K=10)\n- boost_profile=docs → docs (K=8)\n\n設定: KIRI_ADAPTIVE_K_ENABLED=1 で有効化\n\n評価結果:\n| P@10 | 0.286 → 0.375 (+31%) |\n| R@5 | 0.877 → 0.881 (+0.5%) |",
+  "kind": "fact",
+  "scope": "project",
+  "boundary_class": "internal",
+  "content_hash": "sha256:7b121f8e69dcde0c79f67e9244546cea5ce7e1bb8636053bbd99058890afafe8",
+  "provenance": {
+    "at": "2025-12-11T12:00:00Z",
+    "actor": "claude",
+    "note": "GitHub PR #115からの知識抽出",
+    "url": "https://github.com/CAPHTECH/kiri/pull/115"
+  }
+}

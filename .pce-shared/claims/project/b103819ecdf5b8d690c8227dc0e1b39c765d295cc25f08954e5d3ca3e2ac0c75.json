@@ -1,0 +1,13 @@
+{
+  "text": "Issue #106 [CLOSED]: Configurable path penalties for context_bundle\n\n問題: external/ファイルがkiriコアファイルより高優先度で返される（ファイル数不均衡 45:1）\n解決: .kiri/config.yaml でパスペナルティを設定可能に\n設定例:\n  pathPenalties:\n    - prefix: \"external/\"\n      multiplier: 0.3  # 70%ペナルティ\n優先順位: YAML > 環境変数 > boost profile\n修正ファイル: src/server/config-loader.ts\n修正PR: #109",
+  "kind": "fact",
+  "scope": "project",
+  "boundary_class": "internal",
+  "content_hash": "sha256:b103819ecdf5b8d690c8227dc0e1b39c765d295cc25f08954e5d3ca3e2ac0c75",
+  "provenance": {
+    "at": "2025-12-11T12:00:00Z",
+    "actor": "claude",
+    "note": "GitHub Issue #106からの知識抽出",
+    "url": "https://github.com/CAPHTECH/kiri/issues/106"
+  }
+}

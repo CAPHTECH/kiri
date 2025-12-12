@@ -1,0 +1,13 @@
+{
+  "text": "Issue #105 [OPEN]: LDE Migration Phase 3 - Grounded Types (Brand Types) 導入\n\n目的: ユニット混乱を防ぎ、ドメイン制約を型レベルで強制\n実装内容:\n- utility-types 依存追加\n- src/shared/types/lde.ts にBrand型定義（Score, Weight, PenaltyMultiplier等）\n- src/server/scoring.ts, src/server/config.ts に適用\n- スマートコンストラクタ/バリデーター作成（必要に応じて）\n\n参照: rules/law-driven-engineering.md",
+  "kind": "task",
+  "scope": "project",
+  "boundary_class": "internal",
+  "content_hash": "sha256:37fe270a9976c33963f1a390a5729387189e6f14bdd8b338d1c06a8679f906a4",
+  "provenance": {
+    "at": "2025-12-11T12:00:00Z",
+    "actor": "claude",
+    "note": "GitHub Issue #105からの知識抽出",
+    "url": "https://github.com/CAPHTECH/kiri/issues/105"
+  }
+}

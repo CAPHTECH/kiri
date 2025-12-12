@@ -1,0 +1,12 @@
+{
+  "text": "KIRI Product Hunt投稿可能性調査結果（2025年12月）\n\n## 市場分析\n### 競合製品\n- **Buildt AI**: LLM搭載コード検索、VS Code拡張、2023年3月ローンチ\n- **Bloop**: GPT-4搭載セマンティック検索、YC S21、Tree-sitter + Tantivy + Qdrant使用\n- **Cursor**: AI Code Editor、$9.9B評価、MRR $300M超（競合というより隣接市場）\n\n### MCP関連の先行事例\n- Product Hunt MCP Server: Product Hunt API連携（175 upvotes）\n- MCP Playground: テスト/検証ツール\n- Gentoro: MCPツール生成プラットフォーム\n\n## KIRIの差別化ポイント\n1. **MCP Native**: Anthropic MCPの公式仕様に準拠、Claude Code/Codex直接対応\n2. **Degrade-First**: FTS/VSS拡張なしで動作する堅牢設計\n3. **メタデータ重視**: Embeddingなしで80%カバー（プライバシー優位）\n4. **多言語シンボル抽出**: TypeScript/Swift/PHP/Java/Rust/Dart対応\n5. **OSS**: MIT License、完全オープンソース\n\n## Product Hunt要件（2025年版）\n- Featured率10%のみ（アルゴリズム変更後）\n- AI製品は追加審査あり\n- 準備時間: 50-120時間\n- ローンチ初日2時間が最重要\n- アニメーションGIFロゴ推奨\n- タグライン60文字以内",
+  "kind": "fact",
+  "scope": "project",
+  "boundary_class": "internal",
+  "content_hash": "sha256:a7b3c5d9e1f2a4b6c8d0e2f4a6b8c0d2e4f6a8b0c2d4e6f8a0b2c4d6e8f0a2b4",
+  "provenance": {
+    "at": "2025-12-11T15:30:00Z",
+    "actor": "claude",
+    "note": "Product Hunt投稿可能性調査"
+  }
+}

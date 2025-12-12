@@ -1,0 +1,12 @@
+{
+  "text": "KIRI 評価システム\n\n## Golden Set Evaluation\n代表的クエリセットを使用した検索精度の定量評価\n\n### メトリクス\n- **P@10**: Precision at K=10（目標 ≥ 0.70）\n- **TFFU**: Time To First Useful（目標 ≤ 1000ms）\n- **NDCG**: Normalized Discounted Cumulative Gain\n\n### クエリカテゴリ（5種類）\n- bugfix: バグ修正時の調査\n- feature: 新機能追加時の参照コード検索\n- refactor: リファクタリング対象の特定\n- infra: インフラ・設定関連\n- docs: ドキュメント検索\n\n### 実行方法\n```bash\npnpm run eval:golden          # ベンチマーク実行\npnpm run eval:golden:verbose  # 詳細ログ付き\n```\n\n### ファイル構成\n- tests/eval/goldens/queries.yaml: 代表クエリセット\n- tests/eval/goldens/baseline.json: ベースライン閾値\n- var/eval/latest.json/md: 結果出力",
+  "kind": "fact",
+  "scope": "project",
+  "boundary_class": "internal",
+  "content_hash": "sha256:b40f7cb831c12496d4f70db538965ecb586becccfe65e942d7a474845bba73a2",
+  "provenance": {
+    "at": "2025-12-11T00:00:00Z",
+    "actor": "claude",
+    "note": "PCE Collection - 評価システム収集"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "text": "Issue #84 [OPEN]: KIRI検索品質改善ロードマップ (Epic)\n\n達成状況 (v0.18.0):\n| NDCG (integration) | 0.850 ✅ |\n| NDCG (plugins) | 0.768 ✅ |\n| MRR | 1.000 ✅ |\n| P@5 (specialized) | 0.333 (+27%) |\n| R@5 (specialized) | 1.000 (+54%) |\n\n完了済み:\n- Milestone 1: Quick Wins (#76-78) ✅\n- Milestone 2: Foundation (#79-80) ✅\n- Graph Layer実装 (Co-change, PageRank)\n- Phrase-aware tokenization\n- IDF-based weighting\n- Adaptive K-value\n\n残タスク:\n- #81 LLM再ランキング\n- #83 継続学習システム",
+  "kind": "fact",
+  "scope": "project",
+  "boundary_class": "internal",
+  "content_hash": "sha256:b7056c5dc63333a7727b58dbae49f9ab59d2b1717ca536d73060a5aa1ec7f2f3",
+  "provenance": {
+    "at": "2025-12-11T12:00:00Z",
+    "actor": "claude",
+    "note": "GitHub Issue #84からの知識抽出",
+    "url": "https://github.com/CAPHTECH/kiri/issues/84"
+  }
+}

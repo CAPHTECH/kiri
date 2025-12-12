@@ -1,0 +1,12 @@
+{
+  "text": "Open Issues: Refactoring - serverConfig DI (#98) & contextBundleImpl分割 (#97)\n\n#98 [OPEN]: serverConfigをServerContextへ移動\n問題: モジュールトップレベルで初期化、テスト時に設定変更不可\n解決: ServerContext に config を含め、DI原則に従う\n影響: src/server/context.ts, handlers.ts (約20箇所), tests (約15箇所)\n優先度: Medium\n\n#97 [OPEN]: contextBundleImpl分割 (743行)\n問題: 巨大関数で保守困難\n解決: 3サブ関数へ分割\n- gatherBundleCandidates（候補収集）\n- scoreBundleCandidates（スコアリング）\n- buildBundleResults（結果構築）\n推定作業時間: 4-6時間",
+  "kind": "task",
+  "scope": "project",
+  "boundary_class": "internal",
+  "content_hash": "sha256:4d19293b7a06f49e5832a7f4a210899b6adca480086687a83989c8f3813ed9ca",
+  "provenance": {
+    "at": "2025-12-11T12:00:00Z",
+    "actor": "claude",
+    "note": "GitHub Issue #97,#98からの知識抽出"
+  }
+}

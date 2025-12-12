@@ -1,0 +1,5 @@
+{
+  "id": "file-snippets-get",
+  "type": "Artifact",
+  "name": "src/server/handlers/snippets-get.ts"
+}

@@ -1,0 +1,12 @@
+{
+  "text": "KIRI DuckDBスキーマ: blob/tree分離パターン\n\n## 主要テーブル\n- **repo**: リポジトリ情報（id, root, default_branch, indexed_at）\n- **blob**: 内容ハッシュで一意化されたファイル内容\n- **tree**: repo_id + commit_hash + path → blob_hash マッピング\n- **file**: HEAD時点の便宜表（高速検索用）\n- **symbol**: AST抽出シンボル（関数/クラス/メソッド）の範囲\n- **snippet**: シンボル境界ベースのチャンク\n- **dependency**: import/require解決結果\n- **cochange**: Git履歴からのCo-change関係\n- **document_metadata**: Front Matter/YAML/JSONメタデータ\n- **markdown_link**: Markdownリンクグラフ\n\n## 設計ポイント\n- リネーム/コピーでも内容が同一ならblob重複排除\n- VSS/FTS拡張はオプション（Degrade運転可能）\n- snippet_embeddingはオプショナル",
+  "kind": "fact",
+  "scope": "project",
+  "boundary_class": "internal",
+  "content_hash": "sha256:d8ee4d854774c66eca89c15510f615e350a2b70b96c638ed93ba36f1f7544e7d",
+  "provenance": {
+    "at": "2025-12-11T00:00:00Z",
+    "actor": "claude",
+    "note": "PCE Collection - データモデル収集"
+  }
+}

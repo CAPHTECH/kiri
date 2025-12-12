@@ -1,0 +1,12 @@
+{
+  "text": "KIRI MCPツール詳細\n\n## context_bundle（主要ツール）\nタスクゴールから関連コードスニペットを抽出\n- goal: タスク説明（キーワード重視、命令形避ける）\n- limit: 返却スニペット数（デフォルト7、最大20）\n- compact: メタデータのみ返却（デフォルトtrue、95%トークン削減）\n- boost_profile: default/code/docs/balanced/none/vscode\n- category: bugfix/testfail/debug/api/docs/feature等\n\n## files_search\nBM25/ILIKEによる全文検索\n- query: 検索キーワード\n- lang/ext: 言語・拡張子フィルタ\n- metadata_filters: Front Matterフィルタ\n\n## snippets_get\nシンボル境界でのコード取得\n- path: ファイルパス\n- view: auto/symbol/lines/full\n- include_line_numbers: 行番号付与\n\n## deps_closure\n依存グラフ分析\n- direction: outbound（使用先）/ inbound（使用元）\n- max_depth: 走査深度（デフォルト3）\n\n## semantic_rerank\n候補をセマンティック類似度で再ランキング",
+  "kind": "fact",
+  "scope": "project",
+  "boundary_class": "internal",
+  "content_hash": "sha256:661559b167d1dd01b8a22d356ddf8f5e357c427a63e330e203a3ed65784c262d",
+  "provenance": {
+    "at": "2025-12-11T00:00:00Z",
+    "actor": "claude",
+    "note": "PCE Collection - MCPツール収集"
+  }
+}

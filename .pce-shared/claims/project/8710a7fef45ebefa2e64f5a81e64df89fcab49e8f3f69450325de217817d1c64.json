@@ -1,0 +1,12 @@
+{
+  "text": "KIRI 主要コマンドと開発フロー\n\n## 基本コマンド\n```bash\npnpm install              # 依存関係インストール\npnpm run build            # dist/にESM出力\npnpm run dev              # 開発サーバー起動（ポート8765）\npnpm run test             # テスト実行（カバレッジ付き）\npnpm run lint             # ESLint + Prettier\npnpm run check            # lint + test\n```\n\n## インデクサー\n```bash\ntsx src/indexer/cli.ts --repo . --db var/index.duckdb --full\ntsx src/indexer/cli.ts --since <commit>  # 差分インデックス\ntsx src/indexer/cli.ts --watch          # ファイル監視モード\n```\n\n## CLIモード\n```bash\nkiri --repo . --db .kiri/index.duckdb          # stdio (MCP)\nkiri --repo . --db .kiri/index.duckdb --port 8765  # HTTPモード\n```\n\n## コミット規約\nConventional Commits必須\n例: feat(server): expose semantic rerank\n   chore(deps): bump duckdb-wasm\n\n## npm公開\npnpm run check → version更新 → pnpm run build → pnpm publish --access public",
+  "kind": "fact",
+  "scope": "project",
+  "boundary_class": "internal",
+  "content_hash": "sha256:8710a7fef45ebefa2e64f5a81e64df89fcab49e8f3f69450325de217817d1c64",
+  "provenance": {
+    "at": "2025-12-11T00:00:00Z",
+    "actor": "claude",
+    "note": "PCE Collection - コマンド収集"
+  }
+}

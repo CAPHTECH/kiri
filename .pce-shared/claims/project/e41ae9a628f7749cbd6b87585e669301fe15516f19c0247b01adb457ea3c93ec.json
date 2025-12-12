@@ -1,0 +1,12 @@
+{
+  "text": "KIRI 運用上の重要な注意事項\n\n## MCPサーバープロセス管理\n- 複数同時起動禁止\n- 作業前後に `ps aux | grep 'src/server/main.ts'` で確認\n- DuckDB更新時は必ずサーバー停止\n\n## DuckDBロック問題\nロック解除手順:\n1. プロセス停止\n2. rm var/index.duckdb.lock\n3. pnpm exec tsx src/indexer/cli.ts --full\n\n## SLO目標\n- context_bundle P95 ≤ 1000ms\n- フル索引 1M行/10分以内\n- 差分取り込み P95 1分未満\n\n## Degradeモード\nFTS/VSS利用不可時:\n- --allow-degrade フラグで起動\n- ファイル検索のみ許可、他ツールは503\n\n## 監査ログ\n- 外部LLMに渡したパス・行範囲を記録\n- scripts/audit/export-log.ts経由でエクスポート\n- 週次レビュー義務化",
+  "kind": "policy_hint",
+  "scope": "project",
+  "boundary_class": "internal",
+  "content_hash": "sha256:e41ae9a628f7749cbd6b87585e669301fe15516f19c0247b01adb457ea3c93ec",
+  "provenance": {
+    "at": "2025-12-11T00:00:00Z",
+    "actor": "claude",
+    "note": "PCE Collection - 運用注意事項収集"
+  }
+}

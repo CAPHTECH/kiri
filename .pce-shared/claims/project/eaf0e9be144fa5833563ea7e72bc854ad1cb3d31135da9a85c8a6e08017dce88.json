@@ -1,0 +1,13 @@
+{
+  "text": "Issue #141 [CLOSED]: Indexer fails with 'Malformed JSON: no low surrogate in string'\n\n問題: 不正なUnicodeサロゲートペアを含むYAML/JSON/Markdownファイルでインデックス作成が失敗\n原因: sanitizeMetadataTree でサロゲートペアのチェックなし → JSON.stringify → DuckDB JSON検証でエラー\n解決: sanitizeSurrogates関数を追加し、孤立したサロゲートを事前に除去\n影響ファイル: src/indexer/cli.ts (persistDocumentMetadata, sanitizeMetadataTree)\n修正PR: #142, #143",
+  "kind": "fact",
+  "scope": "project",
+  "boundary_class": "internal",
+  "content_hash": "sha256:eaf0e9be144fa5833563ea7e72bc854ad1cb3d31135da9a85c8a6e08017dce88",
+  "provenance": {
+    "at": "2025-12-11T12:00:00Z",
+    "actor": "claude",
+    "note": "GitHub Issue #141からの知識抽出",
+    "url": "https://github.com/CAPHTECH/kiri/issues/141"
+  }
+}

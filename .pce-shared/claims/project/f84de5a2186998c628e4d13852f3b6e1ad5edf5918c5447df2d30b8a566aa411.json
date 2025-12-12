@@ -1,0 +1,12 @@
+{
+  "text": "Open Issues: マーケティング関連タスク (#135, #136, #137, #138)\n\n#138 [OPEN]: Product Hunt投稿準備 (High priority)\n- タグライン（60文字以内）\n- 説明文（260文字以内）\n- ギャラリー画像（5枚以上推奨）\n- 動画（#136依存）\n- トピック: Developer Tools, AI, Open Source, Productivity\n\n#137 [OPEN]: ロゴ/アイコン作成 (Medium priority)\n- SVG, PNG各サイズ, ICO\n- 「KIRI（霧）」イメージ、霧/雲モチーフ\n- ランディングページ(#135)のブロッカー\n\n#136 [OPEN]: デモ動画/GIF作成 (High priority)\n- context_bundleデモ（メイン、15-20秒）\n- MP4（60秒以内）、GIF（15秒以内）\n\n#135 [OPEN]: ランディングページ作成 (High priority)\n- ヒーローセクション、主要機能説明\n- GitHub Pages または Vercel\n- #136, #137に依存",
+  "kind": "task",
+  "scope": "project",
+  "boundary_class": "internal",
+  "content_hash": "sha256:f84de5a2186998c628e4d13852f3b6e1ad5edf5918c5447df2d30b8a566aa411",
+  "provenance": {
+    "at": "2025-12-11T12:00:00Z",
+    "actor": "claude",
+    "note": "GitHub Open Issuesからの知識抽出"
+  }
+}

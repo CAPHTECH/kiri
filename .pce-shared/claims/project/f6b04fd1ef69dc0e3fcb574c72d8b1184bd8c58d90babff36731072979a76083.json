@@ -1,0 +1,12 @@
+{
+  "text": "KIRI 開発規約とコーディングスタイル\n\n## コードスタイル\n- **インデント**: 2スペース\n- **セミコロン**: 常に付与\n- **命名規則**:\n  - 変数・関数: camelCase\n  - クラス・型: PascalCase\n  - 定数: SCREAMING_SNAKE_CASE\n- **SQL**: キーワード大文字、識別子snake_case\n- **MCPツール名**: <領域>.<動詞>形式（例: context_bundle, files_search）\n\n## TypeScript設定\n- strict: true\n- noUncheckedIndexedAccess: true\n- eslint-config-standard-with-typescript + Prettier\n\n## エラーメッセージ\n「原因→対処」の2文構成\n例: \"Target repository is missing from DuckDB. Run the indexer before starting the server.\"\n\n## テスト基準\n- カバレッジ: ≥80% (lines & statements)\n- テストファイル命名: tests/<module>/<file>.spec.ts\n- DuckDB利用時: tmp/に一時DB作成、afterEachで削除",
+  "kind": "preference",
+  "scope": "project",
+  "boundary_class": "internal",
+  "content_hash": "sha256:f6b04fd1ef69dc0e3fcb574c72d8b1184bd8c58d90babff36731072979a76083",
+  "provenance": {
+    "at": "2025-12-11T00:00:00Z",
+    "actor": "claude",
+    "note": "PCE Collection - 開発規約収集"
+  }
+}

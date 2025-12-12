@@ -1,0 +1,13 @@
+{
+  "text": "Issue #118 [CLOSED], Issue #117 [CLOSED]: snippets_get view パラメータ追加\n\n問題: snippets_getがシンボル境界を優先し、ユーザー指定の行範囲が無視される\n解決: viewパラメータを追加\n- auto (デフォルト): 現行動作維持\n- symbol: 強制的にシンボル境界使用\n- lines: 行範囲ベース（シンボル境界無視）\n- full: ファイル全体（安全上限500行）\n修正ファイル: src/server/handlers/snippets-get.ts, src/server/rpc.ts\n修正PR: #128",
+  "kind": "fact",
+  "scope": "project",
+  "boundary_class": "internal",
+  "content_hash": "sha256:b0576fd2f9630abc8e7dca04c5cbe879bc79ef54ae8b25703b998eda3a1bda5b",
+  "provenance": {
+    "at": "2025-12-11T12:00:00Z",
+    "actor": "claude",
+    "note": "GitHub Issue #117,#118からの知識抽出",
+    "url": "https://github.com/CAPHTECH/kiri/issues/118"
+  }
+}

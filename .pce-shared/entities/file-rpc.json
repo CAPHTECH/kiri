@@ -1,0 +1,5 @@
+{
+  "id": "file-rpc",
+  "type": "Artifact",
+  "name": "src/server/rpc.ts"
+}

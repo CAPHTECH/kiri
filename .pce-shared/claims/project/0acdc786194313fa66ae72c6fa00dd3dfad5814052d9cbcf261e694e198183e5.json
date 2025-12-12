@@ -1,0 +1,12 @@
+{
+  "text": "Open Issues: 検索品質 Advanced (#81, #83)\n\n#81 [OPEN]: LLMによる結果再ランキング\n- K=20結果をLLMで関連度評価しTop-K再ランキング\n- KiriLLMRerankerクラス実装\n- ローカルモデル対応（Llama 3.1 8B）\n- キャッシング機構（コスト削減）\n\n#83 [OPEN]: 利用データからの継続学習システム\n- テレメトリ収集（opt-in）: CTR, Dwell time, Edit actions\n- クエリパターン分析\n- VSS埋め込みファインチューニング\n- A/Bテスト基盤\nPhase 1: Telemetry Collection (1-2ヶ月)\nPhase 2: Analysis Pipeline (2-3ヶ月)",
+  "kind": "task",
+  "scope": "project",
+  "boundary_class": "internal",
+  "content_hash": "sha256:0acdc786194313fa66ae72c6fa00dd3dfad5814052d9cbcf261e694e198183e5",
+  "provenance": {
+    "at": "2025-12-11T12:00:00Z",
+    "actor": "claude",
+    "note": "GitHub Issue #81,#83からの知識抽出"
+  }
+}

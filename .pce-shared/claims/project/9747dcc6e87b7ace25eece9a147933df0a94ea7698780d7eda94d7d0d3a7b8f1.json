@@ -1,0 +1,13 @@
+{
+  "text": "PR #124 [MERGED]: VSS infrastructure + dependency graph scoring\n\n機能追加:\n- 依存グラフスコアリング（inbound dependency boost, PageRank-like importance）\n- Co-changeスコアリング（Git履歴で同時変更ファイルをブースト）\n- cochangeデフォルト有効（cochange: 3.0）、--no-cochangeでオプトアウト\n- graph-on/graph-offプロファイル（A/B比較用）\n\n評価結果:\n| Metric | Before | After |\n| P@10 | 0.240 | 0.257 (+7%) |\n| R@5 | 0.620 | 0.675 (+9%) |\n| feature P@10 | 0.217 | 0.317 (+46%) |",
+  "kind": "fact",
+  "scope": "project",
+  "boundary_class": "internal",
+  "content_hash": "sha256:9747dcc6e87b7ace25eece9a147933df0a94ea7698780d7eda94d7d0d3a7b8f1",
+  "provenance": {
+    "at": "2025-12-11T12:00:00Z",
+    "actor": "claude",
+    "note": "GitHub PR #124からの知識抽出",
+    "url": "https://github.com/CAPHTECH/kiri/pull/124"
+  }
+}

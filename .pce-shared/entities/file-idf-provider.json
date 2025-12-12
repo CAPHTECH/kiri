@@ -1,0 +1,5 @@
+{
+  "id": "file-idf-provider",
+  "type": "Artifact",
+  "name": "src/server/idf-provider.ts"
+}

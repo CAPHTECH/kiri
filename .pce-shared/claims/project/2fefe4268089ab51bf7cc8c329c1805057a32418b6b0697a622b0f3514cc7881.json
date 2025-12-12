@@ -1,0 +1,13 @@
+{
+  "text": "PR #134 [MERGED]: Rust言語サポート追加\n\n実装内容:\n- tree-sitter-rust導入\n- 抽出シンボル: struct/enum/trait/impl/fn/mod/type/const/static/macro\n- Rustドキュメントコメント対応\n- use（グループ・ワイルドカード）/extern crate/mod依存解決\n- crate/self/super未解決は棄却\n\nカバレッジ: Statements 80%, Branches 69.81%, Functions 100%\nファイル: src/indexer/codeintel/rust/analyzer.ts",
+  "kind": "fact",
+  "scope": "project",
+  "boundary_class": "internal",
+  "content_hash": "sha256:2fefe4268089ab51bf7cc8c329c1805057a32418b6b0697a622b0f3514cc7881",
+  "provenance": {
+    "at": "2025-12-11T12:00:00Z",
+    "actor": "claude",
+    "note": "GitHub PR #134からの知識抽出",
+    "url": "https://github.com/CAPHTECH/kiri/pull/134"
+  }
+}

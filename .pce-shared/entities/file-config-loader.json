@@ -1,0 +1,5 @@
+{
+  "id": "file-config-loader",
+  "type": "Artifact",
+  "name": "src/server/config-loader.ts"
+}

@@ -1,0 +1,13 @@
+{
+  "text": "Issue #113 [CLOSED]: 特定状況でkiri mcpを入れたclaude codeで400エラー\n\n原因: OpenAI ToolsがトップレベルanyOf/oneOf/allOfを拒否\nエラー: \"tools.0.custom.input_schema: input_schema does not support oneOf, allOf, or anyOf at the top level\"\n解決: files_searchのinputSchemaからtop-level anyOfを削除\n修正ファイル: src/server/rpc.ts\n修正PR: #114",
+  "kind": "fact",
+  "scope": "project",
+  "boundary_class": "internal",
+  "content_hash": "sha256:5b4b5ec1ae75bd0bbf7fa798aefbfab6a5ba959e040d302a5c85a0130316201a",
+  "provenance": {
+    "at": "2025-12-11T12:00:00Z",
+    "actor": "claude",
+    "note": "GitHub Issue #113からの知識抽出",
+    "url": "https://github.com/CAPHTECH/kiri/issues/113"
+  }
+}

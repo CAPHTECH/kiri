@@ -1,0 +1,12 @@
+{
+  "text": "Open Issues: LDE Migration Phase 1-2 (#103, #104)\n\n#103 [OPEN]: LDE Phase 1 - Configuration with Zod\n- src/server/config.ts を Zod でリファクタ\n- 手動の parseEnvNumber/parseEnvFloat を Zod スキーマに置換\n- 宣言的バリデーション\n\n#104 [OPEN]: LDE Phase 2 - Immutability and Zod in Scoring\n- src/server/scoring.ts を Zod + immutability でリファクタ\n- ScoringWeights, ScoringProfileName の Zod スキーマ\n- readonly 修飾子の適用\n\n参照: rules/law-driven-engineering.md",
+  "kind": "task",
+  "scope": "project",
+  "boundary_class": "internal",
+  "content_hash": "sha256:dcf7ea58f56cd04e2e7ea36b96587b5998c884dd967c56485df838328ac09d02",
+  "provenance": {
+    "at": "2025-12-11T12:00:00Z",
+    "actor": "claude",
+    "note": "GitHub Issue #103,#104からの知識抽出"
+  }
+}
