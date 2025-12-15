@@ -94,6 +94,11 @@ function toRegex(pattern: string): RegExp {
     throw new Error("Denylist pattern exceeds maximum length. Simplify the pattern.");
   }
 
+  // 空パターンや過度に広いパターンを拒否
+  if (!pattern || pattern === "/" || pattern === "**" || pattern === "**/") {
+    throw new Error("Empty or overly broad denylist pattern. Provide a specific pattern.");
+  }
+
   const { type, hasTrailingSlash, normalizedPattern } = classifyPattern(pattern);
 
   // 正規表現用にエスケープ（**は後で処理するためプレースホルダに）
@@ -107,7 +112,7 @@ function toRegex(pattern: string): RegExp {
   const withWildcards = escaped
     .replace(/\*/g, "[^/]*")
     .replace(/::DOUBLESTAR::/g, ".*")
-    .replace(/\?/g, ".");
+    .replace(/\?/g, "[^/]");
 
   // ディレクトリの場合のサフィックス（サブパスにもマッチ）
   const suffix = hasTrailingSlash ? "(?:/.*)?" : "";

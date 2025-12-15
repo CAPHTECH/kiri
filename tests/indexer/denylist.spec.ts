@@ -308,3 +308,56 @@ describe("gitignore仕様準拠: ダブルスターパターン", () => {
     await repo.cleanup();
   });
 });
+
+describe("エッジケース", () => {
+  it("? matches single non-slash character", async () => {
+    const repo = await createTempRepo({
+      ".gitignore": "fo?.txt\n",
+      "src/index.ts": "console.log('ok');\n",
+    });
+
+    const nonExistentConfig = join(repo.path, "nonexistent/denylist.yml");
+    const filter = createDenylistFilter(repo.path, nonExistentConfig);
+
+    // 単一文字にマッチ
+    expect(filter.isDenied("foo.txt")).toBe(true);
+    expect(filter.isDenied("fob.txt")).toBe(true);
+
+    // スラッシュにはマッチしない（gitignore仕様）
+    expect(filter.isDenied("fo/.txt")).toBe(false);
+
+    // 複数文字にはマッチしない
+    expect(filter.isDenied("fooo.txt")).toBe(false);
+
+    await repo.cleanup();
+  });
+
+  it("throws for empty or overly broad patterns", async () => {
+    const repo = await createTempRepo({
+      "src/index.ts": "console.log('ok');\n",
+    });
+
+    // 空パターンを持つ設定ファイル
+    const configPath = join(repo.path, "denylist.yml");
+
+    // ** パターンはエラー
+    await writeFile(configPath, "patterns:\n  - '**'\n", "utf8");
+    expect(() => createDenylistFilter(repo.path, configPath)).toThrow(
+      /Empty or overly broad denylist pattern/
+    );
+
+    // **/ パターンはエラー
+    await writeFile(configPath, "patterns:\n  - '**/'\n", "utf8");
+    expect(() => createDenylistFilter(repo.path, configPath)).toThrow(
+      /Empty or overly broad denylist pattern/
+    );
+
+    // / のみはエラー
+    await writeFile(configPath, "patterns:\n  - '/'\n", "utf8");
+    expect(() => createDenylistFilter(repo.path, configPath)).toThrow(
+      /Empty or overly broad denylist pattern/
+    );
+
+    await repo.cleanup();
+  });
+});
