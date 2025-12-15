@@ -35,8 +35,11 @@ function toRegex(pattern: string): RegExp {
   const suffix = pattern.endsWith("/") ? "(?:/.*)?" : "";
 
   // ReDoS対策: 最終パターンの複雑度チェック（ネストした量指定子）
+  // [^/]* は bounded なので安全、.* のみを危険なパターンとしてカウント
   const finalPattern = `^${withWildcards}${suffix}$`;
-  if (/(\*|\+|\{).*(\*|\+|\{).*(\*|\+|\{)/.test(finalPattern)) {
+  // [^/]* を除去してから危険な量指定子をチェック
+  const withoutBounded = finalPattern.replace(/\[\^\/\]\*/g, "");
+  if (/(\.\*|\w\+|\{\d+,\}).*(\.\*|\w\+|\{\d+,\}).*(\.\*|\w\+|\{\d+,\})/.test(withoutBounded)) {
     throw new Error("Denylist pattern is too complex. Use simpler glob patterns.");
   }
 
