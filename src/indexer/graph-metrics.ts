@@ -93,8 +93,10 @@ export async function computeDegreeCentrality(db: DuckDBClient, repoId: number):
   );
 
   // Compute outbound counts (files this file imports)
-  await db.run(
-    `
+  await withRetry(
+    () =>
+      db.run(
+        `
     INSERT INTO graph_metrics (repo_id, path, outbound_count, inbound_count, importance_score, computed_at)
     SELECT
       repo_id,
@@ -107,12 +109,16 @@ export async function computeDegreeCentrality(db: DuckDBClient, repoId: number):
     WHERE repo_id = ? AND dst_kind = 'path'
     GROUP BY repo_id, src_path
   `,
-    [repoId]
+        [repoId]
+      ),
+    DB_RETRY_OPTIONS
   );
 
   // Update inbound counts (files that import this file)
-  await db.run(
-    `
+  await withRetry(
+    () =>
+      db.run(
+        `
     WITH inbound_counts AS (
       SELECT dst as path, COUNT(*) as cnt
       FROM dependency
@@ -125,12 +131,16 @@ export async function computeDegreeCentrality(db: DuckDBClient, repoId: number):
     ), 0)
     WHERE repo_id = ?
   `,
-    [repoId, repoId]
+        [repoId, repoId]
+      ),
+    DB_RETRY_OPTIONS
   );
 
   // Insert files that only have inbound dependencies (not already in table)
-  await db.run(
-    `
+  await withRetry(
+    () =>
+      db.run(
+        `
     INSERT INTO graph_metrics (repo_id, path, outbound_count, inbound_count, importance_score, computed_at)
     SELECT
       ? as repo_id,
@@ -144,7 +154,9 @@ export async function computeDegreeCentrality(db: DuckDBClient, repoId: number):
       AND dst NOT IN (SELECT path FROM graph_metrics WHERE repo_id = ?)
     GROUP BY dst
   `,
-    [repoId, repoId, repoId]
+        [repoId, repoId, repoId]
+      ),
+    DB_RETRY_OPTIONS
   );
 }
 
