@@ -301,11 +301,23 @@ export class IndexWatcher {
             process.stderr.write(
               `⚠️  Watch mode hit OS resource limits. Switching to polling mode...\n`
             );
-            void startOnce(true).catch((restartError) => {
-              process.stderr.write(
-                `❌ Failed to restart watch mode (polling): ${restartError instanceof Error ? restartError.message : String(restartError)}\n`
-              );
-            });
+            // フォールバック前に保留中の変更を保存
+            const pendingSnapshot = new Set(this.pendingFiles);
+            void startOnce(true)
+              .then(() => {
+                // フォールバック成功後に保留中の変更を復元
+                for (const path of pendingSnapshot) {
+                  this.pendingFiles.add(path);
+                }
+                if (pendingSnapshot.size > 0) {
+                  this.pendingReindex = true;
+                }
+              })
+              .catch((restartError) => {
+                process.stderr.write(
+                  `❌ Failed to restart watch mode (polling): ${restartError instanceof Error ? restartError.message : String(restartError)}\n`
+                );
+              });
           }
           settle(() => {
             reject(
