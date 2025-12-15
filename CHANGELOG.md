@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.0] - 2025-12-16
+
+### Added
+
+- **Daemon Watch Mode**: Added `--watch` flag for file monitoring and auto re-indexing (Issue #151)
+  - Detects file changes and automatically triggers incremental indexing
+  - Debounce mechanism handles rapid consecutive changes
+  - Automatic fallback to polling mode on OS resource limits
+  - Ignores DB files and temporary files to prevent infinite loops
+
+### Fixed
+
+- **Denylist optional config**: Daemon watch mode now works in repositories without `config/denylist.yml` (Issue #153)
+  - Returns empty patterns when file is missing, allowing `.gitignore`-only filtering
+  - Throws error when file exists but contains invalid content (detects configuration mistakes)
+
 ## [0.20.2] - 2025-12-12
 
 ### Fixed
