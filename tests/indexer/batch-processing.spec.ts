@@ -31,6 +31,7 @@ describe("Batch Processing for Large Datasets", () => {
     execSync("git init", { cwd: repoDir });
     execSync('git config user.name "Test User"', { cwd: repoDir });
     execSync('git config user.email "test@example.com"', { cwd: repoDir });
+    execSync("git config commit.gpgsign false", { cwd: repoDir });
   });
 
   afterEach(async () => {

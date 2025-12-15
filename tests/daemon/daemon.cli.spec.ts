@@ -24,6 +24,7 @@ const cliTests = createCliTests({
     "--daemon-timeout",
     "Watch Mode:",
     "--watch",
+    "--debounce",
     "Security:",
     "--allow-degrade",
     "--security-config",

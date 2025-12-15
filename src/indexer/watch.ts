@@ -77,6 +77,19 @@ export class IndexWatcher {
   private readonly realpathCache = new Map<string, string>();
   private isStopping = false; // Flag to prevent new reindexes during shutdown
 
+  private isResourceExhaustionError(error: unknown): boolean {
+    if (!error) {
+      return false;
+    }
+
+    const message = error instanceof Error ? error.message : String(error);
+    return /\b(EMFILE|ENOSPC)\b/.test(message);
+  }
+
+  private getWatcherModeLabel(usePolling: boolean): string {
+    return usePolling ? "polling" : "native";
+  }
+
   constructor(options: IndexWatcherOptions) {
     this.rawRepoRoot = resolve(options.repoRoot);
     const repoRoot = normalizeRepoPath(this.rawRepoRoot);
@@ -215,80 +228,124 @@ export class IndexWatcher {
     // Load denylist patterns
     const denylistFilter = createDenylistFilter(this.options.repoRoot, this.options.configPath);
 
-    // Configure chokidar with denylist and editor-specific options
-    this.watcher = watch(this.options.repoRoot, {
-      persistent: true,
-      ignoreInitial: true, // Don't trigger on existing files
-      ignored: (path: string) => {
-        const relativePath = this.normalizePathForRepo(path);
-        // Reject paths outside repo or invalid paths (explicit null check, not falsy check)
-        if (relativePath === null) {
-          return true;
-        }
-        return denylistFilter.isDenied(relativePath);
-      },
-      // Editor-specific handling
-      awaitWriteFinish: {
-        stabilityThreshold: 200, // Wait 200ms for file to stabilize
-        pollInterval: 100,
-      },
-      // Performance tuning
-      usePolling: false, // Use native OS events (faster)
-      // depth option omitted for no depth limit
-    });
+    const relativeDbPath = this.normalizePathForRepo(this.options.databasePath);
+    const ignoredRelativePaths = new Set<string>();
+    if (relativeDbPath) {
+      ignoredRelativePaths.add(relativeDbPath);
+      ignoredRelativePaths.add(`${relativeDbPath}.wal`);
+      ignoredRelativePaths.add(`${relativeDbPath}.tmp`);
+      ignoredRelativePaths.add(`${relativeDbPath}.lock`);
+    }
 
-    // Return promise that resolves when watcher is fully initialized
-    return new Promise<void>((resolve, reject) => {
-      const watcher = this.watcher!;
-      let settled = false;
-      const settle = (cb: () => void) => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        cb();
-      };
+    const startOnce = async (usePolling: boolean): Promise<void> => {
+      // Configure chokidar with denylist and editor-specific options
+      this.watcher = watch(this.options.repoRoot, {
+        persistent: true,
+        ignoreInitial: true, // Don't trigger on existing files
+        ignored: (path: string) => {
+          const relativePath = this.normalizePathForRepo(path);
+          // Reject paths outside repo or invalid paths (explicit null check, not falsy check)
+          if (relativePath === null) {
+            return true;
+          }
 
-      const handleError = (error: unknown) => {
-        process.stderr.write(
-          `❌ File watcher error: ${error instanceof Error ? error.message : String(error)}\n`
-        );
-        if (this.watcher) {
-          void this.watcher.close().catch(() => {
-            /* ignore */
-          });
-          this.watcher = null;
-        }
-        settle(() => {
-          reject(
-            new Error(
-              `Failed to start watch mode: ${error instanceof Error ? error.message : String(error)}`
-            )
-          );
-        });
-      };
+          // Always ignore git internals (not indexable, and very noisy)
+          if (relativePath === ".git" || relativePath.startsWith(".git/")) {
+            return true;
+          }
 
-      // Register event handlers
-      watcher
-        .on("add", (path) => {
-          this.scheduleReindex("add", path);
-        })
-        .on("change", (path) => {
-          this.scheduleReindex("change", path);
-        })
-        .on("unlink", (path) => {
-          this.scheduleReindex("unlink", path);
-        })
-        .on("error", handleError)
-        .once("ready", () => {
-          watcher.off("error", handleError);
+          // If the DB lives under the repo root (e.g., ".kiri/index.duckdb"), ignore it to prevent loops
+          if (ignoredRelativePaths.has(relativePath)) {
+            return true;
+          }
+
+          return denylistFilter.isDenied(relativePath);
+        },
+        // Editor-specific handling
+        awaitWriteFinish: {
+          stabilityThreshold: 200, // Wait 200ms for file to stabilize
+          pollInterval: 100,
+        },
+        // Performance tuning
+        usePolling,
+        // depth option omitted for no depth limit
+      });
+
+      // Return promise that resolves when watcher is fully initialized
+      return new Promise<void>((resolve, reject) => {
+        const watcher = this.watcher!;
+        let settled = false;
+        const settle = (cb: () => void) => {
+          if (settled) {
+            return;
+          }
+          settled = true;
+          cb();
+        };
+
+        const handleError = (error: unknown) => {
           process.stderr.write(
-            `👁️  Watch mode started. Monitoring ${this.options.repoRoot} for changes...\n`
+            `❌ File watcher error: ${error instanceof Error ? error.message : String(error)}\n`
           );
-          process.stderr.write(`   Debounce: ${this.options.debounceMs}ms\n`);
-          settle(resolve);
-        });
-    });
+          if (this.watcher) {
+            void this.watcher.close().catch(() => {
+              /* ignore */
+            });
+            this.watcher = null;
+          }
+          if (settled && !this.isStopping && !usePolling && this.isResourceExhaustionError(error)) {
+            process.stderr.write(
+              `⚠️  Watch mode hit OS resource limits. Switching to polling mode...\n`
+            );
+            void startOnce(true).catch((restartError) => {
+              process.stderr.write(
+                `❌ Failed to restart watch mode (polling): ${restartError instanceof Error ? restartError.message : String(restartError)}\n`
+              );
+            });
+          }
+          settle(() => {
+            reject(
+              new Error(
+                `Failed to start watch mode (${this.getWatcherModeLabel(usePolling)}): ${error instanceof Error ? error.message : String(error)}`
+              )
+            );
+          });
+        };
+
+        // Register event handlers
+        watcher
+          .on("add", (path) => {
+            this.scheduleReindex("add", path);
+          })
+          .on("change", (path) => {
+            this.scheduleReindex("change", path);
+          })
+          .on("unlink", (path) => {
+            this.scheduleReindex("unlink", path);
+          })
+          .on("error", handleError)
+          .once("ready", () => {
+            process.stderr.write(
+              `👁️  Watch mode started (${this.getWatcherModeLabel(usePolling)}). Monitoring ${this.options.repoRoot} for changes...\n`
+            );
+            process.stderr.write(`   Debounce: ${this.options.debounceMs}ms\n`);
+            settle(resolve);
+          });
+      });
+    };
+
+    try {
+      await startOnce(false);
+    } catch (error) {
+      if (!this.isResourceExhaustionError(error)) {
+        throw error;
+      }
+
+      process.stderr.write(
+        `⚠️  Watch mode failed to start due to resource limits. Falling back to polling mode...\n`
+      );
+      await startOnce(true);
+    }
   }
 
   /**

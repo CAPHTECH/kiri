@@ -9,6 +9,7 @@
 import * as path from "path";
 
 import packageJson from "../../package.json" with { type: "json" };
+import { IndexWatcher } from "../indexer/watch.js";
 import { ensureDatabaseIndexed } from "../server/indexBootstrap.js";
 import { createRpcHandler } from "../server/rpc.js";
 import { createServerRuntime } from "../server/runtime.js";
@@ -28,6 +29,7 @@ interface DaemonOptions {
   databasePath: string;
   socketPath?: string | undefined;
   watchMode: boolean;
+  debounceMs: number;
   idleTimeoutMinutes: number;
   allowDegrade: boolean;
   securityConfigPath?: string | undefined;
@@ -88,6 +90,13 @@ const DAEMON_CLI_SPEC: CliSpec = {
           description: "Enable watch mode for automatic re-indexing",
           default: false,
         },
+        {
+          flag: "debounce",
+          type: "string",
+          description: "Debounce delay in milliseconds for watch mode",
+          placeholder: "<ms>",
+          default: "500",
+        },
       ],
     },
     {
@@ -140,6 +149,7 @@ function parseDaemonArgs(): DaemonOptions {
     databasePath,
     socketPath,
     watchMode: (values.watch as boolean) || false,
+    debounceMs: parsePositiveInt(values.debounce as string | undefined, 500, "debounce delay"),
     idleTimeoutMinutes: parsePositiveInt(
       values["daemon-timeout"] as string | undefined,
       5,
@@ -182,6 +192,7 @@ async function main() {
 
     // ServerRuntimeを作成（DuckDB接続、メトリクス、デグレード制御など）
     let runtime: ServerRuntime | null = null;
+    let watcher: IndexWatcher | null = null;
     try {
       const runtimeOptions: Parameters<typeof createServerRuntime>[0] = {
         repoRoot: options.repoRoot,
@@ -207,6 +218,20 @@ async function main() {
       await lifecycle.removePidFile();
       await lifecycle.releaseStartupLock();
       process.exit(1);
+    }
+
+    // ウォッチモードの設定（自動インクリメンタル再インデックス）
+    if (options.watchMode) {
+      lifecycle.setWatchModeActive(true);
+      await lifecycle.log("Watch mode enabled (daemon will not auto-stop)");
+      console.error("[Daemon] Watch mode enabled (daemon will not auto-stop)");
+
+      watcher = new IndexWatcher({
+        repoRoot: options.repoRoot,
+        databasePath: options.databasePath,
+        debounceMs: options.debounceMs,
+      });
+      await watcher.start();
     }
 
     // RPCハンドラを作成（既存のロジックを再利用）
@@ -236,17 +261,15 @@ async function main() {
     // スタートアップロックを解放（起動完了）
     await lifecycle.releaseStartupLock();
 
-    // ウォッチモードの設定
-    if (options.watchMode) {
-      lifecycle.setWatchModeActive(true);
-      await lifecycle.log("Watch mode enabled (daemon will not auto-stop)");
-      console.error("[Daemon] Watch mode enabled (daemon will not auto-stop)");
-      // TODO: IndexWatcherの統合
-    }
-
     // グレースフルシャットダウンの設定
     lifecycle.onShutdown(async () => {
       await lifecycle.log("Shutting down daemon...");
+      if (watcher) {
+        console.error("[Daemon] Stopping watch mode...");
+        await watcher.stop().catch(() => {
+          /* ignore */
+        });
+      }
       console.error("[Daemon] Closing server...");
       await closeServer();
       console.error("[Daemon] Closing runtime...");

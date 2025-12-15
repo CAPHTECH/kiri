@@ -20,6 +20,7 @@ export interface StartDaemonOptions {
   databasePath: string;
   socketPath: string;
   watchMode: boolean;
+  debounceMs?: number | undefined;
   allowDegrade: boolean;
   securityConfigPath?: string | undefined;
   securityLockPath?: string | undefined;
@@ -190,6 +191,7 @@ export async function startDaemon(options: StartDaemonOptions): Promise<void> {
     databasePath,
     socketPath,
     watchMode,
+    debounceMs,
     allowDegrade,
     securityConfigPath,
     securityLockPath,
@@ -207,6 +209,9 @@ export async function startDaemon(options: StartDaemonOptions): Promise<void> {
 
   if (watchMode) {
     args.push("--watch");
+    if (debounceMs !== undefined) {
+      args.push("--debounce", String(debounceMs));
+    }
   }
 
   if (allowDegrade) {

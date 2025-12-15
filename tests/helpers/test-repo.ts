@@ -19,6 +19,7 @@ export async function createTempRepo(files: Record<string, string>): Promise<Tem
   await execFileAsync("git", ["init"], { cwd: repoDir });
   await execFileAsync("git", ["config", "user.email", "test@example.com"], { cwd: repoDir });
   await execFileAsync("git", ["config", "user.name", "Kiri Tester"], { cwd: repoDir });
+  await execFileAsync("git", ["config", "commit.gpgsign", "false"], { cwd: repoDir });
 
   for (const [relativePath, content] of Object.entries(files)) {
     const fullPath = join(repoDir, relativePath);
