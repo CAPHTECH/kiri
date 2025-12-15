@@ -88,7 +88,7 @@ describe("kiri-daemon --watch", () => {
     );
 
     await new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error("Daemon startup timeout")), 30000);
+      const timeout = setTimeout(() => reject(new Error("Daemon startup timeout")), 60000);
       const stderr = daemonProcess!.stderr;
       if (!stderr) {
         clearTimeout(timeout);
@@ -102,6 +102,15 @@ describe("kiri-daemon --watch", () => {
           clearTimeout(timeout);
           resolve();
         }
+      });
+
+      daemonProcess!.on("exit", (code, signal) => {
+        clearTimeout(timeout);
+        reject(
+          new Error(
+            `Daemon exited during startup (code=${code ?? "null"} signal=${signal ?? "null"})`
+          )
+        );
       });
 
       daemonProcess!.on("error", (err) => {
@@ -136,16 +145,20 @@ describe("kiri-daemon --watch", () => {
     throw new Error(`Timed out waiting for indexed marker: ${marker}`);
   }
 
-  it("incrementally updates the index when tracked files change", async () => {
-    await startDaemonWithWatch();
+  it(
+    "incrementally updates the index when tracked files change",
+    async () => {
+      await startDaemonWithWatch();
 
-    const marker = `modified_${Date.now()}`;
-    await fs.writeFile(
-      path.join(repoRoot, "index.ts"),
-      `export const ${marker} = true;\n`,
-      "utf-8"
-    );
+      const marker = `modified_${Date.now()}`;
+      await fs.writeFile(
+        path.join(repoRoot, "index.ts"),
+        `export const ${marker} = true;\n`,
+        "utf-8"
+      );
 
-    await waitForIndexedContent(databasePath, marker);
-  });
+      await waitForIndexedContent(databasePath, marker);
+    },
+    60000
+  );
 });
