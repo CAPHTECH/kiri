@@ -7,11 +7,11 @@ import { join } from "node:path";
 
 import { describe, it, expect, afterEach } from "vitest";
 
-import { DuckDBClient } from "../../src/shared/duckdb.js";
-import { listResources, readResource } from "../../src/server/resources.js";
-import { createTempRepo } from "../helpers/test-repo.js";
 import { runIndexer } from "../../src/indexer/cli.js";
 import { resolveRepoId } from "../../src/server/handlers.js";
+import { listResources, readResource } from "../../src/server/resources.js";
+import { DuckDBClient } from "../../src/shared/duckdb.js";
+import { createTempRepo } from "../helpers/test-repo.js";
 
 interface CleanupTarget {
   dispose: () => Promise<void>;

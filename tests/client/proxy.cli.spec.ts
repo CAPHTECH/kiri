@@ -23,6 +23,7 @@ const cliTests = createCliTests({
     "--socket-path",
     "Watch Mode:",
     "--watch",
+    "--debounce",
     "Security:",
     "--allow-degrade",
     "--security-config",

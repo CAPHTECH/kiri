@@ -13,6 +13,7 @@ import * as readline from "readline";
 import packageJson from "../../package.json" with { type: "json" };
 import { defineCli, type CliSpec } from "../shared/cli/args.js";
 import { getSocketPath } from "../shared/utils/socket.js";
+import { parsePositiveInt } from "../shared/utils/validation.js";
 
 import { startDaemon, isDaemonRunning, stopDaemon } from "./start-daemon.js";
 
@@ -24,6 +25,7 @@ interface ProxyOptions {
   databasePath: string;
   socketPath: string;
   watchMode: boolean;
+  debounceMs: number;
   maxRetries: number;
   retryDelayMs: number;
   allowDegrade: boolean;
@@ -78,6 +80,13 @@ const PROXY_CLI_SPEC: CliSpec = {
           description: "Enable watch mode for automatic re-indexing",
           default: false,
         },
+        {
+          flag: "debounce",
+          type: "string",
+          description: "Debounce delay in milliseconds for watch mode",
+          placeholder: "<ms>",
+          default: "500",
+        },
       ],
     },
     {
@@ -130,6 +139,7 @@ function parseProxyArgs(): ProxyOptions {
     databasePath,
     socketPath,
     watchMode: (values.watch as boolean) || false,
+    debounceMs: parsePositiveInt(values.debounce as string | undefined, 500, "debounce delay"),
     maxRetries: 3,
     retryDelayMs: 1000,
     allowDegrade: (values["allow-degrade"] as boolean) || false,
@@ -297,6 +307,7 @@ async function main() {
         databasePath: options.databasePath,
         socketPath: options.socketPath,
         watchMode: options.watchMode,
+        debounceMs: options.debounceMs,
         allowDegrade: options.allowDegrade,
         securityConfigPath: options.securityConfigPath,
         securityLockPath: options.securityLockPath,
@@ -336,6 +347,7 @@ async function main() {
           databasePath: options.databasePath,
           socketPath: options.socketPath,
           watchMode: options.watchMode,
+          debounceMs: options.debounceMs,
           allowDegrade: options.allowDegrade,
           securityConfigPath: options.securityConfigPath,
           securityLockPath: options.securityLockPath,
