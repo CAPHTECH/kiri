@@ -73,4 +73,38 @@ describe("createDenylistFilter", () => {
 
     await repo.cleanup();
   });
+
+  it("throws error when denylist.yml exists but has no valid patterns", async () => {
+    // denylist.ymlが存在するが内容が無効な場合はエラーにする
+    // （設定ミスを静かに無視しないため）
+    const repo = await createTempRepo({
+      "src/index.ts": "console.log('ok');\n",
+    });
+
+    // 空のpatternsを持つ設定ファイル
+    const configPath = join(repo.path, "denylist.yml");
+    await writeFile(configPath, "patterns: []\n", "utf8");
+
+    expect(() => createDenylistFilter(repo.path, configPath)).toThrow(
+      /exists but contains no valid patterns/
+    );
+
+    await repo.cleanup();
+  });
+
+  it("throws error when denylist.yml exists but patterns key is missing", async () => {
+    // patternsキーが存在しない設定ファイル
+    const repo = await createTempRepo({
+      "src/index.ts": "console.log('ok');\n",
+    });
+
+    const configPath = join(repo.path, "denylist.yml");
+    await writeFile(configPath, "other_key: value\n", "utf8");
+
+    expect(() => createDenylistFilter(repo.path, configPath)).toThrow(
+      /exists but contains no valid patterns/
+    );
+
+    await repo.cleanup();
+  });
 });
