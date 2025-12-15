@@ -235,6 +235,10 @@ export class IndexWatcher {
       ignoredRelativePaths.add(`${relativeDbPath}.wal`);
       ignoredRelativePaths.add(`${relativeDbPath}.tmp`);
       ignoredRelativePaths.add(`${relativeDbPath}.lock`);
+      ignoredRelativePaths.add(`${relativeDbPath}.sock`);
+      ignoredRelativePaths.add(`${relativeDbPath}.daemon.log`);
+      ignoredRelativePaths.add(`${relativeDbPath}.daemon.pid`);
+      ignoredRelativePaths.add(`${relativeDbPath}.daemon.starting`);
     }
 
     const startOnce = async (usePolling: boolean): Promise<void> => {
