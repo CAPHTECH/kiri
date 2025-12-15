@@ -28,4 +28,49 @@ describe("createDenylistFilter", () => {
     expect(diff).toContain("dist/");
     await repo.cleanup();
   });
+
+  it("works with missing denylist.yml by using gitignore only", async () => {
+    // denylist.ymlは存在しないが、.gitignoreは存在するリポジトリ
+    const repo = await createTempRepo({
+      ".gitignore": "node_modules/\ndist/\n*.log\n",
+      "src/index.ts": "console.log('ok');\n",
+    });
+
+    // 存在しないパスを指定（エラーにならないことを確認）
+    const nonExistentConfig = join(repo.path, "nonexistent/denylist.yml");
+    const filter = createDenylistFilter(repo.path, nonExistentConfig);
+
+    // .gitignoreパターンのみが適用される
+    expect(filter.isDenied("node_modules/package/index.js")).toBe(true);
+    expect(filter.isDenied("dist/bundle.js")).toBe(true);
+    expect(filter.isDenied("debug.log")).toBe(true);
+    expect(filter.isDenied("src/index.ts")).toBe(false);
+
+    // diffはすべて.gitignore由来
+    const diff = filter.diff();
+    expect(diff).toContain("node_modules/");
+    expect(diff).toContain("dist/");
+
+    await repo.cleanup();
+  });
+
+  it("works with missing both denylist.yml and gitignore", async () => {
+    // 両方とも存在しないリポジトリ（最小構成）
+    const repo = await createTempRepo({
+      "src/index.ts": "console.log('ok');\n",
+    });
+
+    const nonExistentConfig = join(repo.path, "config/denylist.yml");
+    const filter = createDenylistFilter(repo.path, nonExistentConfig);
+
+    // フィルタは何もブロックしない
+    expect(filter.isDenied("any/path/file.ts")).toBe(false);
+    expect(filter.isDenied("secrets/token.txt")).toBe(false);
+    expect(filter.isDenied(".env")).toBe(false);
+
+    // diffは空
+    expect(filter.diff()).toHaveLength(0);
+
+    await repo.cleanup();
+  });
 });
