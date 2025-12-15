@@ -13,7 +13,77 @@ export interface DenylistFilter {
 }
 
 /**
- * Globパターンを正規表現に変換（ReDoS対策済み）
+ * Pattern classification type based on gitignore specification
+ * - anywhere: no slash or trailing slash only or starts with ** - matches at any depth
+ * - rooted: leading slash - matches only at root
+ * - relative: intermediate slash - matches relative path
+ */
+type PatternType = "anywhere" | "rooted" | "relative";
+
+interface PatternClassification {
+  type: PatternType;
+  hasTrailingSlash: boolean;
+  normalizedPattern: string;
+}
+
+/**
+ * Classify pattern based on gitignore specification
+ *
+ * Gitignore rules:
+ * - No slash: matches at any depth (e.g., node_modules, *.log)
+ * - Trailing slash only: matches directory at any depth (e.g., node_modules/)
+ * - Leading slash: matches only at root (e.g., /node_modules/)
+ * - Intermediate slash: matches relative path (e.g., src/generated/)
+ *
+ * @param pattern Glob pattern string
+ * @returns Pattern classification result
+ */
+function classifyPattern(pattern: string): PatternClassification {
+  const hasTrailingSlash = pattern.endsWith("/");
+  const trimmed = hasTrailingSlash ? pattern.slice(0, -1) : pattern;
+
+  // 先頭スラッシュあり: ルート相対
+  if (trimmed.startsWith("/")) {
+    return {
+      type: "rooted",
+      hasTrailingSlash,
+      normalizedPattern: trimmed.slice(1),
+    };
+  }
+
+  // Intermediate slash: relative path (gitignore spec)
+  // Patterns starting with **/ are treated as "anywhere" type
+  if (trimmed.includes("/") && !trimmed.startsWith("**/")) {
+    return {
+      type: "relative",
+      hasTrailingSlash,
+      normalizedPattern: trimmed,
+    };
+  }
+
+  // No slash, or starts with **/: matches at any depth
+  // For **/ prefix patterns, strip the **/ and let the "anywhere" prefix handle depth
+  const strippedPattern = trimmed.startsWith("**/") ? trimmed.slice(3) : trimmed;
+
+  return {
+    type: "anywhere",
+    hasTrailingSlash,
+    normalizedPattern: strippedPattern,
+  };
+}
+
+/**
+ * Globパターンを正規表現に変換（ReDoS対策済み、gitignore仕様準拠）
+ *
+ * gitignore仕様:
+ * - スラッシュなし/末尾スラッシュのみ: 任意の深さでマッチ
+ *   例: node_modules/ → ルートでもサブディレクトリでもマッチ
+ * - 先頭スラッシュあり: ルートのみマッチ
+ *   例: /node_modules/ → ルート直下のみ
+ * - 中間スラッシュあり: 相対パスとして解釈
+ *   例: src/generated/ → src/generated/ にのみマッチ
+ * - 末尾スラッシュ: ディレクトリのみマッチ（サブパスも含む）
+ *
  * @param pattern Globパターン文字列
  * @returns コンパイル済み正規表現
  * @throws パターンが長すぎる、または複雑すぎる場合
@@ -24,19 +94,38 @@ function toRegex(pattern: string): RegExp {
     throw new Error("Denylist pattern exceeds maximum length. Simplify the pattern.");
   }
 
-  const normalized = pattern.endsWith("/") ? pattern.slice(0, -1) : pattern;
-  const escaped = normalized
+  // 空パターンや過度に広いパターンを拒否
+  if (!pattern || pattern === "/" || pattern === "**" || pattern === "**/") {
+    throw new Error("Empty or overly broad denylist pattern. Provide a specific pattern.");
+  }
+
+  const { type, hasTrailingSlash, normalizedPattern } = classifyPattern(pattern);
+
+  // 正規表現用にエスケープ（**は後で処理するためプレースホルダに）
+  const escaped = normalizedPattern
     .replace(/[.+^${}()|[\]\\]/g, "\\$&")
     .replace(/\*\*/g, "::DOUBLESTAR::");
+
+  // Convert wildcards to regex
+  // IMPORTANT: Replace single * before doublestar placeholder
+  // to avoid .* having its * replaced with [^/]*
   const withWildcards = escaped
-    .replace(/::DOUBLESTAR::/g, ".*")
     .replace(/\*/g, "[^/]*")
-    .replace(/\?/g, ".");
-  const suffix = pattern.endsWith("/") ? "(?:/.*)?" : "";
+    .replace(/::DOUBLESTAR::/g, ".*")
+    .replace(/\?/g, "[^/]");
+
+  // ディレクトリの場合のサフィックス（サブパスにもマッチ）
+  const suffix = hasTrailingSlash ? "(?:/.*)?" : "";
+
+  // パターンタイプに応じてプレフィックス決定
+  // - anywhere: 任意の深さでマッチ（先頭または任意のディレクトリ境界から）
+  // - rooted/relative: ルートからのみマッチ
+  const prefix = type === "anywhere" ? "(?:^|.*/)" : "^";
+
+  const finalPattern = `${prefix}${withWildcards}${suffix}$`;
 
   // ReDoS対策: 最終パターンの複雑度チェック（ネストした量指定子）
   // [^/]* は bounded なので安全、.* のみを危険なパターンとしてカウント
-  const finalPattern = `^${withWildcards}${suffix}$`;
   // [^/]* を除去してから危険な量指定子をチェック
   const withoutBounded = finalPattern.replace(/\[\^\/\]\*/g, "");
   if (/(\.\*|\w\+|\{\d+,\}).*(\.\*|\w\+|\{\d+,\}).*(\.\*|\w\+|\{\d+,\})/.test(withoutBounded)) {
