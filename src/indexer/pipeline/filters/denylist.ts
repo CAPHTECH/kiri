@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { parseSimpleYaml } from "../../../shared/utils/simpleYaml.js";
@@ -55,16 +55,34 @@ function loadGitignore(repoRoot: string): string[] {
   }
 }
 
+/**
+ * denylist.ymlを読み込む
+ * ファイルが存在しない場合は空のパターン配列を返す（.gitignoreのみで動作可能にする）
+ * ファイルが存在するが内容が無効な場合はエラーを投げる（設定ミスを検出可能にする）
+ */
 export function loadDenylistConfig(configPath?: string): DenylistConfig {
   const path = resolve(configPath ?? "config/denylist.yml");
+
+  // ファイルが存在しない場合は空のパターンを返す
+  if (!existsSync(path)) {
+    return { patterns: [] };
+  }
+
   const content = readFileSync(path, "utf8");
   const parsed = parseSimpleYaml(content) as Record<string, unknown>;
   const patterns = Array.isArray(parsed.patterns)
     ? parsed.patterns.filter((value): value is string => typeof value === "string")
     : [];
+
+  // ファイルが存在する場合、有効なパターンが必要
+  // （設定ミスを静かに無視しないため）
   if (patterns.length === 0) {
-    throw new Error("config/denylist.yml must contain patterns array");
+    throw new Error(
+      `${path} exists but contains no valid patterns. ` +
+        "Add patterns array or remove the file to use .gitignore only."
+    );
   }
+
   return { patterns };
 }
 
