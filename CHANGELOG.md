@@ -7,15 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.21.1] - 2025-12-16
+## [0.21.2] - 2025-12-16
 
 ### Fixed
 
-- **Denylist filter gitignore compliance** (Issue #154): サブディレクトリの`node_modules/`が正しく除外されるように修正
-  - gitignore仕様に準拠し、スラッシュなしパターンが任意の深さでマッチするように
-  - `?`ワイルドカードがスラッシュにマッチしないように修正（gitignore仕様準拠）
-  - 空パターンや過度に広いパターン（`**`、`**/`、`/`）のバリデーションを追加
-- **graph_metrics retry logic**: INSERT/UPDATE文にリトライロジックを追加し、テスト時のDuckDBロック競合を解消
+- **Denylist filter gitignore compliance** (Issue #154): Fixed subdirectory `node_modules/` not being excluded
+  - Patterns without slashes now match at any depth per gitignore spec
+  - Fixed `?` wildcard to not match slashes (gitignore compliance)
+  - Added validation for empty or overly broad patterns (`**`, `**/`, `/`)
+- **graph_metrics retry logic**: Added retry logic to INSERT/UPDATE statements to resolve DuckDB lock conflicts during tests
+
+Note: v0.21.1 was unpublished from npm. This release contains the same fixes.
+
+## [0.21.1] - 2025-12-16 (unpublished)
+
+### Fixed
+
+- **Denylist filter gitignore compliance** (Issue #154): Fixed subdirectory `node_modules/` not being excluded
+  - Patterns without slashes now match at any depth per gitignore spec
+  - Fixed `?` wildcard to not match slashes (gitignore compliance)
+  - Added validation for empty or overly broad patterns (`**`, `**/`, `/`)
+- **graph_metrics retry logic**: Added retry logic to INSERT/UPDATE statements to resolve DuckDB lock conflicts during tests
 
 ## [0.21.0] - 2025-12-16
 
