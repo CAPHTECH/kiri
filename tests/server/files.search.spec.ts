@@ -677,5 +677,162 @@ category: dev
       expect(results.length).toBe(1);
       expect(results[0]!.path).toBe("docs/api/guide.md");
     });
+
+    it("normalizes path_prefix with leading slashes", async () => {
+      const repo = await createTempRepo({
+        "src/server/handler.ts": "export function handler() {}",
+        "src/client/app.ts": "const app = {};",
+      });
+      cleanupTargets.push({ dispose: repo.cleanup });
+
+      const dbDir = await mkdtemp(join(tmpdir(), "kiri-path-leading-"));
+      const dbPath = join(dbDir, "index.duckdb");
+      cleanupTargets.push({
+        dispose: async () => await rm(dbDir, { recursive: true, force: true }),
+      });
+
+      await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+      const db = await DuckDBClient.connect({ databasePath: dbPath });
+      cleanupTargets.push({ dispose: async () => await db.close() });
+
+      const repoId = await resolveRepoId(db, repo.path);
+      const tableAvailability = await checkTableAvailability(db);
+
+      const context: ServerContext = {
+        db,
+        repoId,
+        services: createServerServices(db),
+        tableAvailability,
+        warningManager: new WarningManager(),
+      };
+
+      // path_prefix with leading slash should be normalized
+      const results = await filesSearch(context, {
+        query: "handler",
+        path_prefix: "/src/server/",
+      });
+
+      expect(results.length).toBe(1);
+      expect(results[0]!.path).toBe("src/server/handler.ts");
+    });
+
+    it("normalizes path_prefix with backslashes", async () => {
+      const repo = await createTempRepo({
+        "src/server/handler.ts": "export function handler() {}",
+        "src/client/app.ts": "const app = {};",
+      });
+      cleanupTargets.push({ dispose: repo.cleanup });
+
+      const dbDir = await mkdtemp(join(tmpdir(), "kiri-path-backslash-"));
+      const dbPath = join(dbDir, "index.duckdb");
+      cleanupTargets.push({
+        dispose: async () => await rm(dbDir, { recursive: true, force: true }),
+      });
+
+      await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+      const db = await DuckDBClient.connect({ databasePath: dbPath });
+      cleanupTargets.push({ dispose: async () => await db.close() });
+
+      const repoId = await resolveRepoId(db, repo.path);
+      const tableAvailability = await checkTableAvailability(db);
+
+      const context: ServerContext = {
+        db,
+        repoId,
+        services: createServerServices(db),
+        tableAvailability,
+        warningManager: new WarningManager(),
+      };
+
+      // path_prefix with backslashes should be normalized
+      const results = await filesSearch(context, {
+        query: "handler",
+        path_prefix: "src\\server\\",
+      });
+
+      expect(results.length).toBe(1);
+      expect(results[0]!.path).toBe("src/server/handler.ts");
+    });
+
+    it("normalizes path_prefix starting with ./", async () => {
+      const repo = await createTempRepo({
+        "src/server/handler.ts": "export function handler() {}",
+        "src/client/app.ts": "const app = {};",
+      });
+      cleanupTargets.push({ dispose: repo.cleanup });
+
+      const dbDir = await mkdtemp(join(tmpdir(), "kiri-path-dotslash-"));
+      const dbPath = join(dbDir, "index.duckdb");
+      cleanupTargets.push({
+        dispose: async () => await rm(dbDir, { recursive: true, force: true }),
+      });
+
+      await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+      const db = await DuckDBClient.connect({ databasePath: dbPath });
+      cleanupTargets.push({ dispose: async () => await db.close() });
+
+      const repoId = await resolveRepoId(db, repo.path);
+      const tableAvailability = await checkTableAvailability(db);
+
+      const context: ServerContext = {
+        db,
+        repoId,
+        services: createServerServices(db),
+        tableAvailability,
+        warningManager: new WarningManager(),
+      };
+
+      // path_prefix starting with ./ should be normalized
+      const results = await filesSearch(context, {
+        query: "handler",
+        path_prefix: "./src/server/",
+      });
+
+      expect(results.length).toBe(1);
+      expect(results[0]!.path).toBe("src/server/handler.ts");
+    });
+
+    it("handles path_prefix that normalizes to empty string", async () => {
+      const repo = await createTempRepo({
+        "src/server/handler.ts": "export function handler() {}",
+        "src/client/app.ts": "const app = {};",
+      });
+      cleanupTargets.push({ dispose: repo.cleanup });
+
+      const dbDir = await mkdtemp(join(tmpdir(), "kiri-path-root-"));
+      const dbPath = join(dbDir, "index.duckdb");
+      cleanupTargets.push({
+        dispose: async () => await rm(dbDir, { recursive: true, force: true }),
+      });
+
+      await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+      const db = await DuckDBClient.connect({ databasePath: dbPath });
+      cleanupTargets.push({ dispose: async () => await db.close() });
+
+      const repoId = await resolveRepoId(db, repo.path);
+      const tableAvailability = await checkTableAvailability(db);
+
+      const context: ServerContext = {
+        db,
+        repoId,
+        services: createServerServices(db),
+        tableAvailability,
+        warningManager: new WarningManager(),
+      };
+
+      // path_prefix "/" normalizes to empty, so no path filter is applied
+      const results = await filesSearch(context, {
+        query: "handler",
+        path_prefix: "/",
+      });
+
+      // Should find handler in both files (no path filter)
+      expect(results.length).toBe(1);
+      expect(results[0]!.path).toBe("src/server/handler.ts");
+    });
   });
 });

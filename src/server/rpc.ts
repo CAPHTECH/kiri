@@ -506,12 +506,16 @@ function parseFilesSearchParams(input: unknown): FilesSearchParams {
   if (typeof record.lang === "string") params.lang = record.lang;
   if (typeof record.ext === "string") params.ext = record.ext;
 
-  // Validate path_prefix to prevent path traversal attacks
+  // Validate and normalize path_prefix to prevent path traversal attacks
   if (typeof record.path_prefix === "string") {
     if (record.path_prefix.includes("..")) {
       throw new Error("path_prefix cannot contain '..' (path traversal not allowed)");
     }
-    params.path_prefix = record.path_prefix;
+    // Normalize: convert backslashes, remove leading slashes (consistent with parseContextBundleParams)
+    const normalizedPrefix = path.posix
+      .normalize(record.path_prefix.replace(/\\/g, "/"))
+      .replace(/^\/+/, "");
+    params.path_prefix = normalizedPrefix;
   }
 
   // Validate limit is within acceptable range
