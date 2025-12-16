@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.0] - 2025-12-16
+
+### Changed
+
+- **BREAKING: `files_search` response format** - Changed response from array to object format
+  - Old: `[{path, matchLine, ...}, ...]`
+  - New: `{results: [{path, matchLine, ...}, ...]}`
+  - Reason: Claude Code MCP client requires `outputSchema.type` to be `"object"` (not `"array"`)
+  - If you directly consume `files_search` results, update your code to access `.results`
+
+### Fixed
+
+- **MCP tool registration with Claude Code** - Fixed issue where Claude Code failed to register KIRI tools due to `files_search` outputSchema having `type: "array"` at top level
+
 ## [0.21.2] - 2025-12-16
 
 ### Fixed

@@ -317,12 +317,13 @@ describe("MCP標準エンドポイント", () => {
     // Parse the JSON result and verify it contains search results
     const firstContent = content[0];
     if (!firstContent) throw new Error("Content array is empty");
-    const searchResults = JSON.parse(firstContent.text);
-    expect(Array.isArray(searchResults)).toBe(true);
-    expect(searchResults.length).toBeGreaterThan(0);
+    const searchResults = JSON.parse(firstContent.text) as { results: unknown[] };
+    expect(searchResults).toHaveProperty("results");
+    expect(Array.isArray(searchResults.results)).toBe(true);
+    expect(searchResults.results.length).toBeGreaterThan(0);
   });
 
-  it("degrade モードでも files.search が配列形式で結果を返す", async () => {
+  it("degrade モードでも files.search が結果を返す", async () => {
     const repo = await createTempRepo({
       "src/degrade.ts": "export const degradeHelper = () => 'fallback';\n",
       "README.md": "Fallback search content here.\n",
@@ -372,11 +373,12 @@ describe("MCP標準エンドポイント", () => {
     const firstContent = content[0];
     if (!firstContent) throw new Error("Content array is empty");
 
-    const searchResults = JSON.parse(firstContent.text);
-    expect(Array.isArray(searchResults)).toBe(true);
-    expect(searchResults.length).toBeGreaterThan(0);
+    const searchResults = JSON.parse(firstContent.text) as { results: Record<string, unknown>[] };
+    expect(searchResults).toHaveProperty("results");
+    expect(Array.isArray(searchResults.results)).toBe(true);
+    expect(searchResults.results.length).toBeGreaterThan(0);
 
-    const firstResult = searchResults[0] as Record<string, unknown>;
+    const firstResult = searchResults.results[0];
     expect(firstResult).toHaveProperty("path");
     expect(firstResult).toHaveProperty("preview");
     expect(firstResult).toHaveProperty("matchLine");
@@ -675,10 +677,13 @@ describe("MCP標準エンドポイント", () => {
       const firstContent = content[0];
       if (!firstContent) throw new Error("Content array is empty");
 
-      const searchResults = JSON.parse(firstContent.text) as Array<{ preview?: string }>;
-      expect(Array.isArray(searchResults)).toBe(true);
-      expect(searchResults.length).toBeGreaterThan(0);
-      expect(searchResults.every((item) => item.preview === undefined)).toBe(true);
+      const searchResults = JSON.parse(firstContent.text) as {
+        results: Array<{ preview?: string }>;
+      };
+      expect(searchResults).toHaveProperty("results");
+      expect(Array.isArray(searchResults.results)).toBe(true);
+      expect(searchResults.results.length).toBeGreaterThan(0);
+      expect(searchResults.results.every((item) => item.preview === undefined)).toBe(true);
     });
   });
 

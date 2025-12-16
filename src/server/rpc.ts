@@ -862,7 +862,7 @@ async function executeToolByName(
       if (degrade.current.active && allowDegrade) {
         // Use same output option logic as normal mode for consistency
         const includePreview = params.compact !== true;
-        return degrade.search(params.query, params.limit ?? 20).map((hit) => {
+        const results = degrade.search(params.query, params.limit ?? 20).map((hit) => {
           const result = {
             path: hit.path,
             matchLine: hit.matchLine,
@@ -872,9 +872,17 @@ async function executeToolByName(
           };
           return includePreview ? { ...result, preview: hit.preview } : result;
         });
+        // MCP outputSchema requires type="object" at top level
+        return { results };
       } else {
-        const handler = async () =>
-          await withSpan("files_search", async () => await filesSearch(context, params));
+        const handler = async () => {
+          const results = await withSpan(
+            "files_search",
+            async () => await filesSearch(context, params)
+          );
+          // MCP outputSchema requires type="object" at top level
+          return { results };
+        };
         return await degrade.withResource(handler, "duckdb:files_search");
       }
     }

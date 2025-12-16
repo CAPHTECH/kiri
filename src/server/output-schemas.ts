@@ -50,9 +50,14 @@ export const FilesSearchResultItemSchema = z.object({
 });
 
 /**
- * files_searchの戻り値スキーマ（配列）
+ * files_searchの戻り値スキーマ
+ *
+ * Note: MCP outputSchema requires type="object" at top level.
+ * Claude Code rejects tools with type="array" outputSchema.
  */
-export const FilesSearchResultSchema = z.array(FilesSearchResultItemSchema);
+export const FilesSearchResultSchema = z.object({
+  results: z.array(FilesSearchResultItemSchema).describe("検索結果の配列"),
+});
 
 // =============================================================================
 // snippets_get
