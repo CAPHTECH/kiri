@@ -647,6 +647,17 @@ export async function rebuildGlobalFTS(
 
     // FTS再構築が必要かチェック
     if (forceFTS || needsRebuild || !ftsExists) {
+      // Issue #158: FTS再構築前にWALをフラッシュ
+      // DuckDB FTS PRAGMAは実行時点のテーブルスナップショットを使用するため、
+      // 直前のトランザクションでコミットされたblobデータを確実に参照するには
+      // WALをメインDBにフラッシュする必要がある（防御的措置）
+      try {
+        await db.run("CHECKPOINT");
+      } catch {
+        // CHECKPOINTエラーはread-onlyモードなどで発生しうるが、
+        // FTS再構築自体は試行する価値がある
+      }
+
       // Fix #2: Wrap entire rebuild in transaction with status tracking
       // Fix #3: Capture dirty repos' generations to prevent lost updates
       const dirtyRepos = await db.all<{ id: number; fts_generation: number }>(
