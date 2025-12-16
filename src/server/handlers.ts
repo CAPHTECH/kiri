@@ -3329,8 +3329,11 @@ export async function filesSearch(
     hasTextQuery = cleanedQuery.length > 0;
   }
 
+  // Normalize path_prefix using shared utility for consistency with contextBundle
   const pathPrefix =
-    params.path_prefix && params.path_prefix.length > 0 ? params.path_prefix : undefined;
+    params.path_prefix && params.path_prefix.length > 0
+      ? normalizePathPrefix(params.path_prefix) || undefined
+      : undefined;
 
   const metadataValueSeed = metadataFilters
     .flatMap((filter) => filter.values)
@@ -3370,9 +3373,9 @@ export async function filesSearch(
         conditions.push("COALESCE(f.ext, '') = ?");
         values.push(params.ext);
       }
-      if (params.path_prefix) {
+      if (pathPrefix) {
         conditions.push("f.path LIKE ?");
-        values.push(`${params.path_prefix}%`);
+        values.push(`${pathPrefix}%`);
       }
       for (const clause of metadataClauses) {
         conditions.push(clause.sql);
@@ -3417,9 +3420,9 @@ export async function filesSearch(
         conditions.push("COALESCE(f.ext, '') = ?");
         values.push(params.ext);
       }
-      if (params.path_prefix) {
+      if (pathPrefix) {
         conditions.push("f.path LIKE ?");
-        values.push(`${params.path_prefix}%`);
+        values.push(`${pathPrefix}%`);
       }
       for (const clause of metadataClauses) {
         conditions.push(clause.sql);
