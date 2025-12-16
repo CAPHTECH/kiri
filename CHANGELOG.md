@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.2] - 2025-12-17
+
+### Fixed
+
+- **files_search path_prefix filter** (Issue #162): Fixed path_prefix parameter not filtering results correctly
+  - Added normalization for leading slashes (`/src/` → `src/`)
+  - Added normalization for backslashes (`src\server\` → `src/server/`)
+  - Added normalization for dot-slash prefix (`./src/` → `src/`)
+  - Uses shared `normalizePathPrefix` function for consistency with `context_bundle`
+
 ## [0.22.1] - 2025-12-16
 
 ### Fixed
