@@ -54,6 +54,20 @@ export async function gitLsFiles(repoRoot: string): Promise<string[]> {
   }
 }
 
+/**
+ * untracked files（.gitignoreで除外されないもの）を取得
+ * watchモードで追加された新規ファイルがreconcileDeletedFilesで
+ * 誤って削除されないようにするために使用
+ */
+export async function gitLsFilesUntracked(repoRoot: string): Promise<string[]> {
+  const { stdout } = await execFileAsync(
+    "git",
+    ["ls-files", "--others", "--exclude-standard", "-z"],
+    { cwd: repoRoot }
+  );
+  return parseGitPaths(stdout);
+}
+
 export async function getHeadCommit(repoRoot: string): Promise<string> {
   const { stdout } = await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: repoRoot });
   return stdout.trim();

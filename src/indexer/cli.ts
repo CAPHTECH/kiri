@@ -18,7 +18,13 @@ import {
 
 import { computeCochangeGraph, incrementalCochangeUpdate } from "./cochange.js";
 import { analyzeSource, buildFallbackSnippet } from "./codeintel.js";
-import { getDefaultBranch, getHeadCommit, gitLsFiles, gitDiffNameOnly } from "./git.js";
+import {
+  getDefaultBranch,
+  getHeadCommit,
+  gitLsFiles,
+  gitLsFilesUntracked,
+  gitDiffNameOnly,
+} from "./git.js";
 import { computeGraphMetrics, incrementalGraphUpdate } from "./graph-metrics.js";
 import { detectLanguage } from "./language.js";
 import { mergeRepoRecords } from "./migrations/repo-merger.js";
@@ -1467,28 +1473,38 @@ async function getExistingFileHashes(
  * This function detects files that exist in the database but no longer exist
  * in the git tree (deleted or renamed files) and removes their records.
  *
+ * Fix #157: untrackedファイルも考慮し、changedPathsに含まれるファイルは除外する
+ * - tracked + untrackedファイルを「現在のファイル」として扱う
+ * - excludePathsに含まれるファイルは削除対象から除外する
+ *
  * @param db - Database client
  * @param repoId - Repository ID
  * @param repoRoot - Repository root path
+ * @param excludePaths - Paths to exclude from deletion (e.g., changedPaths from watch mode)
  * @returns Array of deleted file paths
  */
 async function reconcileDeletedFiles(
   db: DuckDBClient,
   repoId: number,
-  repoRoot: string
+  repoRoot: string,
+  excludePaths?: Set<string>
 ): Promise<string[]> {
-  // Get all current files from git tree
-  const currentFiles = new Set(await gitLsFiles(repoRoot));
+  // Get all current files from git tree (tracked + untracked)
+  // Fix #157: untrackedファイルも考慮してwatchモードで追加されたファイルが誤って削除されないようにする
+  const trackedFiles = await gitLsFiles(repoRoot);
+  const untrackedFiles = await gitLsFilesUntracked(repoRoot);
+  const currentFiles = new Set([...trackedFiles, ...untrackedFiles]);
 
   // Get all indexed files from database
   const indexedFiles = await db.all<{ path: string }>("SELECT path FROM file WHERE repo_id = ?", [
     repoId,
   ]);
 
-  // Find files that are in DB but not in git tree (deleted/renamed)
+  // Find files that are in DB but not in current files (deleted/renamed)
+  // Fix #157: excludePathsに含まれるファイルは削除対象から除外する
   const deletedPaths: string[] = [];
   for (const row of indexedFiles) {
-    if (!currentFiles.has(row.path)) {
+    if (!currentFiles.has(row.path) && !excludePaths?.has(row.path)) {
       deletedPaths.push(row.path);
     }
   }
@@ -1645,7 +1661,9 @@ export async function runIndexer(options: IndexerOptions): Promise<void> {
       // Incremental mode: only reindex files in changedPaths (empty array means no-op)
       if (options.changedPaths) {
         // First, reconcile deleted files (handle renames/deletions)
-        const deletedPaths = await reconcileDeletedFiles(dbClient, repoId, repoRoot);
+        // Fix #157: changedPathsをexcludePathsとして渡し、watchで検出されたファイルが誤って削除されないようにする
+        const excludeSet = new Set(options.changedPaths);
+        const deletedPaths = await reconcileDeletedFiles(dbClient, repoId, repoRoot, excludeSet);
         if (deletedPaths.length > 0) {
           console.info(`Removed ${deletedPaths.length} deleted file(s) from index.`);
         }
