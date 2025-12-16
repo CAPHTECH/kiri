@@ -2,7 +2,7 @@
 
 > Intelligent code context extraction for LLMs via Model Context Protocol
 
-[![Version](https://img.shields.io/badge/version-0.22.0-blue.svg)](package.json)
+[![Version](https://img.shields.io/badge/version-0.22.1-blue.svg)](package.json)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.6-blue.svg)](https://www.typescriptlang.org/)
 [![MCP](https://img.shields.io/badge/MCP-Compatible-green.svg)](https://modelcontextprotocol.io/)
@@ -139,10 +139,10 @@ See [CHANGELOG.md](CHANGELOG.md) for release notes.
 
 **Recent highlights:**
 
+- **v0.22.1**: FTS index WAL visibility fix (Issue #158)
 - **v0.21.0**: Daemon Watch Mode (`--watch` flag for auto re-indexing)
 - **v0.20.2**: Build artifact fix (dist/ contained stale Japanese text)
 - **v0.20.1**: MCP Prompts translation fix (Japanese to English)
-- **v0.20.0**: MCP Prompts/Resources support
 
 ---
 
@@ -221,4 +221,4 @@ Built with [Model Context Protocol](https://modelcontextprotocol.io/), [DuckDB](
 
 ---
 
-**Status**: v0.22.0 (Beta) - Production-ready for MCP clients
+**Status**: v0.22.1 (Beta) - Production-ready for MCP clients

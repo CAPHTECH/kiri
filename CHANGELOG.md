@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.1] - 2025-12-16
+
+### Fixed
+
+- **FTS index WAL visibility** (Issue #158): Fixed incremental indexing not including new blobs in FTS search results
+  - Added defensive CHECKPOINT before FTS index rebuild to flush WAL data
+  - Ensures `match_bm25` can find newly added/modified content after incremental reindex
+
 ## [0.22.0] - 2025-12-16
 
 ### Changed
