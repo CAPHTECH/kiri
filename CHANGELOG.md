@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.3] - 2025-12-17
+
+### Fixed
+
+- **Denylist filter using node-ignore library** (Issue #154): Replaced custom regex with battle-tested `ignore` library for proper gitignore compliance
+  - Uses `ignore` (node-ignore) library version 7.0.5 for gitignore spec 2.22.1 compliance
+  - Fixed pattern priority: denylist.yml patterns now correctly override .gitignore (applied last, "last match wins")
+  - Added security validation: negation patterns (`!pattern`) are now forbidden in denylist.yml
+  - Improved test coverage for edge cases (?, \*\*, nested directories)
+
 ## [0.22.2] - 2025-12-17
 
 ### Fixed
