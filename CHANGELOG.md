@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.23.0] - 2025-12-18
+
+### Added
+
+- **`--full` option for kiri command** (Issue #161, PR #166): Run full reindex directly from kiri CLI
+  - Stops existing daemon if running
+  - Runs full reindex in child process (ensures DuckDB lock is released)
+  - Restarts daemon after indexing completes
+  - Supports custom `--socket-path` for daemon detection
+
+### Changed
+
+- `isDaemonRunning()` now accepts optional `customSocketPath` parameter
+
 ## [0.22.4] - 2025-12-17
 
 ### Fixed
