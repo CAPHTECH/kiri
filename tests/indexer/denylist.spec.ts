@@ -343,19 +343,42 @@ describe("エッジケース", () => {
     // ** パターンはエラー
     await writeFile(configPath, "patterns:\n  - '**'\n", "utf8");
     expect(() => createDenylistFilter(repo.path, configPath)).toThrow(
-      /Empty or overly broad denylist pattern/
+      /Overly broad denylist pattern/
     );
 
     // **/ パターンはエラー
     await writeFile(configPath, "patterns:\n  - '**/'\n", "utf8");
     expect(() => createDenylistFilter(repo.path, configPath)).toThrow(
-      /Empty or overly broad denylist pattern/
+      /Overly broad denylist pattern/
     );
 
     // / のみはエラー
     await writeFile(configPath, "patterns:\n  - '/'\n", "utf8");
     expect(() => createDenylistFilter(repo.path, configPath)).toThrow(
-      /Empty or overly broad denylist pattern/
+      /Overly broad denylist pattern/
+    );
+
+    await repo.cleanup();
+  });
+
+  it("throws for negation patterns in denylist (security)", async () => {
+    // 否定パターンはセキュリティ上の理由でdenylistでは禁止
+    const repo = await createTempRepo({
+      "src/index.ts": "console.log('ok');\n",
+    });
+
+    const configPath = join(repo.path, "denylist.yml");
+
+    // !pattern 形式はエラー
+    await writeFile(configPath, "patterns:\n  - '!important.txt'\n", "utf8");
+    expect(() => createDenylistFilter(repo.path, configPath)).toThrow(
+      /Negation pattern in denylist/
+    );
+
+    // !dir/ 形式もエラー
+    await writeFile(configPath, "patterns:\n  - '!keep/'\n", "utf8");
+    expect(() => createDenylistFilter(repo.path, configPath)).toThrow(
+      /Negation pattern in denylist/
     );
 
     await repo.cleanup();
