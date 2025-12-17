@@ -221,6 +221,7 @@ async function main() {
     }
 
     // ウォッチモードの設定（自動インクリメンタル再インデックス）
+    // 注意: watch modeの起動に失敗してもデーモン自体は継続起動する
     if (options.watchMode) {
       lifecycle.setWatchModeActive(true);
       await lifecycle.log("Watch mode enabled (daemon will not auto-stop)");
@@ -231,7 +232,23 @@ async function main() {
         databasePath: options.databasePath,
         debounceMs: options.debounceMs,
       });
-      await watcher.start();
+
+      try {
+        await watcher.start();
+      } catch (watchError) {
+        // Watch modeの起動失敗は致命的エラーではない
+        // デーモンは継続起動し、検索機能は正常に動作する
+        // 自動再インデックスのみが無効になる
+        const errorMessage = watchError instanceof Error ? watchError.message : String(watchError);
+        await lifecycle.log(`Watch mode failed to start: ${errorMessage}`);
+        console.error(`[Daemon] ⚠️  Watch mode disabled due to error: ${errorMessage}`);
+        console.error(`[Daemon] Daemon will continue without automatic re-indexing.`);
+        console.error(
+          `[Daemon] To fix: increase file descriptor limit (ulimit -n 65536) or reduce watched files.`
+        );
+        watcher = null;
+        lifecycle.setWatchModeActive(false);
+      }
     }
 
     // RPCハンドラを作成（既存のロジックを再利用）

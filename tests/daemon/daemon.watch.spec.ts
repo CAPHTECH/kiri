@@ -160,7 +160,11 @@ describe("kiri-daemon --watch", () => {
     while (Date.now() - startedAt < timeoutMs) {
       const fullOutput = daemonOutput.join("\n");
       // マーカーを含むファイル変更検知とインデックス完了の両方を確認
-      const hasMarker = fullOutput.includes(marker) || fullOutput.includes("File changes detected");
+      // @parcel/watcher uses different messages for normal changes vs changes during reindex
+      const hasMarker =
+        fullOutput.includes(marker) ||
+        fullOutput.includes("File changes detected") ||
+        fullOutput.includes("New changes detected during reindex");
       const isComplete = completePattern.test(fullOutput);
 
       if (hasMarker && isComplete) {
