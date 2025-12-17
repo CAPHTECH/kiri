@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.4] - 2025-12-17
+
+### Fixed
+
+- **EMFILE error on large repositories** (PR #165): Replaced chokidar with @parcel/watcher for file watching
+  - Uses OS-native APIs (FSEvents on macOS, inotify on Linux) instead of per-file watchers
+  - Resolves "too many open files" error when watch mode is enabled on repos with 3000+ files
+  - Added graceful degradation: daemon continues running even if watch mode fails to start
+
 ## [0.22.3] - 2025-12-17
 
 ### Fixed
