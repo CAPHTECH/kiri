@@ -6,9 +6,11 @@
  * Auto-starts daemon if not running, handles retries and fallback.
  */
 
+import { spawn } from "child_process";
 import * as net from "net";
 import * as path from "path";
 import * as readline from "readline";
+import { fileURLToPath } from "url";
 
 import packageJson from "../../package.json" with { type: "json" };
 import { defineCli, type CliSpec } from "../shared/cli/args.js";
@@ -16,6 +18,9 @@ import { getSocketPath } from "../shared/utils/socket.js";
 import { parsePositiveInt } from "../shared/utils/validation.js";
 
 import { startDaemon, isDaemonRunning, stopDaemon } from "./start-daemon.js";
+
+/** Delay after stopping daemon before starting new processes */
+const DAEMON_STOP_WAIT_MS = 1000;
 
 /**
  * プロキシ設定オプション
@@ -31,6 +36,23 @@ interface ProxyOptions {
   allowDegrade: boolean;
   securityConfigPath?: string | undefined;
   securityLockPath?: string | undefined;
+  fullIndex: boolean;
+}
+
+/**
+ * Build daemon startup options from proxy options
+ */
+function buildDaemonOptions(options: ProxyOptions) {
+  return {
+    repoRoot: options.repoRoot,
+    databasePath: options.databasePath,
+    socketPath: options.socketPath,
+    watchMode: options.watchMode,
+    debounceMs: options.debounceMs,
+    allowDegrade: options.allowDegrade,
+    securityConfigPath: options.securityConfigPath,
+    securityLockPath: options.securityLockPath,
+  };
 }
 
 /**
@@ -112,6 +134,18 @@ const PROXY_CLI_SPEC: CliSpec = {
         },
       ],
     },
+    {
+      title: "Indexing",
+      options: [
+        {
+          flag: "full",
+          type: "boolean",
+          description:
+            "Run full reindex and exit (stops daemon if running, restarts after indexing)",
+          default: false,
+        },
+      ],
+    },
   ],
   examples: [
     "kiri --repo /path/to/repo --db /path/to/index.duckdb",
@@ -145,6 +179,7 @@ function parseProxyArgs(): ProxyOptions {
     allowDegrade: (values["allow-degrade"] as boolean) || false,
     securityConfigPath: values["security-config"] as string | undefined,
     securityLockPath: values["security-lock"] as string | undefined,
+    fullIndex: (values.full as boolean) || false,
   };
 }
 
@@ -289,29 +324,93 @@ function bridgeStdioToSocket(socket: net.Socket): void {
 }
 
 /**
+ * Run indexer as a child process to ensure DuckDB file lock is released
+ */
+async function runIndexerProcess(repoRoot: string, databasePath: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    // Get the path to the indexer CLI
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = path.dirname(__filename);
+    const indexerPath = path.join(__dirname, "../indexer/cli.js");
+
+    const child = spawn(
+      process.execPath,
+      [indexerPath, "--repo", repoRoot, "--db", databasePath, "--full"],
+      {
+        stdio: ["ignore", "inherit", "inherit"],
+      }
+    );
+
+    child.on("error", (err) => {
+      reject(new Error(`Failed to spawn indexer: ${err.message}`));
+    });
+
+    child.on("exit", (code) => {
+      if (code === 0) {
+        resolve();
+      } else {
+        reject(new Error(`Indexer exited with code ${code}`));
+      }
+    });
+  });
+}
+
+/**
+ * Handle --full flag: stop daemon, run full index, restart daemon
+ *
+ * This function implements index-only mode where:
+ * 1. Existing daemon is stopped (if running)
+ * 2. Full reindex is performed (in child process to release DB lock)
+ * 3. Daemon is restarted
+ */
+async function handleFullIndex(options: ProxyOptions): Promise<void> {
+  try {
+    // Step 1: Stop existing daemon if running (use configured socket path)
+    const wasRunning = await isDaemonRunning(options.databasePath, options.socketPath);
+    if (wasRunning) {
+      console.error("[Full Index] Stopping existing daemon...");
+      await stopDaemon(options.databasePath);
+      await new Promise((resolve) => setTimeout(resolve, DAEMON_STOP_WAIT_MS));
+      console.error("[Full Index] Daemon stopped");
+    }
+
+    // Step 2: Run full index in child process (ensures DB lock is released on exit)
+    console.error(`[Full Index] Starting full reindex for ${options.repoRoot}...`);
+    await runIndexerProcess(options.repoRoot, options.databasePath);
+    console.error("[Full Index] Indexing complete");
+
+    // Step 3: Restart daemon
+    console.error("[Full Index] Starting daemon...");
+    await startDaemon(buildDaemonOptions(options));
+    console.error("[Full Index] Daemon started successfully");
+  } catch (err) {
+    const error = err as Error;
+    console.error(`[Full Index] Failed: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+/**
  * メイン関数：プロキシを起動
  */
 async function main() {
   const options = parseProxyArgs();
 
+  // Handle --full flag: index-only mode
+  if (options.fullIndex) {
+    await handleFullIndex(options);
+    return; // Exit without starting MCP proxy
+  }
+
   try {
-    // デーモンが実行中かチェック
-    const running = await isDaemonRunning(options.databasePath);
+    // デーモンが実行中かチェック (use configured socket path)
+    const running = await isDaemonRunning(options.databasePath, options.socketPath);
 
     if (!running) {
       console.error("[Proxy] Daemon not running. Starting daemon...");
 
       // デーモンを起動
-      await startDaemon({
-        repoRoot: options.repoRoot,
-        databasePath: options.databasePath,
-        socketPath: options.socketPath,
-        watchMode: options.watchMode,
-        debounceMs: options.debounceMs,
-        allowDegrade: options.allowDegrade,
-        securityConfigPath: options.securityConfigPath,
-        securityLockPath: options.securityLockPath,
-      });
+      await startDaemon(buildDaemonOptions(options));
 
       console.error("[Proxy] Daemon started successfully");
     }
@@ -339,19 +438,10 @@ async function main() {
         await stopDaemon(options.databasePath);
 
         // 少し待ってから新しいデーモンを起動
-        await new Promise((resolve) => setTimeout(resolve, 1000));
+        await new Promise((resolve) => setTimeout(resolve, DAEMON_STOP_WAIT_MS));
 
         // 新しいデーモンを起動
-        await startDaemon({
-          repoRoot: options.repoRoot,
-          databasePath: options.databasePath,
-          socketPath: options.socketPath,
-          watchMode: options.watchMode,
-          debounceMs: options.debounceMs,
-          allowDegrade: options.allowDegrade,
-          securityConfigPath: options.securityConfigPath,
-          securityLockPath: options.securityLockPath,
-        });
+        await startDaemon(buildDaemonOptions(options));
 
         console.error("[Proxy] Daemon restarted successfully, reconnecting...");
 

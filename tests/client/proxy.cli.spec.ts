@@ -27,6 +27,8 @@ const cliTests = createCliTests({
     "Security:",
     "--allow-degrade",
     "--security-config",
+    "Indexing:",
+    "--full",
   ],
 });
 
