@@ -2,13 +2,13 @@ import { realpathSync, mkdirSync } from "node:fs";
 import { resolve, relative, sep, dirname, isAbsolute } from "node:path";
 import { performance } from "node:perf_hooks";
 
-import { watch, type FSWatcher } from "chokidar";
+import watcher, { type AsyncSubscription, type Event } from "@parcel/watcher";
 
 import { acquireLock, releaseLock, getLockOwner, LockfileError } from "../shared/utils/lockfile.js";
 import { normalizeDbPath, normalizeRepoPath } from "../shared/utils/path.js";
 
 import { runIndexer } from "./cli.js";
-import { createDenylistFilter } from "./pipeline/filters/denylist.js";
+import { createDenylistFilter, type DenylistFilter } from "./pipeline/filters/denylist.js";
 
 /**
  * Configuration options for IndexWatcher.
@@ -46,6 +46,7 @@ export interface WatcherStatistics {
  * IndexWatcher monitors filesystem changes and triggers automatic reindexing.
  *
  * Features:
+ * - Uses @parcel/watcher for efficient native recursive watching (FSEvents on macOS, etc.)
  * - Debouncing: Aggregates rapid consecutive changes to minimize reindex operations
  * - Denylist Integration: Respects both denylist.yml and .gitignore patterns
  * - Lock Management: Prevents concurrent indexing using lock files
@@ -53,9 +54,10 @@ export interface WatcherStatistics {
  * - Statistics: Tracks reindex count, duration, and queue depth
  *
  * Implementation Note:
- * Uses incremental reindex (hash-based change detection) for performance.
- * Only files with changed content hashes are re-parsed and updated in the database.
- * This provides significant speedup for watch mode while maintaining consistency.
+ * Uses @parcel/watcher instead of chokidar for better performance and
+ * to avoid EMFILE (too many open files) errors on large repositories.
+ * @parcel/watcher uses native OS APIs (FSEvents, inotify, etc.) that
+ * efficiently watch entire directory trees without per-file descriptors.
  */
 export class IndexWatcher {
   private readonly options: {
@@ -66,7 +68,7 @@ export class IndexWatcher {
     signal?: AbortSignal;
   };
   private readonly rawRepoRoot: string;
-  private watcher: FSWatcher | null = null;
+  private subscription: AsyncSubscription | null = null;
   private reindexTimer: NodeJS.Timeout | null = null;
   private isReindexing = false;
   private reindexPromise: Promise<void> | null = null;
@@ -76,28 +78,16 @@ export class IndexWatcher {
   private readonly lockfilePath: string;
   private readonly realpathCache = new Map<string, string>();
   private isStopping = false; // Flag to prevent new reindexes during shutdown
-
-  private isResourceExhaustionError(error: unknown): boolean {
-    if (!error) {
-      return false;
-    }
-
-    const message = error instanceof Error ? error.message : String(error);
-    return /\b(EMFILE|ENOSPC)\b/.test(message);
-  }
-
-  private getWatcherModeLabel(usePolling: boolean): string {
-    return usePolling ? "polling" : "native";
-  }
+  private denylistFilter: DenylistFilter | null = null;
+  private ignoredRelativePaths = new Set<string>();
 
   constructor(options: IndexWatcherOptions) {
     this.rawRepoRoot = resolve(options.repoRoot);
     const repoRoot = normalizeRepoPath(this.rawRepoRoot);
     let databasePath: string;
 
-    // Fix #2: Ensure parent directory exists BEFORE normalization
+    // Ensure parent directory exists BEFORE normalization
     // This guarantees consistent path normalization on first and subsequent runs
-    // Using sync version because constructors can't be async
     try {
       const parentDir = dirname(resolve(options.databasePath));
       mkdirSync(parentDir, { recursive: true });
@@ -106,7 +96,6 @@ export class IndexWatcher {
     }
 
     // Critical: Use normalizeDbPath to ensure consistent path with cli.ts
-    // This prevents lock file and queue key mismatch
     databasePath = normalizeDbPath(options.databasePath);
 
     this.options = {
@@ -165,8 +154,6 @@ export class IndexWatcher {
   /**
    * Normalizes absolute file path to repository-relative path.
    *
-   * Fix #3: Proper cross-platform path handling to prevent denylist bypass on Windows.
-   *
    * Strategy:
    * - Use path.relative() instead of string replacement
    * - Normalize path separator to forward slash (git-compatible)
@@ -180,12 +167,7 @@ export class IndexWatcher {
   private normalizePathForRepo(absPath: string): string | null {
     const rel = relative(this.options.repoRoot, absPath);
 
-    // Fix #3: Security - Reject paths outside repository
-    // - Parent directory traversal: ".."
-    // - Absolute paths (Unix): starts with "/"
-    // - Absolute paths (Windows): starts with drive letter "C:" or "C:\"
-    // - UNC paths (Windows): starts with "\\" or "//"
-    // Note: Empty string is ALLOWED (represents repo root for chokidar directory watching)
+    // Security - Reject paths outside repository
     if (
       rel.startsWith("..") ||
       isAbsolute(rel) ||
@@ -196,172 +178,151 @@ export class IndexWatcher {
       return null;
     }
 
-    // Fix #3: Additional safety - Resolve symlinks once and cache the result
-    // This prevents bypass via junction points or symlinks pointing outside the repo
+    // Additional safety - Resolve symlinks once and cache the result
     const realAbsPath = this.getCachedRealPath(absPath);
     if (realAbsPath) {
-      const realRepoRoot = this.options.repoRoot; // Already normalized in constructor
+      const realRepoRoot = this.options.repoRoot;
       const realRel = relative(realRepoRoot, realAbsPath);
 
-      // Double-check the real path is still inside repo
       if (realRel.startsWith("..") || isAbsolute(realRel)) {
         return null;
       }
     }
 
-    // Allow empty string (repo root itself) for chokidar directory watching
     // Normalize to forward slash for cross-platform compatibility
-    // Windows uses backslash, but git and denylist rules expect forward slash
     return rel.split(sep).join("/");
+  }
+
+  /**
+   * Checks if a path should be ignored based on denylist and internal paths.
+   *
+   * @param relativePath - Repository-relative path (forward slashes)
+   * @returns true if the path should be ignored
+   */
+  private shouldIgnore(relativePath: string): boolean {
+    // Always ignore git internals
+    if (relativePath === ".git" || relativePath.startsWith(".git/")) {
+      return true;
+    }
+
+    // Ignore database-related files to prevent loops
+    if (this.ignoredRelativePaths.has(relativePath)) {
+      return true;
+    }
+
+    // Check denylist (includes .gitignore patterns)
+    if (this.denylistFilter && this.denylistFilter.isDenied(relativePath)) {
+      return true;
+    }
+
+    return false;
   }
 
   /**
    * Starts the file watcher and begins monitoring for changes.
    *
+   * Uses @parcel/watcher for efficient native recursive watching.
+   * This avoids EMFILE errors that occur with chokidar on large repositories.
+   *
    * @throws {Error} If the watcher is already running
    */
   async start(): Promise<void> {
-    if (this.watcher !== null) {
+    if (this.subscription !== null) {
       throw new Error("IndexWatcher is already running. Call stop() before starting again.");
     }
 
     // Load denylist patterns
-    const denylistFilter = createDenylistFilter(this.options.repoRoot, this.options.configPath);
+    this.denylistFilter = createDenylistFilter(this.options.repoRoot, this.options.configPath);
 
+    // Build ignore list for database files
     const relativeDbPath = this.normalizePathForRepo(this.options.databasePath);
-    const ignoredRelativePaths = new Set<string>();
+    this.ignoredRelativePaths.clear();
     if (relativeDbPath) {
-      ignoredRelativePaths.add(relativeDbPath);
-      ignoredRelativePaths.add(`${relativeDbPath}.wal`);
-      ignoredRelativePaths.add(`${relativeDbPath}.tmp`);
-      ignoredRelativePaths.add(`${relativeDbPath}.lock`);
-      ignoredRelativePaths.add(`${relativeDbPath}.sock`);
-      ignoredRelativePaths.add(`${relativeDbPath}.daemon.log`);
-      ignoredRelativePaths.add(`${relativeDbPath}.daemon.pid`);
-      ignoredRelativePaths.add(`${relativeDbPath}.daemon.starting`);
+      this.ignoredRelativePaths.add(relativeDbPath);
+      this.ignoredRelativePaths.add(`${relativeDbPath}.wal`);
+      this.ignoredRelativePaths.add(`${relativeDbPath}.tmp`);
+      this.ignoredRelativePaths.add(`${relativeDbPath}.lock`);
+      this.ignoredRelativePaths.add(`${relativeDbPath}.sock`);
+      this.ignoredRelativePaths.add(`${relativeDbPath}.daemon.log`);
+      this.ignoredRelativePaths.add(`${relativeDbPath}.daemon.pid`);
+      this.ignoredRelativePaths.add(`${relativeDbPath}.daemon.starting`);
     }
 
-    const startOnce = async (usePolling: boolean): Promise<void> => {
-      // Configure chokidar with denylist and editor-specific options
-      this.watcher = watch(this.options.repoRoot, {
-        persistent: true,
-        ignoreInitial: true, // Don't trigger on existing files
-        ignored: (path: string) => {
-          const relativePath = this.normalizePathForRepo(path);
-          // Reject paths outside repo or invalid paths (explicit null check, not falsy check)
-          if (relativePath === null) {
-            return true;
-          }
+    // Build ignore patterns for @parcel/watcher
+    // Note: @parcel/watcher's ignore option uses micromatch globs
+    const ignorePatterns: string[] = [
+      "**/.git/**",
+      "**/.git",
+      "**/node_modules/**", // Common pattern to reduce noise
+    ];
 
-          // Always ignore git internals (not indexable, and very noisy)
-          if (relativePath === ".git" || relativePath.startsWith(".git/")) {
-            return true;
-          }
-
-          // If the DB lives under the repo root (e.g., ".kiri/index.duckdb"), ignore it to prevent loops
-          if (ignoredRelativePaths.has(relativePath)) {
-            return true;
-          }
-
-          return denylistFilter.isDenied(relativePath);
-        },
-        // Editor-specific handling
-        awaitWriteFinish: {
-          stabilityThreshold: 200, // Wait 200ms for file to stabilize
-          pollInterval: 100,
-        },
-        // Performance tuning
-        usePolling,
-        // depth option omitted for no depth limit
-      });
-
-      // Return promise that resolves when watcher is fully initialized
-      return new Promise<void>((resolve, reject) => {
-        const watcher = this.watcher!;
-        let settled = false;
-        const settle = (cb: () => void) => {
-          if (settled) {
-            return;
-          }
-          settled = true;
-          cb();
-        };
-
-        const handleError = (error: unknown) => {
-          process.stderr.write(
-            `❌ File watcher error: ${error instanceof Error ? error.message : String(error)}\n`
-          );
-          if (this.watcher) {
-            void this.watcher.close().catch(() => {
-              /* ignore */
-            });
-            this.watcher = null;
-          }
-          if (settled && !this.isStopping && !usePolling && this.isResourceExhaustionError(error)) {
-            process.stderr.write(
-              `⚠️  Watch mode hit OS resource limits. Switching to polling mode...\n`
-            );
-            // フォールバック前に保留中の変更を保存
-            const pendingSnapshot = new Set(this.pendingFiles);
-            void startOnce(true)
-              .then(() => {
-                // フォールバック成功後に保留中の変更を復元
-                for (const path of pendingSnapshot) {
-                  this.pendingFiles.add(path);
-                }
-                if (pendingSnapshot.size > 0) {
-                  this.pendingReindex = true;
-                }
-              })
-              .catch((restartError) => {
-                process.stderr.write(
-                  `❌ Failed to restart watch mode (polling): ${restartError instanceof Error ? restartError.message : String(restartError)}\n`
-                );
-              });
-          }
-          settle(() => {
-            reject(
-              new Error(
-                `Failed to start watch mode (${this.getWatcherModeLabel(usePolling)}): ${error instanceof Error ? error.message : String(error)}`
-              )
-            );
-          });
-        };
-
-        // Register event handlers
-        watcher
-          .on("add", (path) => {
-            this.scheduleReindex("add", path);
-          })
-          .on("change", (path) => {
-            this.scheduleReindex("change", path);
-          })
-          .on("unlink", (path) => {
-            this.scheduleReindex("unlink", path);
-          })
-          .on("error", handleError)
-          .once("ready", () => {
-            process.stderr.write(
-              `👁️  Watch mode started (${this.getWatcherModeLabel(usePolling)}). Monitoring ${this.options.repoRoot} for changes...\n`
-            );
-            process.stderr.write(`   Debounce: ${this.options.debounceMs}ms\n`);
-            settle(resolve);
-          });
-      });
-    };
+    // Add database path patterns
+    if (relativeDbPath) {
+      const dbDir = dirname(relativeDbPath);
+      if (dbDir && dbDir !== ".") {
+        // Ignore the entire .kiri directory if db is in .kiri/
+        ignorePatterns.push(`**/${dbDir}/**`);
+      }
+    }
 
     try {
-      await startOnce(false);
-    } catch (error) {
-      if (!this.isResourceExhaustionError(error)) {
-        throw error;
-      }
+      // Subscribe to file changes using @parcel/watcher
+      // @parcel/watcher uses native OS APIs (FSEvents on macOS, inotify on Linux)
+      // which efficiently watch entire directory trees without per-file descriptors
+      this.subscription = await watcher.subscribe(
+        this.options.repoRoot,
+        (err: Error | null, events: Event[]) => {
+          if (err) {
+            process.stderr.write(`❌ File watcher error: ${err.message}\n`);
+            return;
+          }
+
+          // Process each event
+          for (const event of events) {
+            this.handleEvent(event);
+          }
+        },
+        {
+          ignore: ignorePatterns,
+        }
+      );
 
       process.stderr.write(
-        `⚠️  Watch mode failed to start due to resource limits. Falling back to polling mode...\n`
+        `👁️  Watch mode started (native). Monitoring ${this.options.repoRoot} for changes...\n`
       );
-      await startOnce(true);
+      process.stderr.write(`   Debounce: ${this.options.debounceMs}ms\n`);
+      process.stderr.write(`   Backend: @parcel/watcher (FSEvents/inotify)\n`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`Failed to start watch mode: ${message}`);
     }
+  }
+
+  /**
+   * Handles a single file system event from @parcel/watcher.
+   *
+   * @param event - The file system event containing type and path
+   */
+  private handleEvent(event: Event): void {
+    // Don't process events if stopping
+    if (this.isStopping) {
+      return;
+    }
+
+    const relativePath = this.normalizePathForRepo(event.path);
+
+    // Ignore paths outside repository or invalid
+    if (relativePath === null) {
+      return;
+    }
+
+    // Check if path should be ignored (denylist, .git, db files)
+    if (this.shouldIgnore(relativePath)) {
+      return;
+    }
+
+    // Schedule reindex for this file
+    this.scheduleReindex(event.type, event.path);
   }
 
   /**
@@ -369,7 +330,7 @@ export class IndexWatcher {
    *
    * Multiple rapid changes are aggregated into a single reindex operation.
    *
-   * @param event - Type of file event (add/change/unlink)
+   * @param event - Type of file event (create/update/delete)
    * @param path - Absolute path to the changed file
    */
   private scheduleReindex(event: string, path: string): void {
@@ -402,7 +363,7 @@ export class IndexWatcher {
 
       process.stderr.write(`\n📝 File changes detected: ${summary}\n`);
 
-      // Fix #3 & #4: Capture snapshot BEFORE clearing to prevent data loss and enable incremental indexing
+      // Capture snapshot BEFORE clearing to prevent data loss
       const changedPaths = Array.from(this.pendingFiles);
       this.pendingFiles.clear();
 
@@ -420,7 +381,7 @@ export class IndexWatcher {
    * If a reindex is already in progress, marks a pending flag to trigger
    * another reindex after the current one completes.
    *
-   * @param changedPaths - Array of file paths that changed (Fix #3 & #4: snapshot from scheduleReindex)
+   * @param changedPaths - Array of file paths that changed
    */
   private async executeReindex(changedPaths: string[]): Promise<void> {
     // Don't start reindex if watcher is stopping
@@ -431,7 +392,7 @@ export class IndexWatcher {
 
     // Check if already reindexing
     if (this.isReindexing) {
-      // Fix #6: Restore changedPaths back to pendingFiles to prevent data loss
+      // Restore changedPaths back to pendingFiles to prevent data loss
       for (const path of changedPaths) {
         this.pendingFiles.add(path);
       }
@@ -447,12 +408,9 @@ export class IndexWatcher {
     this.pendingReindex = false;
     this.stats.lastReindexStart = performance.now();
 
-    // Fix #3 & #4: Use changedPaths parameter (snapshot from scheduleReindex) instead of reading pendingFiles
-    // This prevents data loss on lock contention and enables true incremental indexing
-
     // Create and store the reindex promise for proper shutdown handling
     this.reindexPromise = (async () => {
-      // Fix #1: Track lock ownership to prevent releasing locks we don't own
+      // Track lock ownership to prevent releasing locks we don't own
       let lockAcquired = false;
 
       try {
@@ -465,14 +423,14 @@ export class IndexWatcher {
         // Acquire lock to prevent concurrent indexing
         try {
           acquireLock(this.lockfilePath);
-          lockAcquired = true; // Fix #1: Only set to true on successful acquisition
+          lockAcquired = true;
         } catch (error) {
           if (error instanceof LockfileError) {
-            // Fix #3: Restore changedPaths to pendingFiles to prevent data loss
+            // Restore changedPaths to pendingFiles to prevent data loss
             for (const path of changedPaths) {
               this.pendingFiles.add(path);
             }
-            this.pendingReindex = true; // Mark for retry when lock is available
+            this.pendingReindex = true;
 
             const ownerPid = error.ownerPid ?? getLockOwner(this.lockfilePath);
             const ownerInfo = ownerPid ? ` (PID: ${ownerPid})` : "";
@@ -493,7 +451,7 @@ export class IndexWatcher {
           databasePath: this.options.databasePath,
           full: false,
           changedPaths,
-          skipLocking: true, // Fix #1: Watcher already holds the lock
+          skipLocking: true, // Watcher already holds the lock
         });
 
         const duration = performance.now() - start;
@@ -511,12 +469,7 @@ export class IndexWatcher {
           );
         }
       } catch (error) {
-        // Fix #2: Restore changedPaths for ALL errors, not just LockfileError
-        // This prevents permanent data loss when reindex fails due to:
-        // - Database I/O errors
-        // - Parsing failures
-        // - Network timeouts
-        // - Any other transient errors
+        // Restore changedPaths for ALL errors to prevent data loss
         for (const path of changedPaths) {
           this.pendingFiles.add(path);
         }
@@ -529,7 +482,7 @@ export class IndexWatcher {
       } finally {
         this.isReindexing = false;
 
-        // Fix #1: Only release lock if we acquired it (prevents deleting other process's locks)
+        // Only release lock if we acquired it
         if (lockAcquired) {
           releaseLock(this.lockfilePath);
         }
@@ -542,14 +495,12 @@ export class IndexWatcher {
           this.reindexTimer = null;
         }
 
-        // Fix #7: If more changes occurred during reindex, trigger direct retry
+        // If more changes occurred during reindex, trigger direct retry
         if (this.pendingReindex && this.pendingFiles.size > 0) {
           process.stderr.write(
             `🔁 New changes detected during reindex. Scheduling another reindex...\n`
           );
 
-          // Direct retry without file system event dependency
-          // Don't clear pendingFiles here - let the timer callback handle it
           this.reindexTimer = setTimeout(() => {
             this.reindexTimer = null;
             const changedPaths = Array.from(this.pendingFiles);
@@ -567,10 +518,9 @@ export class IndexWatcher {
    * Stops the file watcher and cleans up resources.
    *
    * Waits for any ongoing reindex to complete before stopping.
-   * Uses the reindex promise to ensure proper synchronization.
    */
   async stop(): Promise<void> {
-    if (this.watcher === null) {
+    if (this.subscription === null) {
       return; // Already stopped
     }
 
@@ -585,15 +535,14 @@ export class IndexWatcher {
       this.reindexTimer = null;
     }
 
-    // Wait for ongoing reindex to complete using the promise
-    // This is more reliable than polling isReindexing flag
+    // Wait for ongoing reindex to complete
     if (this.reindexPromise !== null) {
       await this.reindexPromise;
     }
 
-    // Close watcher
-    await this.watcher.close();
-    this.watcher = null;
+    // Unsubscribe from @parcel/watcher
+    await this.subscription.unsubscribe();
+    this.subscription = null;
 
     // Print final statistics
     const uptime = Math.round((performance.now() - this.stats.watcherStartTime) / 1000);
@@ -605,8 +554,6 @@ export class IndexWatcher {
 
   /**
    * Returns current watcher statistics.
-   *
-   * Useful for monitoring and diagnostics.
    */
   getStatistics(): Readonly<WatcherStatistics> {
     return { ...this.stats };
@@ -616,6 +563,6 @@ export class IndexWatcher {
    * Checks if the watcher is currently running.
    */
   isRunning(): boolean {
-    return this.watcher !== null;
+    return this.subscription !== null;
   }
 }
