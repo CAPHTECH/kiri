@@ -31,10 +31,16 @@ export interface StartDaemonOptions {
  * デーモンが実行中かチェック
  *
  * PIDファイルの存在とプロセスの存在、ソケット接続可能性を確認
+ *
+ * @param databasePath - データベースパス（PIDファイルのパス導出に使用）
+ * @param customSocketPath - カスタムソケットパス（指定された場合はデフォルトを上書き）
  */
-export async function isDaemonRunning(databasePath: string): Promise<boolean> {
+export async function isDaemonRunning(
+  databasePath: string,
+  customSocketPath?: string
+): Promise<boolean> {
   const pidFilePath = `${databasePath}.daemon.pid`;
-  const socketPath = getSocketPath(databasePath);
+  const socketPath = customSocketPath ?? getSocketPath(databasePath);
 
   try {
     // PIDファイルが存在するかチェック

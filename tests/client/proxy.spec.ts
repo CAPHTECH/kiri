@@ -1,5 +1,6 @@
 /**
  * Tests for proxy client with automatic daemon restart on version mismatch
+ * and --full index mode
  */
 
 import * as fs from "fs/promises";
@@ -8,7 +9,7 @@ import * as path from "path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { stopDaemon } from "../../src/client/start-daemon.js";
+import { stopDaemon, isDaemonRunning } from "../../src/client/start-daemon.js";
 
 // proxy.ts は直接インポートできないため、start-daemon の stopDaemon をテストして
 // 自動再起動の基盤を確認する
@@ -53,6 +54,38 @@ describe("Proxy Daemon Restart", () => {
     it("handles missing PID file gracefully (already cleaned up)", async () => {
       // PIDファイルが存在しない場合もエラーにならないことを確認
       await expect(stopDaemon(databasePath)).resolves.not.toThrow();
+    });
+  });
+
+  describe("--full mode prerequisites", () => {
+    it("isDaemonRunning returns false when no daemon is running", async () => {
+      // デーモンが実行されていない場合はfalseを返す
+      const running = await isDaemonRunning(databasePath);
+      expect(running).toBe(false);
+    });
+
+    it("isDaemonRunning returns false with stale PID file", async () => {
+      const pidFilePath = `${databasePath}.daemon.pid`;
+      // 存在しないPIDを書き込む
+      const stalePid = 999999;
+      await fs.writeFile(pidFilePath, String(stalePid), "utf-8");
+
+      // 古いPIDファイルがあってもfalseを返す（プロセスが存在しないため）
+      const running = await isDaemonRunning(databasePath);
+      expect(running).toBe(false);
+    });
+
+    it("stopDaemon followed by isDaemonRunning returns false", async () => {
+      const pidFilePath = `${databasePath}.daemon.pid`;
+      const stalePid = 999999;
+      await fs.writeFile(pidFilePath, String(stalePid), "utf-8");
+
+      // stopDaemonでクリーンアップ
+      await stopDaemon(databasePath);
+
+      // isDaemonRunningはfalseを返す
+      const running = await isDaemonRunning(databasePath);
+      expect(running).toBe(false);
     });
   });
 });
