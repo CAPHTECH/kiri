@@ -1,5 +1,0 @@
-{
-  "id": "file-rust-analyzer",
-  "type": "Artifact",
-  "name": "src/indexer/codeintel/rust/analyzer.ts"
-}
