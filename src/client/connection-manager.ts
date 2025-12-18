@@ -124,6 +124,8 @@ export class ConnectionManager extends EventEmitter {
   private readonly securityLockPath: string | undefined;
   private isReconnecting = false;
   private isClosed = false;
+  /** 再接続待機中のintervalをトラッキング（close時にクリーンアップ） */
+  private pendingWaitIntervals: Set<NodeJS.Timeout> = new Set();
 
   constructor(options: ConnectionManagerOptions) {
     super();
@@ -215,11 +217,29 @@ export class ConnectionManager extends EventEmitter {
     }
 
     if (this.isReconnecting) {
-      // 既に再接続中の場合は現在のソケットを返す（または待機）
+      // 既に再接続中の場合は完了を待機（タイムアウト付き）
+      const waitTimeoutMs = this.maxReconnectAttempts * this.reconnectMaxDelayMs + 10000;
       return new Promise((resolve, reject) => {
+        const startTime = Date.now();
         const checkInterval = setInterval(() => {
+          // タイムアウトチェック
+          if (Date.now() - startTime > waitTimeoutMs) {
+            clearInterval(checkInterval);
+            this.pendingWaitIntervals.delete(checkInterval);
+            reject(new Error("Reconnection wait timeout"));
+            return;
+          }
+          // close()が呼ばれた場合
+          if (this.isClosed) {
+            clearInterval(checkInterval);
+            this.pendingWaitIntervals.delete(checkInterval);
+            reject(new Error("ConnectionManager is closed"));
+            return;
+          }
+          // 再接続完了チェック
           if (!this.isReconnecting) {
             clearInterval(checkInterval);
+            this.pendingWaitIntervals.delete(checkInterval);
             if (this.socket && this.state.status === "connected") {
               resolve(this.socket);
             } else {
@@ -227,6 +247,7 @@ export class ConnectionManager extends EventEmitter {
             }
           }
         }, 100);
+        this.pendingWaitIntervals.add(checkInterval);
       });
     }
 
@@ -323,17 +344,15 @@ export class ConnectionManager extends EventEmitter {
 
   /**
    * データを送信（キュー経由）
+   *
+   * 接続中の場合は即座に送信。未接続の場合はキューに追加し、
+   * 再接続後にreplayAll()で自動送信される。
    */
   async send(data: string): Promise<void> {
-    // リクエストをキューに追加
-    this.requestQueue.enqueue(data);
-
-    if (!this.socket || this.state.status !== "connected") {
-      // 接続されていない場合は再接続を試みる
-      await this.reconnect();
-    }
-
-    if (this.socket) {
+    // 接続中の場合は即座に送信
+    if (this.socket && this.state.status === "connected") {
+      // キューに追加（レスポンス受信時にdequeueされる）
+      this.requestQueue.enqueue(data);
       return new Promise((resolve, reject) => {
         this.socket!.write(data + "\n", (err) => {
           if (err) {
@@ -344,6 +363,12 @@ export class ConnectionManager extends EventEmitter {
         });
       });
     }
+
+    // 未接続の場合はキューに追加して再接続
+    // 再接続成功時にreplayAll()で自動送信されるため、ここでは送信しない
+    this.requestQueue.enqueue(data);
+    await this.reconnect();
+    // replayAll()で既に送信済みなので、追加の送信は不要
   }
 
   /**
@@ -352,6 +377,12 @@ export class ConnectionManager extends EventEmitter {
   close(): void {
     this.isClosed = true;
     this.requestQueue.clear();
+
+    // 待機中のintervalをすべてクリア
+    for (const interval of this.pendingWaitIntervals) {
+      clearInterval(interval);
+    }
+    this.pendingWaitIntervals.clear();
 
     if (this.socket) {
       this.socket.removeAllListeners();

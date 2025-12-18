@@ -374,24 +374,15 @@ function createReconnectingBridge(connectionManager: ConnectionManager): void {
   });
 
   // socket → stdout のイベントリスナーを設定
+  // Note: dequeue処理はConnectionManager.setupSocketListeners()で行われる
   connectionManager.on("data", (data) => {
-    // 改行区切りでレスポンスを処理
+    // 改行区切りでレスポンスを処理し、stdoutへ出力
     const lines = data
       .toString()
       .split("\n")
       .filter((line) => line.trim());
     for (const line of lines) {
       console.log(line);
-
-      // レスポンスを受信したらキューから削除
-      try {
-        const response = JSON.parse(line);
-        if (response.id !== undefined && response.id !== null) {
-          requestQueue.dequeue(response.id);
-        }
-      } catch {
-        // JSONパースエラーは無視
-      }
     }
   });
 
