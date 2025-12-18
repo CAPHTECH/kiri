@@ -179,8 +179,8 @@ export class ConnectionManager extends EventEmitter {
 
     this.state.status = "connecting";
 
-    // デーモンが起動していない場合は起動
-    const running = await isDaemonRunning(this.databasePath);
+    // デーモンが起動していない場合は起動（カスタムソケットパスを考慮）
+    const running = await isDaemonRunning(this.databasePath, this.socketPath);
     if (!running) {
       console.error("[ConnectionManager] Daemon not running. Starting daemon...");
       await startDaemon({
@@ -275,8 +275,8 @@ export class ConnectionManager extends EventEmitter {
         // 遅延
         await new Promise((resolve) => setTimeout(resolve, delayMs));
 
-        // デーモンが起動していない場合は起動を試みる
-        const running = await isDaemonRunning(this.databasePath);
+        // デーモンが起動していない場合は起動を試みる（カスタムソケットパスを考慮）
+        const running = await isDaemonRunning(this.databasePath, this.socketPath);
         if (!running) {
           console.error("[ConnectionManager] Daemon not running. Attempting to start...");
           try {
