@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.0] - 2025-12-19
+
+### Added
+
+- **MCP接続の自動再接続機能** (Issue #156, PR #167): デーモン再起動時に自動再接続
+  - `ConnectionManager`: ソケット接続の確立・維持・再接続を管理
+  - `RequestQueue`: 再接続中のリクエストをバッファリングし、再接続後に自動再送信
+  - 指数バックオフ付きリトライ戦略（初期500ms、最大30秒、ジッター100ms）
+  - `createReconnectingBridge()`: 自動再接続対応のブリッジ関数を提供
+
 ## [0.23.0] - 2025-12-18
 
 ### Added
