@@ -4,6 +4,9 @@
  *
  * Transparently bridges stdio (MCP client) ↔ Unix socket (daemon).
  * Auto-starts daemon if not running, handles retries and fallback.
+ * Supports automatic reconnection on daemon restart.
+ *
+ * @see Issue #156: MCP接続がデーモン再起動時に切断され、自動再接続しない問題への対応
  */
 
 import { spawn } from "child_process";
@@ -17,6 +20,7 @@ import { defineCli, type CliSpec } from "../shared/cli/args.js";
 import { getSocketPath } from "../shared/utils/socket.js";
 import { parsePositiveInt } from "../shared/utils/validation.js";
 
+import { ConnectionManager, isRetriableError } from "./connection-manager.js";
 import { startDaemon, isDaemonRunning, stopDaemon } from "./start-daemon.js";
 
 /** Delay after stopping daemon before starting new processes */
@@ -37,6 +41,12 @@ interface ProxyOptions {
   securityConfigPath?: string | undefined;
   securityLockPath?: string | undefined;
   fullIndex: boolean;
+  /** 最大再接続試行回数（デフォルト: 10） */
+  maxReconnectAttempts: number;
+  /** 初期再接続遅延（ミリ秒、デフォルト: 500） */
+  reconnectInitialDelayMs: number;
+  /** 最大再接続遅延（ミリ秒、デフォルト: 30000） */
+  reconnectMaxDelayMs: number;
 }
 
 /**
@@ -146,6 +156,32 @@ const PROXY_CLI_SPEC: CliSpec = {
         },
       ],
     },
+    {
+      title: "Reconnection",
+      options: [
+        {
+          flag: "max-reconnect-attempts",
+          type: "string",
+          description: "Maximum number of reconnection attempts (default: 10)",
+          placeholder: "<count>",
+          default: "10",
+        },
+        {
+          flag: "reconnect-delay",
+          type: "string",
+          description: "Initial reconnection delay in milliseconds (default: 500)",
+          placeholder: "<ms>",
+          default: "500",
+        },
+        {
+          flag: "reconnect-max-delay",
+          type: "string",
+          description: "Maximum reconnection delay in milliseconds (default: 30000)",
+          placeholder: "<ms>",
+          default: "30000",
+        },
+      ],
+    },
   ],
   examples: [
     "kiri --repo /path/to/repo --db /path/to/index.duckdb",
@@ -180,6 +216,21 @@ function parseProxyArgs(): ProxyOptions {
     securityConfigPath: values["security-config"] as string | undefined,
     securityLockPath: values["security-lock"] as string | undefined,
     fullIndex: (values.full as boolean) || false,
+    maxReconnectAttempts: parsePositiveInt(
+      values["max-reconnect-attempts"] as string | undefined,
+      10,
+      "max reconnect attempts"
+    ),
+    reconnectInitialDelayMs: parsePositiveInt(
+      values["reconnect-delay"] as string | undefined,
+      500,
+      "reconnect delay"
+    ),
+    reconnectMaxDelayMs: parsePositiveInt(
+      values["reconnect-max-delay"] as string | undefined,
+      30000,
+      "reconnect max delay"
+    ),
   };
 }
 
@@ -250,7 +301,7 @@ async function checkDaemonVersion(socket: net.Socket): Promise<void> {
 /**
  * デーモンに接続を試みる（リトライロジック付き）
  */
-async function connectToDaemon(
+async function _connectToDaemon(
   socketPath: string,
   maxRetries: number,
   retryDelayMs: number
@@ -281,13 +332,104 @@ async function connectToDaemon(
     }
   }
 
-  throw new Error("Unexpected error in connectToDaemon");
+  throw new Error("Unexpected error in _connectToDaemon");
 }
 
 /**
- * Stdio ↔ Socket ブリッジを確立
+ * Stdio ↔ Socket ブリッジを確立（再接続対応版）
+ *
+ * ConnectionManagerを使用して、デーモン再起動時も自動的に再接続を試みる。
+ * 再接続中のリクエストはRequestQueueでバッファリングされ、再接続後に再送信される。
+ *
+ * @see Issue #156
  */
-function bridgeStdioToSocket(socket: net.Socket): void {
+function createReconnectingBridge(connectionManager: ConnectionManager): void {
+  const requestQueue = connectionManager.getRequestQueue();
+
+  // stdin → socket
+  const stdinReader = readline.createInterface({
+    input: process.stdin,
+    crlfDelay: Infinity,
+  });
+
+  stdinReader.on("line", async (line) => {
+    // リクエストをキューに追加
+    requestQueue.enqueue(line);
+
+    const socket = connectionManager.getSocket();
+    if (socket && connectionManager.getState().status === "connected") {
+      try {
+        socket.write(line + "\n");
+      } catch (err) {
+        console.error(`[Proxy] Write error: ${(err as Error).message}`);
+        // 書き込みエラーは無視（再接続時に再送信される）
+      }
+    }
+    // 接続されていない場合、リクエストはキューに保持され、再接続後に再送信される
+  });
+
+  stdinReader.on("close", () => {
+    connectionManager.close();
+    process.exit(0);
+  });
+
+  // socket → stdout のイベントリスナーを設定
+  connectionManager.on("data", (data) => {
+    // 改行区切りでレスポンスを処理
+    const lines = data
+      .toString()
+      .split("\n")
+      .filter((line) => line.trim());
+    for (const line of lines) {
+      console.log(line);
+
+      // レスポンスを受信したらキューから削除
+      try {
+        const response = JSON.parse(line);
+        if (response.id !== undefined && response.id !== null) {
+          requestQueue.dequeue(response.id);
+        }
+      } catch {
+        // JSONパースエラーは無視
+      }
+    }
+  });
+
+  // 再接続イベントのログ出力
+  connectionManager.on("reconnecting", (attempt, maxAttempts, delayMs) => {
+    console.error(
+      `[Proxy] Reconnection attempt ${attempt}/${maxAttempts} (delay: ${Math.round(delayMs)}ms)`
+    );
+  });
+
+  connectionManager.on("reconnected", () => {
+    console.error("[Proxy] Reconnected to daemon successfully");
+  });
+
+  connectionManager.on("disconnected", (reason) => {
+    console.error(`[Proxy] Connection lost: ${reason}. Attempting reconnection...`);
+  });
+
+  connectionManager.on("maxRetriesExceeded", () => {
+    console.error("[Proxy] Max reconnection attempts exceeded. Exiting.");
+    process.exit(1);
+  });
+
+  connectionManager.on("error", (err) => {
+    if (!isRetriableError(err)) {
+      console.error(`[Proxy] Fatal socket error: ${err.message}`);
+      process.exit(1);
+    }
+    // 再接続可能なエラーはConnectionManagerが自動的に処理
+  });
+}
+
+/**
+ * Stdio ↔ Socket ブリッジを確立（レガシー版、後方互換性のために残す）
+ *
+ * @deprecated createReconnectingBridgeを使用してください
+ */
+function _bridgeStdioToSocket(socket: net.Socket): void {
   // stdin → socket
   const stdinReader = readline.createInterface({
     input: process.stdin,
@@ -392,6 +534,10 @@ async function handleFullIndex(options: ProxyOptions): Promise<void> {
 
 /**
  * メイン関数：プロキシを起動
+ *
+ * ConnectionManagerを使用して、デーモン再起動時も自動的に再接続を試みる。
+ *
+ * @see Issue #156
  */
 async function main() {
   const options = parseProxyArgs();
@@ -403,24 +549,23 @@ async function main() {
   }
 
   try {
-    // デーモンが実行中かチェック (use configured socket path)
-    const running = await isDaemonRunning(options.databasePath, options.socketPath);
+    // ConnectionManagerを作成
+    const connectionManager = new ConnectionManager({
+      socketPath: options.socketPath,
+      databasePath: options.databasePath,
+      repoRoot: options.repoRoot,
+      maxReconnectAttempts: options.maxReconnectAttempts,
+      reconnectInitialDelayMs: options.reconnectInitialDelayMs,
+      reconnectMaxDelayMs: options.reconnectMaxDelayMs,
+      watchMode: options.watchMode,
+      debounceMs: options.debounceMs,
+      allowDegrade: options.allowDegrade,
+      securityConfigPath: options.securityConfigPath,
+      securityLockPath: options.securityLockPath,
+    });
 
-    if (!running) {
-      console.error("[Proxy] Daemon not running. Starting daemon...");
-
-      // デーモンを起動
-      await startDaemon(buildDaemonOptions(options));
-
-      console.error("[Proxy] Daemon started successfully");
-    }
-
-    // デーモンに接続
-    const socket = await connectToDaemon(
-      options.socketPath,
-      options.maxRetries,
-      options.retryDelayMs
-    );
+    // 初回接続
+    const socket = await connectionManager.connect();
 
     // バージョン互換性をチェック
     try {
@@ -432,7 +577,7 @@ async function main() {
         console.error(`[Proxy] ${versionErr.message}`);
         console.error("[Proxy] Automatically restarting daemon with current version...");
 
-        socket.destroy();
+        connectionManager.close();
 
         // 古いデーモンを停止
         await stopDaemon(options.databasePath);
@@ -440,34 +585,45 @@ async function main() {
         // 少し待ってから新しいデーモンを起動
         await new Promise((resolve) => setTimeout(resolve, DAEMON_STOP_WAIT_MS));
 
-        // 新しいデーモンを起動
-        await startDaemon(buildDaemonOptions(options));
+        // 新しいConnectionManagerを作成して再接続
+        const newConnectionManager = new ConnectionManager({
+          socketPath: options.socketPath,
+          databasePath: options.databasePath,
+          repoRoot: options.repoRoot,
+          maxReconnectAttempts: options.maxReconnectAttempts,
+          reconnectInitialDelayMs: options.reconnectInitialDelayMs,
+          reconnectMaxDelayMs: options.reconnectMaxDelayMs,
+          watchMode: options.watchMode,
+          debounceMs: options.debounceMs,
+          allowDegrade: options.allowDegrade,
+          securityConfigPath: options.securityConfigPath,
+          securityLockPath: options.securityLockPath,
+        });
+
+        const newSocket = await newConnectionManager.connect();
 
         console.error("[Proxy] Daemon restarted successfully, reconnecting...");
-
-        // 再接続を試みる
-        const newSocket = await connectToDaemon(
-          options.socketPath,
-          options.maxRetries,
-          options.retryDelayMs
-        );
 
         // 再度バージョンチェック
         await checkDaemonVersion(newSocket);
 
-        console.error("[Proxy] Connected to daemon. Bridging stdio ↔ socket...");
+        console.error(
+          "[Proxy] Connected to daemon. Bridging stdio ↔ socket (with reconnection support)..."
+        );
 
-        // Stdio ↔ Socket ブリッジを確立
-        bridgeStdioToSocket(newSocket);
+        // Stdio ↔ Socket ブリッジを確立（再接続対応版）
+        createReconnectingBridge(newConnectionManager);
         return;
       }
       throw versionError;
     }
 
-    console.error("[Proxy] Connected to daemon. Bridging stdio ↔ socket...");
+    console.error(
+      "[Proxy] Connected to daemon. Bridging stdio ↔ socket (with reconnection support)..."
+    );
 
-    // Stdio ↔ Socket ブリッジを確立
-    bridgeStdioToSocket(socket);
+    // Stdio ↔ Socket ブリッジを確立（再接続対応版）
+    createReconnectingBridge(connectionManager);
   } catch (err) {
     const error = err as Error;
     console.error(`[Proxy] Failed to start proxy: ${error.message}`);
