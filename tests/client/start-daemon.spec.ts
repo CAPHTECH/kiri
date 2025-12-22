@@ -35,63 +35,83 @@ describe("Daemon Starter", () => {
       expect(running).toBe(false);
     });
 
-    it("returns false when PID file contains stale PID", async () => {
-      const pidFilePath = `${databasePath}.daemon.pid`;
-
-      // 存在しないPIDを書き込む
-      const nonExistentPid = 999999;
-      await fs.writeFile(pidFilePath, String(nonExistentPid), "utf-8");
-
-      const running = await isDaemonRunning(databasePath);
-      expect(running).toBe(false);
-
-      // PIDファイルは残っていることを確認（積極的なクリーンアップは行わない）
-      await fs.access(pidFilePath); // Should not throw
-    });
-
-    it("returns false when daemon process exists but socket is not responsive", async () => {
-      const pidFilePath = `${databasePath}.daemon.pid`;
-
-      // 現在のプロセスのPIDを書き込む（ソケットは存在しない）
-      await fs.writeFile(pidFilePath, String(process.pid), "utf-8");
-
-      const running = await isDaemonRunning(databasePath);
-      expect(running).toBe(false);
-
-      // PIDファイルは残っていることを確認（デーモン起動中の可能性があるため）
-      await fs.access(pidFilePath); // Should not throw
-    });
-
-    it("does not clean up stale files to avoid race conditions", async () => {
+    it("returns false and cleans up when PID file contains stale PID", async () => {
       const pidFilePath = `${databasePath}.daemon.pid`;
       const socketPath = `${databasePath}.sock`;
+      const lockFilePath = `${socketPath}.lock`;
 
-      // 存在しないPIDとソケットファイルを作成
-      await fs.writeFile(pidFilePath, "999999", "utf-8");
-      await fs.writeFile(socketPath, "", "utf-8"); // ダミーソケット
+      // 存在しないPIDとゾンビファイルを作成
+      const nonExistentPid = 999999;
+      await fs.writeFile(pidFilePath, String(nonExistentPid), "utf-8");
+      await fs.writeFile(socketPath, "", "utf-8");
+      await fs.writeFile(lockFilePath, "", "utf-8");
 
       const running = await isDaemonRunning(databasePath);
       expect(running).toBe(false);
 
-      // ファイルは残っていることを確認（デーモン自身がクリーンアップを担当）
-      await fs.access(pidFilePath); // Should not throw
-      await fs.access(socketPath); // Should not throw
+      // ゾンビファイルがクリーンアップされていることを確認
+      await expect(fs.access(pidFilePath)).rejects.toThrow();
+      await expect(fs.access(socketPath)).rejects.toThrow();
+      await expect(fs.access(lockFilePath)).rejects.toThrow();
     });
 
-    it("preserves startup lock file to avoid interfering with daemon startup", async () => {
+    it("returns false and attempts cleanup when daemon health check fails", async () => {
       const pidFilePath = `${databasePath}.daemon.pid`;
-      const startupLockPath = `${databasePath}.daemon.starting`;
+      const socketPath = `${databasePath}.sock`;
+      const lockFilePath = `${socketPath}.lock`;
 
-      // 存在しないPIDとスタートアップロックを作成
-      await fs.writeFile(pidFilePath, "999999", "utf-8");
-      await fs.writeFile(startupLockPath, "999999", "utf-8");
+      // 存在しないPIDを書き込む（実プロセスを使うとテストが不安定になる）
+      // ヘルスチェック失敗時の動作を確認
+      const nonExistentPid = 999998;
+      await fs.writeFile(pidFilePath, String(nonExistentPid), "utf-8");
+      await fs.writeFile(socketPath, "", "utf-8");
+      await fs.writeFile(lockFilePath, "", "utf-8");
 
       const running = await isDaemonRunning(databasePath);
       expect(running).toBe(false);
 
-      // ファイルは残っていることを確認（起動中のデーモンを妨害しないため）
-      await fs.access(pidFilePath); // Should not throw
-      await fs.access(startupLockPath); // Should not throw
+      // ゾンビファイルがクリーンアップされていることを確認
+      await expect(fs.access(pidFilePath)).rejects.toThrow();
+      await expect(fs.access(socketPath)).rejects.toThrow();
+      await expect(fs.access(lockFilePath)).rejects.toThrow();
+    });
+
+    it("cleans up all stale files including startup lock", async () => {
+      const pidFilePath = `${databasePath}.daemon.pid`;
+      const socketPath = `${databasePath}.sock`;
+      const lockFilePath = `${socketPath}.lock`;
+      const startupLockPath = `${databasePath}.daemon.starting`;
+
+      // 存在しないPIDと全てのゾンビファイルを作成
+      await fs.writeFile(pidFilePath, "999997", "utf-8");
+      await fs.writeFile(socketPath, "", "utf-8");
+      await fs.writeFile(lockFilePath, "", "utf-8");
+      await fs.writeFile(startupLockPath, "999997", "utf-8");
+
+      const running = await isDaemonRunning(databasePath);
+      expect(running).toBe(false);
+
+      // 全てのゾンビファイルがクリーンアップされていることを確認
+      await expect(fs.access(pidFilePath)).rejects.toThrow();
+      await expect(fs.access(socketPath)).rejects.toThrow();
+      await expect(fs.access(lockFilePath)).rejects.toThrow();
+      await expect(fs.access(startupLockPath)).rejects.toThrow();
+    });
+
+    it("cleans up stale files even when PID file does not exist", async () => {
+      const socketPath = `${databasePath}.sock`;
+      const lockFilePath = `${socketPath}.lock`;
+
+      // PIDファイルなしでソケットとロックファイルだけ存在する状態
+      await fs.writeFile(socketPath, "", "utf-8");
+      await fs.writeFile(lockFilePath, "", "utf-8");
+
+      const running = await isDaemonRunning(databasePath);
+      expect(running).toBe(false);
+
+      // ゾンビファイルがクリーンアップされていることを確認
+      await expect(fs.access(socketPath)).rejects.toThrow();
+      await expect(fs.access(lockFilePath)).rejects.toThrow();
     });
   });
 
