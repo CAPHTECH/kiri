@@ -20,6 +20,11 @@ import { parsePositiveInt } from "../shared/utils/validation.js";
 
 import { DaemonLifecycle } from "./lifecycle.js";
 import { createSocketServer } from "./socket.js";
+import {
+  detectAndCleanupZombie,
+  extractPidFromLockError,
+  isDuckDBLockConflictError,
+} from "./zombie-detector.js";
 
 /**
  * デーモン設定オプション
@@ -191,33 +196,65 @@ async function main() {
     );
 
     // ServerRuntimeを作成（DuckDB接続、メトリクス、デグレード制御など）
+    // ゾンビdaemonによるDuckDBロック競合時は、ゾンビ検出・クリーンアップ後にリトライ
     let runtime: ServerRuntime | null = null;
     let watcher: IndexWatcher | null = null;
-    try {
-      const runtimeOptions: Parameters<typeof createServerRuntime>[0] = {
-        repoRoot: options.repoRoot,
-        databasePath: options.databasePath,
-        allowDegrade: options.allowDegrade,
-        allowWriteLock: true, // Daemon mode should auto-create security lock
-      };
+    const MAX_RUNTIME_RETRY_ATTEMPTS = 2;
+    const socketPath =
+      options.socketPath || getSocketPath(options.databasePath, { ensureDir: true });
 
-      if (options.securityConfigPath) {
-        runtimeOptions.securityConfigPath = options.securityConfigPath;
+    for (let attempt = 0; attempt < MAX_RUNTIME_RETRY_ATTEMPTS; attempt++) {
+      try {
+        const runtimeOptions: Parameters<typeof createServerRuntime>[0] = {
+          repoRoot: options.repoRoot,
+          databasePath: options.databasePath,
+          allowDegrade: options.allowDegrade,
+          allowWriteLock: true, // Daemon mode should auto-create security lock
+        };
+
+        if (options.securityConfigPath) {
+          runtimeOptions.securityConfigPath = options.securityConfigPath;
+        }
+        if (options.securityLockPath) {
+          runtimeOptions.securityLockPath = options.securityLockPath;
+        }
+
+        runtime = await createServerRuntime(runtimeOptions);
+        await lifecycle.log(`Runtime initialized for repo: ${options.repoRoot}`);
+        break; // 成功
+      } catch (err) {
+        const error = err as Error;
+
+        // DuckDBロック競合エラーの場合、ゾンビ検出・クリーンアップを試みる
+        if (isDuckDBLockConflictError(error) && attempt < MAX_RUNTIME_RETRY_ATTEMPTS - 1) {
+          const conflictingPid = extractPidFromLockError(error.message);
+
+          if (conflictingPid !== null) {
+            await lifecycle.log(
+              `DuckDB lock conflict detected (PID ${conflictingPid}). Checking for zombie...`
+            );
+
+            const cleaned = await detectAndCleanupZombie(conflictingPid, socketPath);
+
+            if (cleaned) {
+              await lifecycle.log(`Zombie daemon cleaned up. Retrying...`);
+              // DuckDBがロックを解放するのを待つ
+              await new Promise((resolve) => setTimeout(resolve, 1000));
+              continue; // リトライ
+            }
+
+            // 正常動作中のdaemonがいる場合
+            await lifecycle.log(`Another daemon is running normally. Exiting.`);
+          }
+        }
+
+        // リトライ不可またはリトライ失敗
+        await lifecycle.log(`Failed to create runtime: ${error.message}`);
+        console.error(`[Daemon] Failed to create runtime: ${error.message}`);
+        await lifecycle.removePidFile();
+        await lifecycle.releaseStartupLock();
+        process.exit(1);
       }
-      if (options.securityLockPath) {
-        runtimeOptions.securityLockPath = options.securityLockPath;
-      }
-
-      runtime = await createServerRuntime(runtimeOptions);
-
-      await lifecycle.log(`Runtime initialized for repo: ${options.repoRoot}`);
-    } catch (err) {
-      const error = err as Error;
-      await lifecycle.log(`Failed to create runtime: ${error.message}`);
-      console.error(`[Daemon] Failed to create runtime: ${error.message}`);
-      await lifecycle.removePidFile();
-      await lifecycle.releaseStartupLock();
-      process.exit(1);
     }
 
     // ウォッチモードの設定（自動インクリメンタル再インデックス）
@@ -252,11 +289,10 @@ async function main() {
     }
 
     // RPCハンドラを作成（既存のロジックを再利用）
-    const rpcHandler = createRpcHandler(runtime);
+    // Note: runtimeはリトライループで必ず初期化されるか、初期化失敗時はprocess.exit(1)で終了する
+    const rpcHandler = createRpcHandler(runtime!);
 
     // ソケットサーバーを作成（プラットフォームに応じてUnixソケットまたはWindows名前付きパイプ）
-    const socketPath =
-      options.socketPath || getSocketPath(options.databasePath, { ensureDir: true });
     const closeServer = await createSocketServer({
       socketPath,
       onRequest: async (request) => {
