@@ -12,7 +12,7 @@ import * as fs from "fs/promises";
  * @param pid - チェックするプロセスID
  * @returns プロセスが存在する場合はtrue
  */
-function isProcessRunning(pid: number): boolean {
+export function isProcessRunning(pid: number): boolean {
   if (!Number.isInteger(pid) || pid <= 0) {
     return false;
   }
@@ -29,6 +29,18 @@ function isProcessRunning(pid: number): boolean {
 /**
  * PIDファイルとスタートアップロックを管理する
  */
+/**
+ * ゾンビdaemon関連のメトリクス
+ */
+export interface ZombieMetrics {
+  /** ゾンビ検出回数 */
+  detectedTotal: number;
+  /** クリーンアップ成功回数 */
+  cleanupSuccessTotal: number;
+  /** クリーンアップ失敗回数 */
+  cleanupFailureTotal: number;
+}
+
 export class DaemonLifecycle {
   private readonly pidFilePath: string;
   private readonly startupLockPath: string;
@@ -39,6 +51,11 @@ export class DaemonLifecycle {
   private shutdownCallback?: () => Promise<void>;
   private readonly maxLogSizeBytes: number = 10 * 1024 * 1024; // 10MB
   private readonly maxLogBackups: number = 3;
+
+  // ゾンビdaemonメトリクス
+  private zombieDetectedTotal = 0;
+  private zombieCleanupSuccessTotal = 0;
+  private zombieCleanupFailureTotal = 0;
 
   constructor(
     private readonly databasePath: string,
@@ -383,5 +400,36 @@ export class DaemonLifecycle {
     } catch (err) {
       console.error(`Failed to write to log file: ${err}`);
     }
+  }
+
+  /**
+   * ゾンビdaemon検出を記録
+   */
+  recordZombieDetected(): void {
+    this.zombieDetectedTotal++;
+  }
+
+  /**
+   * ゾンビdaemonクリーンアップ結果を記録
+   *
+   * @param success - クリーンアップが成功した場合はtrue
+   */
+  recordZombieCleanup(success: boolean): void {
+    if (success) {
+      this.zombieCleanupSuccessTotal++;
+    } else {
+      this.zombieCleanupFailureTotal++;
+    }
+  }
+
+  /**
+   * ゾンビdaemon関連メトリクスのスナップショットを取得
+   */
+  getZombieMetrics(): ZombieMetrics {
+    return {
+      detectedTotal: this.zombieDetectedTotal,
+      cleanupSuccessTotal: this.zombieCleanupSuccessTotal,
+      cleanupFailureTotal: this.zombieCleanupFailureTotal,
+    };
   }
 }

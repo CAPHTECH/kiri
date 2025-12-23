@@ -238,4 +238,69 @@ describe("DaemonLifecycle", () => {
 
     expect(newListeners).toBeGreaterThan(originalListeners);
   });
+
+  describe("zombie metrics", () => {
+    it("initializes with zero values", () => {
+      const metrics = lifecycle.getZombieMetrics();
+      expect(metrics.detectedTotal).toBe(0);
+      expect(metrics.cleanupSuccessTotal).toBe(0);
+      expect(metrics.cleanupFailureTotal).toBe(0);
+    });
+
+    it("records zombie detection", () => {
+      lifecycle.recordZombieDetected();
+      lifecycle.recordZombieDetected();
+
+      const metrics = lifecycle.getZombieMetrics();
+      expect(metrics.detectedTotal).toBe(2);
+    });
+
+    it("records successful cleanup", () => {
+      lifecycle.recordZombieCleanup(true);
+      lifecycle.recordZombieCleanup(true);
+
+      const metrics = lifecycle.getZombieMetrics();
+      expect(metrics.cleanupSuccessTotal).toBe(2);
+      expect(metrics.cleanupFailureTotal).toBe(0);
+    });
+
+    it("records failed cleanup", () => {
+      lifecycle.recordZombieCleanup(false);
+
+      const metrics = lifecycle.getZombieMetrics();
+      expect(metrics.cleanupSuccessTotal).toBe(0);
+      expect(metrics.cleanupFailureTotal).toBe(1);
+    });
+
+    it("tracks mixed cleanup results", () => {
+      lifecycle.recordZombieDetected();
+      lifecycle.recordZombieCleanup(true);
+      lifecycle.recordZombieDetected();
+      lifecycle.recordZombieCleanup(false);
+      lifecycle.recordZombieDetected();
+      lifecycle.recordZombieCleanup(true);
+
+      const metrics = lifecycle.getZombieMetrics();
+      expect(metrics.detectedTotal).toBe(3);
+      expect(metrics.cleanupSuccessTotal).toBe(2);
+      expect(metrics.cleanupFailureTotal).toBe(1);
+    });
+
+    it("returns snapshot that does not change when metrics are updated", () => {
+      lifecycle.recordZombieDetected();
+      const snapshot = lifecycle.getZombieMetrics();
+
+      lifecycle.recordZombieDetected();
+      lifecycle.recordZombieCleanup(true);
+
+      // スナップショットは変更されない
+      expect(snapshot.detectedTotal).toBe(1);
+      expect(snapshot.cleanupSuccessTotal).toBe(0);
+
+      // 新しいスナップショットは最新値
+      const newSnapshot = lifecycle.getZombieMetrics();
+      expect(newSnapshot.detectedTotal).toBe(2);
+      expect(newSnapshot.cleanupSuccessTotal).toBe(1);
+    });
+  });
 });
