@@ -63,6 +63,57 @@ describe("DaemonLifecycle", () => {
     await lifecycle.releaseStartupLock();
   });
 
+  it("detects and removes stale startup lock (dead process)", async () => {
+    const lockPath = lifecycle.getStartupLockPath();
+
+    // 存在しないPIDでロックファイルを作成（stale lock をシミュレート）
+    const nonExistentPid = 999999;
+    await fs.writeFile(lockPath, String(nonExistentPid), "utf-8");
+
+    // stale lockを検出して再取得できるはず
+    const acquired = await lifecycle.acquireStartupLock();
+    expect(acquired).toBe(true);
+
+    // ロックファイルは現在のプロセスのPIDで更新されているはず
+    const content = await fs.readFile(lockPath, "utf-8");
+    expect(parseInt(content.trim(), 10)).toBe(process.pid);
+
+    await lifecycle.releaseStartupLock();
+  });
+
+  it("does not remove lock held by running process", async () => {
+    const lockPath = lifecycle.getStartupLockPath();
+
+    // 現在のプロセスのPIDでロックファイルを作成（生きているプロセス）
+    await fs.writeFile(lockPath, String(process.pid), "utf-8");
+
+    // 別のlifecycleインスタンスで取得を試みる
+    const lifecycle2 = new DaemonLifecycle(databasePath, 0.1);
+    const acquired = await lifecycle2.acquireStartupLock();
+    expect(acquired).toBe(false);
+
+    // ロックファイルは元のPIDのまま
+    const content = await fs.readFile(lockPath, "utf-8");
+    expect(parseInt(content.trim(), 10)).toBe(process.pid);
+
+    // クリーンアップ
+    await fs.unlink(lockPath);
+  });
+
+  it("handles invalid PID in stale lock file", async () => {
+    const lockPath = lifecycle.getStartupLockPath();
+
+    // 無効なPIDでロックファイルを作成
+    await fs.writeFile(lockPath, "invalid-pid", "utf-8");
+
+    // 無効なPIDは安全のため取得失敗とする
+    const acquired = await lifecycle.acquireStartupLock();
+    expect(acquired).toBe(false);
+
+    // クリーンアップ
+    await fs.unlink(lockPath);
+  });
+
   it("releases startup lock successfully", async () => {
     await lifecycle.acquireStartupLock();
     const lockPath = lifecycle.getStartupLockPath();
