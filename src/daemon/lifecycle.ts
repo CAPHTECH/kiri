@@ -7,6 +7,26 @@
 import * as fs from "fs/promises";
 
 /**
+ * 指定したPIDのプロセスが存在するかチェック
+ *
+ * @param pid - チェックするプロセスID
+ * @returns プロセスが存在する場合はtrue
+ */
+function isProcessRunning(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) {
+    return false;
+  }
+  try {
+    // シグナル0はプロセスを停止せず、存在チェックのみ
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    // ESRCHはプロセスが存在しないことを意味
+    return false;
+  }
+}
+
+/**
  * PIDファイルとスタートアップロックを管理する
  */
 export class DaemonLifecycle {
@@ -53,6 +73,9 @@ export class DaemonLifecycle {
   /**
    * スタートアップロックを取得（排他的作成）
    *
+   * ロックファイルが存在しても、所有プロセスが死んでいればstale lockとして
+   * 自動的にクリーンアップして再取得を試みる。
+   *
    * @returns ロック取得に成功した場合はtrue、他のプロセスが既にロック中の場合はfalse
    */
   async acquireStartupLock(): Promise<boolean> {
@@ -63,7 +86,81 @@ export class DaemonLifecycle {
       return true;
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === "EEXIST") {
-        return false;
+        // ロックが stale（所有プロセスが死んでいる）かチェック
+        try {
+          const existingPidStr = await fs.readFile(this.startupLockPath, "utf-8");
+          const existingPid = parseInt(existingPidStr.trim(), 10);
+
+          if (!isNaN(existingPid) && !isProcessRunning(existingPid)) {
+            // Stale lock 検出 - 削除前に再検証（TOCTOU対策）
+            console.error(`[Daemon] Removing stale startup lock (PID ${existingPid} not running)`);
+
+            // PIDが再利用されていないか再確認
+            try {
+              const recheckPidStr = await fs.readFile(this.startupLockPath, "utf-8");
+              const recheckPid = parseInt(recheckPidStr.trim(), 10);
+
+              // PIDが一致し、まだプロセスが死んでいる場合のみ削除
+              if (
+                !isNaN(recheckPid) &&
+                recheckPid === existingPid &&
+                !isProcessRunning(recheckPid)
+              ) {
+                await fs.unlink(this.startupLockPath);
+
+                // 再取得を試みる
+                try {
+                  await fs.writeFile(this.startupLockPath, String(process.pid), {
+                    flag: "wx",
+                  });
+                  return true;
+                } catch (retryErr) {
+                  // 再取得に失敗（他のプロセスが先に取得した）
+                  if ((retryErr as NodeJS.ErrnoException).code === "EEXIST") {
+                    return false;
+                  }
+                  throw retryErr;
+                }
+              }
+            } catch (recheckErr) {
+              // 再検証中にファイルが消えた（他のプロセスが処理した）
+              if ((recheckErr as NodeJS.ErrnoException).code === "ENOENT") {
+                // 消えたので再取得を試みる
+                try {
+                  await fs.writeFile(this.startupLockPath, String(process.pid), {
+                    flag: "wx",
+                  });
+                  return true;
+                } catch (retryErr) {
+                  if ((retryErr as NodeJS.ErrnoException).code === "EEXIST") {
+                    return false;
+                  }
+                  throw retryErr;
+                }
+              }
+              throw recheckErr;
+            }
+          }
+          // 生きているプロセスがロックを保持している
+          return false;
+        } catch (readErr) {
+          // ロックファイルを読めない場合は安全のため取得失敗とする
+          if ((readErr as NodeJS.ErrnoException).code !== "ENOENT") {
+            return false;
+          }
+          // ENOENTの場合、ファイルが消えたので再取得を試みる
+          try {
+            await fs.writeFile(this.startupLockPath, String(process.pid), {
+              flag: "wx",
+            });
+            return true;
+          } catch (retryErr) {
+            if ((retryErr as NodeJS.ErrnoException).code === "EEXIST") {
+              return false;
+            }
+            throw retryErr;
+          }
+        }
       }
       throw err;
     }
