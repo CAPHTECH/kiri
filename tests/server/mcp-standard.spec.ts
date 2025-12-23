@@ -689,7 +689,9 @@ describe("MCP標準エンドポイント", () => {
 
   // MCP 2025-06-18 Structured Output 対応テスト
   describe("MCP 2025-06-18 Structured Output", () => {
-    it("tools/list の全ツールに outputSchema が含まれる", async () => {
+    // Note: tools/listでは outputSchema を意図的に除外している（Claude Code互換性のため）
+    // レスポンスサイズが8KBを超えるとClaude CodeのMCPクライアントでパースエラーが発生するため
+    it("tools/list の全ツールには outputSchema が含まれない（Claude Code互換性）", async () => {
       const repo = await createTempRepo({
         "src/app.ts": "export const app = () => 1;\n",
       });
@@ -723,7 +725,7 @@ describe("MCP標準エンドポイント", () => {
       const tools = (payload.result as Record<string, unknown>).tools as unknown[];
       expect(Array.isArray(tools)).toBe(true);
 
-      // 全5ツールにoutputSchemaが含まれることを検証
+      // 全5ツールにoutputSchemaが含まれないことを検証（Claude Code互換性のため意図的に除外）
       const expectedTools = [
         "context_bundle",
         "semantic_rerank",
@@ -739,10 +741,13 @@ describe("MCP標準エンドポイント", () => {
         ) as Record<string, unknown> | undefined;
 
         expect(tool).toBeDefined();
-        expect(tool?.outputSchema).toBeDefined();
-        expect(typeof tool?.outputSchema).toBe("object");
-        expect((tool?.outputSchema as Record<string, unknown>)?.type).toBeDefined();
+        // outputSchemaは意図的に除外されている
+        expect(tool?.outputSchema).toBeUndefined();
       }
+
+      // レスポンスサイズが8KB以下であることを検証
+      const responseJson = JSON.stringify({ tools });
+      expect(responseJson.length).toBeLessThan(8192);
     });
 
     it("tools/call が structuredContent を含むレスポンスを返す", async () => {
