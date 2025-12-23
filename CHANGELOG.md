@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.3] - 2025-12-23
+
+### Fixed
+
+- **tools/listレスポンスサイズを縮小** (PR #170): Claude Code互換性を改善
+  - TOOL_DESCRIPTORSの説明を簡潔化（17KB → 4KB、75%削減）
+  - `outputSchema`をtools/listレスポンスから除外（Claude CodeのMCPクライアントが8KB以上のJSONでパースエラー）
+  - 必要なパラメータ（`artifacts`, `metadata_filters`等）は維持し、各ツールに使用例を追加
+
 ## [0.24.2] - 2025-12-23
 
 ### Fixed
