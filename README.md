@@ -2,7 +2,7 @@
 
 > Intelligent code context extraction for LLMs via Model Context Protocol
 
-[![Version](https://img.shields.io/badge/version-0.24.0-blue.svg)](package.json)
+[![Version](https://img.shields.io/badge/version-0.24.1-blue.svg)](package.json)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.6-blue.svg)](https://www.typescriptlang.org/)
 [![MCP](https://img.shields.io/badge/MCP-Compatible-green.svg)](https://modelcontextprotocol.io/)
@@ -139,10 +139,10 @@ See [CHANGELOG.md](CHANGELOG.md) for release notes.
 
 **Recent highlights:**
 
-- **v0.22.4**: Replace chokidar with @parcel/watcher to fix EMFILE error on large repos (PR #165)
-- **v0.22.3**: Denylist filter using node-ignore library for proper gitignore compliance (Issue #154)
-- **v0.22.2**: files_search path_prefix filter fix (Issue #162)
-- **v0.22.1**: FTS index WAL visibility fix (Issue #158)
+- **v0.24.1**: DaemonLifecycle stale lock detection (PR #168)
+- **v0.24.0**: MCP connection auto-reconnect (PR #167)
+- **v0.23.0**: `--full` option for kiri command (PR #166)
+- **v0.22.4**: Replace chokidar with @parcel/watcher (PR #165)
 
 ---
 
@@ -221,4 +221,4 @@ Built with [Model Context Protocol](https://modelcontextprotocol.io/), [DuckDB](
 
 ---
 
-**Status**: v0.22.4 (Beta) - Production-ready for MCP clients
+**Status**: v0.24.1 (Beta) - Production-ready for MCP clients

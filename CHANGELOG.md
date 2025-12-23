@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.1] - 2025-12-23
+
+### Fixed
+
+- **DaemonLifecycle stale lock検出機能** (PR #168): デーモン異常終了時の古いロックファイルを自動検出・クリーンアップ
+  - `isProcessRunning()` ヘルパー関数を追加
+  - `acquireStartupLock()` にstale lock検出を実装（TOCTOU対策付き）
+
 ## [0.24.0] - 2025-12-19
 
 ### Added
