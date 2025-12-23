@@ -9,25 +9,32 @@
 
 import net from "net";
 
+import { isProcessRunning } from "./lifecycle.js";
+
 /**
- * プロセスが実行中かどうかを確認
- *
- * @param pid - 確認するプロセスID
- * @returns プロセスが存在する場合はtrue
+ * ログ出力関数の型
+ * 依存性注入により、テスト時のモック化や出力先の統一が可能
  */
-function isProcessRunning(pid: number): boolean {
-  if (!Number.isInteger(pid) || pid <= 0) {
-    return false;
-  }
-  try {
-    // シグナル0はプロセスを停止せず、存在チェックのみ
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    // ESRCHはプロセスが存在しないことを意味
-    return false;
-  }
+export type ZombieLogger = (message: string) => void;
+
+/**
+ * ゾンビ検出・クリーンアップのオプション
+ */
+export interface ZombieDetectorOptions {
+  /** ログ出力関数（デフォルト: console.error） */
+  logger?: ZombieLogger;
+  /** ソケット接続タイムアウト（ミリ秒、デフォルト: 2000） */
+  socketTimeoutMs?: number;
+  /** SIGTERM後の待機時間（ミリ秒、デフォルト: 2000） */
+  gracefulShutdownTimeoutMs?: number;
+  /** ゾンビ検出時のコールバック */
+  onZombieDetected?: () => void;
+  /** クリーンアップ完了時のコールバック */
+  onCleanupComplete?: (success: boolean) => void;
 }
+
+/** デフォルトのロガー */
+const defaultLogger: ZombieLogger = (message) => console.error(`[Daemon] ${message}`);
 
 /**
  * DuckDBロック競合エラーメッセージからPIDを抽出
@@ -133,57 +140,74 @@ export async function isProcessListeningOnSocket(
  *
  * @param pid - 競合しているプロセスのPID
  * @param socketPath - ソケットファイルのパス
+ * @param options - オプション（ログ、タイムアウト、コールバック）
  * @returns クリーンアップ成功（またはプロセス不在）時はtrue、正常動作中のdaemonがいる場合はfalse
  */
-export async function detectAndCleanupZombie(pid: number, socketPath: string): Promise<boolean> {
+export async function detectAndCleanupZombie(
+  pid: number,
+  socketPath: string,
+  options: ZombieDetectorOptions = {}
+): Promise<boolean> {
+  const {
+    logger = defaultLogger,
+    socketTimeoutMs = 2000,
+    gracefulShutdownTimeoutMs = 2000,
+    onZombieDetected,
+    onCleanupComplete,
+  } = options;
+
   // プロセスが存在するか確認
   if (!isProcessRunning(pid)) {
     // プロセスが死んでいる（通常のstale lock）
-    console.error(`[Daemon] Conflicting process (PID ${pid}) is no longer running`);
+    logger(`Conflicting process (PID ${pid}) is no longer running`);
     return true; // 呼び出し元でリトライ可能
   }
 
   // プロセスは生きているが、ソケットをリッスンしているか確認
-  const isListening = await isProcessListeningOnSocket(socketPath);
+  const isListening = await isProcessListeningOnSocket(socketPath, socketTimeoutMs);
 
   if (isListening) {
     // 正常に動作中のdaemon
-    console.error(`[Daemon] Another daemon (PID ${pid}) is running normally`);
+    logger(`Another daemon (PID ${pid}) is running normally`);
     return false;
   }
 
   // ゾンビ状態: プロセス生存 + ソケット消失
-  console.error(
-    `[Daemon] Detected zombie daemon (PID ${pid}): process alive but not listening on socket`
-  );
+  logger(`Detected zombie daemon (PID ${pid}): process alive but not listening on socket`);
+
+  // ゾンビ検出コールバック
+  onZombieDetected?.();
 
   try {
     // SIGTERMでグレースフルシャットダウンを試みる
-    console.error(`[Daemon] Sending SIGTERM to zombie daemon (PID ${pid})`);
+    logger(`Sending SIGTERM to zombie daemon (PID ${pid})`);
     process.kill(pid, "SIGTERM");
 
-    // 最大2秒待機
-    for (let i = 0; i < 20; i++) {
+    // グレースフルシャットダウン待機
+    const waitIterations = Math.ceil(gracefulShutdownTimeoutMs / 100);
+    for (let i = 0; i < waitIterations; i++) {
       await new Promise((resolve) => setTimeout(resolve, 100));
       if (!isProcessRunning(pid)) {
-        console.error(`[Daemon] Zombie daemon (PID ${pid}) terminated gracefully`);
+        logger(`Zombie daemon (PID ${pid}) terminated gracefully`);
+        onCleanupComplete?.(true);
         return true;
       }
     }
 
     // SIGKILLで強制終了
-    console.error(`[Daemon] Force killing zombie daemon (PID ${pid}) with SIGKILL`);
+    logger(`Force killing zombie daemon (PID ${pid}) with SIGKILL`);
     process.kill(pid, "SIGKILL");
 
     // 少し待機
     await new Promise((resolve) => setTimeout(resolve, 100));
+    onCleanupComplete?.(true);
     return true;
   } catch (err) {
     // 権限不足などでkillできない場合
-    console.error(
-      `[Daemon] Failed to kill zombie daemon (PID ${pid}): ${err instanceof Error ? err.message : String(err)}`
-    );
-    console.error(`[Daemon] Please manually terminate the process: kill ${pid}`);
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    logger(`Failed to kill zombie daemon (PID ${pid}): ${errorMessage}`);
+    logger(`Please manually terminate the process: kill ${pid}`);
+    onCleanupComplete?.(false);
     return false;
   }
 }

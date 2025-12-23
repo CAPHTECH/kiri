@@ -234,7 +234,16 @@ async function main() {
               `DuckDB lock conflict detected (PID ${conflictingPid}). Checking for zombie...`
             );
 
-            const cleaned = await detectAndCleanupZombie(conflictingPid, socketPath);
+            const cleaned = await detectAndCleanupZombie(conflictingPid, socketPath, {
+              // ログ出力を lifecycle.log と console.error の両方に出力
+              logger: (message) => {
+                console.error(`[Daemon] ${message}`);
+                lifecycle.log(message).catch(() => {});
+              },
+              // メトリクス記録
+              onZombieDetected: () => lifecycle.recordZombieDetected(),
+              onCleanupComplete: (success) => lifecycle.recordZombieCleanup(success),
+            });
 
             if (cleaned) {
               await lifecycle.log(`Zombie daemon cleaned up. Retrying...`);

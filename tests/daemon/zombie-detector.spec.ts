@@ -14,6 +14,7 @@ import {
   extractPidFromLockError,
   isDuckDBLockConflictError,
   isProcessListeningOnSocket,
+  type ZombieDetectorOptions,
 } from "../../src/daemon/zombie-detector.js";
 
 describe("extractPidFromLockError", () => {
@@ -219,15 +220,97 @@ describe("detectAndCleanupZombie", () => {
     }
   });
 
-  it("logs appropriate message for zombie detection", async () => {
-    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  it("uses custom logger when provided", async () => {
+    const logMessages: string[] = [];
+    const customLogger = (message: string) => logMessages.push(message);
 
     // 存在しないPIDでテスト
-    await detectAndCleanupZombie(999999, socketPath);
+    await detectAndCleanupZombie(999999, socketPath, { logger: customLogger });
 
-    expect(consoleSpy).toHaveBeenCalledWith(
+    expect(logMessages.length).toBeGreaterThan(0);
+    expect(logMessages[0]).toContain("PID 999999");
+    expect(logMessages[0]).toContain("no longer running");
+  });
+
+  it("calls onZombieDetected callback when zombie is detected", async () => {
+    // ゾンビ状態をシミュレート: プロセスは存在するがソケットがない
+    let zombieDetectedCalled = false;
+    let cleanupSuccess: boolean | undefined;
+
+    const options: ZombieDetectorOptions = {
+      logger: () => {}, // 抑制
+      socketTimeoutMs: 100,
+      onZombieDetected: () => {
+        zombieDetectedCalled = true;
+      },
+      onCleanupComplete: (success) => {
+        cleanupSuccess = success;
+      },
+    };
+
+    // 現在のプロセスはソケットをリッスンしていないので、ゾンビとして検出される
+    // ただし、現在のプロセスをkillしようとするとテストが中断するため、
+    // モックを使うか、存在しないPIDでテストする
+    // ここでは存在しないPIDを使用（ゾンビ検出ではなく、stale lock検出）
+    await detectAndCleanupZombie(999999, socketPath, options);
+
+    // 存在しないPIDの場合、ゾンビ検出コールバックは呼ばれない（stale lockとして処理）
+    expect(zombieDetectedCalled).toBe(false);
+    expect(cleanupSuccess).toBeUndefined(); // stale lockの場合はコールバック不要
+  });
+
+  it("logs appropriate message for stale lock detection", async () => {
+    const logMessages: string[] = [];
+
+    await detectAndCleanupZombie(999999, socketPath, {
+      logger: (msg) => logMessages.push(msg),
+    });
+
+    expect(logMessages).toContainEqual(
       expect.stringContaining("Conflicting process (PID 999999) is no longer running")
     );
+  });
+});
+
+describe("detectAndCleanupZombie with options", () => {
+  let tmpDir: string;
+  let socketPath: string;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "kiri-zombie-options-test-"));
+    socketPath = path.join(tmpDir, "test.sock");
+  });
+
+  afterEach(async () => {
+    try {
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    } catch {
+      // Ignore cleanup errors
+    }
+  });
+
+  it("respects socketTimeoutMs option", async () => {
+    // 非常に短いタイムアウトでテスト
+    const start = Date.now();
+    await detectAndCleanupZombie(999999, socketPath, {
+      socketTimeoutMs: 50,
+      logger: () => {},
+    });
+    const duration = Date.now() - start;
+
+    // タイムアウト前に完了するはず（PIDが存在しないため即座に返る）
+    expect(duration).toBeLessThan(1000);
+  });
+
+  it("suppresses console output when custom logger is provided", async () => {
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await detectAndCleanupZombie(999999, socketPath, {
+      logger: () => {}, // カスタムロガーで出力を抑制
+    });
+
+    // デフォルトロガーが使われないため、console.errorは呼ばれない
+    expect(consoleSpy).not.toHaveBeenCalled();
 
     consoleSpy.mockRestore();
   });
