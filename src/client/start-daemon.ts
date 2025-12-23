@@ -13,38 +13,6 @@ import { fileURLToPath } from "url";
 import { getSocketPath } from "../shared/utils/socket.js";
 
 /**
- * ゾンビソケット・PIDファイルをクリーンアップ
- *
- * デーモンプロセスが異常終了した場合に残留するファイルを削除する。
- * - PIDファイル
- * - ソケットファイル（Unix系のみ）
- * - ロックファイル
- * - スタートアップロックファイル
- *
- * @param databasePath - データベースパス
- * @param socketPath - ソケットパス
- */
-async function cleanupStaleFiles(databasePath: string, socketPath: string): Promise<void> {
-  const pidFilePath = `${databasePath}.daemon.pid`;
-  const lockFilePath = `${socketPath}.lock`;
-  const startupLockPath = `${databasePath}.daemon.starting`;
-
-  const filesToClean = [pidFilePath, socketPath, lockFilePath, startupLockPath];
-
-  for (const filePath of filesToClean) {
-    try {
-      await fs.unlink(filePath);
-      console.error(`[StartDaemon] Cleaned up stale file: ${filePath}`);
-    } catch (err) {
-      // ファイルが存在しない場合は無視
-      if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
-        console.error(`[StartDaemon] Failed to cleanup ${filePath}: ${(err as Error).message}`);
-      }
-    }
-  }
-}
-
-/**
  * デーモン起動オプション
  */
 export interface StartDaemonOptions {
@@ -84,9 +52,9 @@ export async function isDaemonRunning(
       process.kill(pid, 0); // シグナル0は存在チェック
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
     } catch (_err) {
-      // プロセスが存在しない場合、PIDファイルは古い → クリーンアップ実行
-      console.error("[StartDaemon] Stale PID file detected (process not running). Cleaning up...");
-      await cleanupStaleFiles(databasePath, socketPath);
+      // プロセスが存在しない場合、PIDファイルは古い
+      // Note: クリーンアップは意図的に行わない（デーモン起動中の競合を防ぐため）
+      console.error("[StartDaemon] Stale PID file detected");
       return false;
     }
 
@@ -144,47 +112,14 @@ export async function isDaemonRunning(
 
       return healthCheck;
     } catch (err) {
-      // ソケット接続失敗またはヘルスチェック失敗
-      // プロセスは存在するがソケットをリッスンしていない = ゾンビ状態
+      // ソケット接続失敗またはヘルスチェック失敗（起動中の可能性もあるため、クリーンアップは行わない）
       console.error(
         `[StartDaemon] Daemon health check failed: ${err instanceof Error ? err.message : String(err)}`
       );
-      console.error("[StartDaemon] Daemon is in zombie state. Stopping and cleaning up...");
-
-      // ゾンビプロセスを停止
-      try {
-        const pidStr = await fs.readFile(pidFilePath, "utf-8");
-        const zombiePid = parseInt(pidStr.trim(), 10);
-        process.kill(zombiePid, "SIGTERM");
-        // グレースフル停止を最大2秒待機
-        for (let i = 0; i < 20; i++) {
-          await new Promise((resolve) => setTimeout(resolve, 100));
-          try {
-            process.kill(zombiePid, 0);
-          } catch {
-            // プロセスが終了した
-            break;
-          }
-        }
-        // まだ生きている場合は強制終了
-        try {
-          process.kill(zombiePid, 0);
-          process.kill(zombiePid, "SIGKILL");
-        } catch {
-          // 既に終了済み
-        }
-      } catch {
-        // PIDファイル読み取りエラーは無視
-      }
-
-      await cleanupStaleFiles(databasePath, socketPath);
       return false;
     }
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-      // PIDファイルが存在しない場合でも、ソケットファイルやロックファイルが残っている可能性がある
-      // 念のためクリーンアップを実行
-      await cleanupStaleFiles(databasePath, socketPath);
       return false;
     }
     throw err;
