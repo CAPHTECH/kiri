@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.2] - 2025-12-23
+
+### Fixed
+
+- **ゾンビdaemon自動検出・クリーンアップ** (Issue #168, PR #169): プロセス生存 + ソケット消失状態のゾンビdaemonを検出しDuckDBロック競合時に自動クリーンアップ
+  - `extractPidFromLockError()`: DuckDBエラーメッセージからPID抽出
+  - `detectAndCleanupZombie()`: ゾンビ検出・SIGTERM→SIGKILL停止
+  - カスタムソケットパス使用時のdaemon誤kill防止（ソケットファイル存在確認）
+  - `ZombieMetrics` によるメトリクス追跡
+
 ## [0.24.1] - 2025-12-23
 
 ### Fixed

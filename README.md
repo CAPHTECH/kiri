@@ -2,7 +2,7 @@
 
 > Intelligent code context extraction for LLMs via Model Context Protocol
 
-[![Version](https://img.shields.io/badge/version-0.24.1-blue.svg)](package.json)
+[![Version](https://img.shields.io/badge/version-0.24.2-blue.svg)](package.json)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.6-blue.svg)](https://www.typescriptlang.org/)
 [![MCP](https://img.shields.io/badge/MCP-Compatible-green.svg)](https://modelcontextprotocol.io/)
@@ -139,10 +139,10 @@ See [CHANGELOG.md](CHANGELOG.md) for release notes.
 
 **Recent highlights:**
 
+- **v0.24.2**: Zombie daemon auto-detection and cleanup (PR #169)
 - **v0.24.1**: DaemonLifecycle stale lock detection (PR #168)
 - **v0.24.0**: MCP connection auto-reconnect (PR #167)
 - **v0.23.0**: `--full` option for kiri command (PR #166)
-- **v0.22.4**: Replace chokidar with @parcel/watcher (PR #165)
 
 ---
 
