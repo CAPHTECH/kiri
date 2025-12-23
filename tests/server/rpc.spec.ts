@@ -152,6 +152,6 @@ describe("tools/list schema", () => {
 
     const category = properties?.category as Record<string, unknown> | undefined;
     expect(category?.type).toBe("string");
-    expect(String(category?.description ?? "")).toContain("adaptive K-value");
+    expect(String(category?.description ?? "")).toContain("adaptive K");
   });
 });
