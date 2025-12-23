@@ -940,7 +940,12 @@ export function createRpcHandler(
         }
         case "tools/list": {
           // MCP standard format: tools array without nextCursor (no pagination)
-          result = { tools: TOOL_DESCRIPTORS };
+          // Note: outputSchemaを除外してレスポンスサイズを削減（Claude Code互換性のため）
+          // outputSchemaは17KB超のJSONとなり、Claude CodeのMCPクライアントでパースエラーを起こす
+          const toolsWithoutOutputSchema = TOOL_DESCRIPTORS.map(
+            ({ outputSchema: _unused, ...rest }) => rest
+          );
+          result = { tools: toolsWithoutOutputSchema };
           break;
         }
         case "resources/list": {
