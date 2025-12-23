@@ -207,110 +207,61 @@ const SERVER_INFO = {
   version: typeof packageJson?.version === "string" ? packageJson.version : "0.0.0",
 } as const;
 
+// Tool descriptors optimized for Claude Code compatibility (<8KB response)
+// Includes essential params and brief examples while staying under size limit
 const TOOL_DESCRIPTORS: ToolDescriptor[] = [
   {
     name: "context_bundle",
     description:
-      "Primary code discovery tool. Provide a concrete, keyword-rich `goal` (modules, files, symptoms) to receive ranked `context` entries containing `path`, `range`, optional `preview`, scoring `why`, and `score`. Avoid leading with generic imperatives such as 'find' or 'locate'; list the signals you have instead.\n\n" +
-      "Returns {context, tokens_estimate?, warnings?}; computing tokens_estimate is optional and should be requested explicitly when needed. Empty or vague goals raise an MCP error that asks for specific keywords, and imperative-only phrasing usually lowers ranking quality.\n\n" +
-      "Example: context_bundle({goal: 'pagination off-by-one bug; file=src/catalog/products.ts; expected=20 items; observed=19'}) surfaces the affected files. Less effective: goal='Find where pagination breaks'.\n\n" +
-      "Goal-crafting best practices (applies to every high-signal identifier, not only function names):\n" +
-      "- List the crucial identifiers (functions, hooks, components, file names, config IDs, etc.) first so the highest-signal terms are always at the front.\n" +
-      "- Stay within 3-5 concrete keywords (about 80 characters) to limit noise and keep scoring sharp.\n" +
-      "- Keep generic errors or narration minimal; if you need them, append short suffixes or parentheses after the identifiers.\n" +
-      "- Attach conditions or context as concise trailing phrases (e.g., 'conditional hook calls').\n\n" +
-      "Before: 'Find where pagination breaks in React hooks error'\n" +
-      "After: 'useOrdersPagination src/orders/pagination.ts offByOne (React hooks error)'.\n\n" +
-      "boost_profile options:\n" +
-      "- 'default': Prioritizes implementation files (src/app/, src/components/) over docs\n" +
-      "- 'docs': Prioritizes documentation (.md, .yaml) over implementation  \n" +
-      "- 'balanced': Equal weight for both docs and implementation\n" +
-      "- 'none': No file type boosting, pure BM25/keyword scoring\n\n" +
-      "Example: context_bundle({goal: 'state management design', boost_profile: 'balanced'})\n\n" +
-      "Metadata filtering:\n" +
-      "- Inline goal tokens such as `tag:observability`, `category:operations`, or `service:kiri` are stripped from the goal and applied as metadata hints so related docs surface alongside nearby implementation.\n" +
-      "- Provide an explicit `metadata_filters` object (e.g., { tags: ['observability'], 'docmeta.category': 'operations' }) to enforce structured filters; string or string[] values are accepted.\n" +
-      "- Supported prefixes include meta., metadata., docmeta., frontmatter., fm., yaml., and json., plus built-in aliases (tag/tags, category, service). `meta.*` behaves as a hint, while `docmeta.*`/`metadata.*` are strict doc-only filters.\n" +
-      "- Metadata filters refine and prioritize candidates but still require a concise goal; use `docmeta.*` when you need docs-only matches and `meta.*` to keep surrounding implementation eligible.",
+      "Find relevant code for a goal. Returns ranked snippets with path, range, score. Use concrete keywords.\n" +
+      "Example: context_bundle({goal: 'pagination off-by-one bug src/catalog/products.ts'})",
     inputSchema: {
       type: "object",
       required: ["goal"],
       additionalProperties: true,
       properties: {
-        goal: {
-          type: "string",
-          description:
-            "A clear, specific description using concrete keywords. Focus on WHAT you're looking for, not HOW to find it. " +
-            "Good: 'User login validation, session management, token refresh'. " +
-            "Bad: 'Understand how users log in', 'explore auth', 'authentication'.",
-        },
+        goal: { type: "string", description: "Concrete keywords describing what to find." },
         limit: {
           type: "number",
           minimum: 1,
           maximum: 20,
-          description:
-            "Maximum number of snippets to return. Default: 7 (optimized for token efficiency), use 5 for quick exploration, 10-15 for deep investigation.",
+          description: "Max results (default: 7).",
         },
         compact: {
           type: "boolean",
-          description:
-            "If true, omits the 'preview' field to drastically reduce token consumption (~95% reduction). " +
-            "Returns only metadata: path, range, why, score. Use with snippets.get for two-tier approach. " +
-            "Default: true (v0.8.0+). Set to false if you need immediate code previews.",
-        },
-        includeTokensEstimate: {
-          type: "boolean",
-          description:
-            "If true, computes the tokens_estimate field. This is slower and should be used only when you need projected token counts.",
-        },
-        profile: {
-          type: "string",
-          description: "Evaluation profile name (bugfix, testfail, refactor, typeerror, feature).",
+          description: "Omit preview for token savings (default: true).",
         },
         boost_profile: {
           type: "string",
           enum: ["default", "docs", "balanced", "none", "code"],
           description:
-            'File type boosting mode: "default" prioritizes implementation files (src/app/, src/components/), "code" strongly deprioritizes documentation and config files (95% penalty), "docs" prioritizes documentation (*.md), "balanced" applies equal weight to both docs and implementation, "none" disables boosting. Default is "default".',
+            "File type priority: default=impl, docs=*.md, code=strongly deprioritize docs.",
         },
         path_prefix: {
           type: "string",
-          pattern: "^(?!.*\\.\\.)[A-Za-z0-9_./\\-]+/?$",
-          description:
-            "Filter by path prefix (e.g., 'docs/', 'src/server/'). Path traversal ('..') is not allowed.",
+          description: "Filter by path prefix (e.g., 'src/server/').",
+        },
+        category: {
+          type: "string",
+          enum: [...ADAPTIVE_K_CATEGORIES],
+          description: "Query category for adaptive K.",
         },
         artifacts: {
           type: "object",
           additionalProperties: true,
           properties: {
-            editing_path: {
-              type: "string",
-              pattern: "^(?!.*\\.\\.)[A-Za-z0-9_./\\-]+$",
-              description:
-                "Path to the file currently being edited. Strongly recommended to provide for better context; boosts that file and related dependencies in the bundle output.",
-            },
+            editing_path: { type: "string", description: "Currently editing file path." },
             failing_tests: {
               type: "array",
               items: { type: "string" },
-              description: "Names of failing test cases. Useful for debugging.",
-            },
-            last_diff: {
-              type: "string",
-              description: "Recent diff content. Useful for understanding current changes.",
+              description: "Failing test names.",
             },
           },
         },
         metadata_filters: {
           type: "object",
           additionalProperties: true,
-          description:
-            "Structured metadata filters applied in addition to the goal text. Keys may use prefixes (meta./metadata./docmeta./frontmatter./fm./yaml./json.) or aliases (tag/tags, category, service). Values can be strings or string arrays. Example: { tags: ['observability'], 'docmeta.category': 'operations' }.",
-        },
-        category: {
-          type: "string",
-          enum: [...ADAPTIVE_K_CATEGORIES],
-          description:
-            "Query category for adaptive K-value selection. Valid values: bugfix, testfail, debug, api, docs, feature, integration, performance. When provided, the system adjusts the number of results (K) based on typical needs for that category.",
+          description: "Filter by YAML frontmatter (e.g., {tags: ['api'], category: 'auth'}).",
         },
       },
     },
@@ -318,30 +269,23 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
   },
   {
     name: "semantic_rerank",
-    description:
-      "Reorders candidate files by embedding similarity to `text`. Use after keyword or heuristic search when you already have `candidates` and want a semantic ranking update without fetching new files.\n\n" +
-      "Returns {candidates: [{path, semantic, base, combined}]}; purely read-only. Missing `text` or an empty candidate list causes an MCP error describing the required inputs.\n\n" +
-      "Example: semantic_rerank({text: 'JWT login flow', candidates: [...]}) reprioritises auth code. Invalid: semantic_rerank({text: '', candidates: [...]}) raises a validation error.",
+    description: "Reorder files by semantic similarity. Use after keyword search.",
     inputSchema: {
       type: "object",
       required: ["text", "candidates"],
       additionalProperties: true,
       properties: {
-        text: { type: "string", description: "Query or goal text for similarity comparison." },
+        text: { type: "string", description: "Query text." },
         candidates: {
           type: "array",
           items: {
             type: "object",
             required: ["path"],
             additionalProperties: true,
-            properties: {
-              path: { type: "string" },
-              score: { type: "number" },
-            },
+            properties: { path: { type: "string" }, score: { type: "number" } },
           },
         },
-        k: { type: "number", minimum: 1, description: "Number of top results to return." },
-        profile: { type: "string" },
+        k: { type: "number", minimum: 1, description: "Top K results." },
       },
     },
     outputSchema: OUTPUT_SCHEMAS.semantic_rerank,
@@ -349,13 +293,8 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
   {
     name: "files_search",
     description:
-      "Token-aware substring search for precise identifiers, error messages, or import fragments. Prefer this tool when you already know the exact string you need to locate; use `context_bundle` for exploratory work.\n\n" +
-      "Returns an array of `{path, matchLine, lang, ext, score}` objects with optional `preview`; the tool never mutates the repo. Set `compact: true` to omit previews entirely for maximum token savings. Empty queries raise an MCP error unless `metadata_filters` are provided. If DuckDB is unavailable but the server runs with `--allow-degrade`, the same array shape is returned using filesystem-based fallbacks (with `lang`/`ext` set to null).\n\n" +
-      'Example: files_search({query: "", metadata_filters: { "docmeta.category": "operations" }}) lists runbooks for the operations category. Invalid: files_search({}) reports that either query or metadata_filters must be supplied.\n\n' +
-      "Metadata filtering:\n" +
-      "- Inline `tag:` / `category:` / `service:` tokens are parsed out of the query and treated as metadata hints, so docs and neighboring implementation stay ranked together.\n" +
-      "- The `metadata_filters` object accepts string or string[] values and supports the same prefixes/aliases as context_bundle (meta., metadata., docmeta., frontmatter., fm., yaml., json.). Use `docmeta.*` when you need doc-only matches; `meta.*` keeps implementations eligible.\n" +
-      '- Either a textual query or `metadata_filters` (or both) is required. Metadata-only searches are supported (tests cover `query:""` + filters) and are ideal when discovering runbooks by tag/category.',
+      "Search files by keyword. Returns path, matchLine, score.\n" +
+      "Example: files_search({query: 'handleUserLogin', ext: '.ts'})",
     inputSchema: {
       type: "object",
       required: [],
@@ -363,47 +302,27 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
       properties: {
         query: {
           type: "string",
-          description:
-            "Specific keyword, function name, class name, error message, or code pattern to search for. " +
-            "Be as specific as possible. Good: 'handleUserLogin', 'JWT_SECRET', 'ReferenceError'. " +
-            "Bad: 'login', 'authentication', 'understand'.",
+          description: "Keyword to search (function name, error message, etc.).",
         },
-        lang: {
-          type: "string",
-          description: "Filter by language name (e.g., 'typescript', 'python', 'swift').",
-        },
-        ext: {
-          type: "string",
-          description: "Filter by file extension (e.g., '.ts', '.py', '.md').",
-        },
-        path_prefix: {
-          type: "string",
-          pattern: "^(?!.*\\.\\.)[A-Za-z0-9_./\\-]+/?$",
-          description: "Filter by path prefix (e.g., 'src/auth/', 'tests/'). No '..' allowed.",
-        },
+        lang: { type: "string", description: "Filter by language (e.g., 'typescript')." },
+        ext: { type: "string", description: "Filter by extension (e.g., '.ts', '.md')." },
+        path_prefix: { type: "string", description: "Filter by path prefix." },
         limit: {
           type: "number",
           minimum: 1,
           maximum: 200,
-          description:
-            "Maximum number of results. Default: 50. Use higher values for exhaustive search.",
+          description: "Max results (default: 50).",
         },
+        compact: { type: "boolean", description: "Omit previews." },
         boost_profile: {
           type: "string",
           enum: ["default", "docs", "balanced", "none", "code"],
-          description:
-            'File type boosting mode: "default" prioritizes implementation files (src/app/, src/components/), "code" strongly deprioritizes documentation and config files (95% penalty), "docs" prioritizes documentation (*.md), "balanced" applies equal weight to both docs and implementation, "none" disables boosting. Default is "default".',
-        },
-        compact: {
-          type: "boolean",
-          description:
-            "If true, omits previews to minimize response tokens. Pair with snippets_get for detail-on-demand workflows.",
+          description: "File type priority.",
         },
         metadata_filters: {
           type: "object",
           additionalProperties: true,
-          description:
-            "Structured metadata filters targeting YAML front matter or JSON docs. Keys may use meta./metadata./docmeta./frontmatter./fm./yaml./json. prefixes or aliases (tag/tags, category, service). Values accept strings or arrays. Example: { tags: ['observability'], 'docmeta.id': 'runbook-002' }.",
+          description: "Filter by YAML frontmatter.",
         },
       },
     },
@@ -412,40 +331,26 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
   {
     name: "snippets_get",
     description:
-      "Focused snippet retrieval by file path. The tool uses recorded symbol boundaries to return the smallest readable span, or falls back to the requested line window.\n\n" +
-      "Returns {path, startLine, endLine, totalLines, symbolName, symbolKind} with optional `content`. Set `compact: true` to omit content, or `include_line_numbers: true` to prefix each line with its number; this is a read-only lookup. Missing `path`, binary files, or absent index entries raise an MCP error with guidance to re-run the indexer.\n\n" +
-      "Use the `view` parameter to control retrieval strategy:\n" +
-      "- 'auto' (default): Uses symbol boundaries if available, falls back to line window\n" +
-      "- 'symbol': Forces symbol-based snippets\n" +
-      "- 'lines': Uses line-based retrieval (respects start_line/end_line, ignores symbols)\n" +
-      "- 'full': Returns entire file from line 1 (start_line is ignored). Safety limit: 500 lines. If truncated, response includes `truncated: true`.\n\n" +
-      "Example: snippets_get({path: 'src/auth/login.ts'}) surfaces the enclosing function. snippets_get({path: 'src/config.ts', view: 'full'}) returns entire file. Invalid: snippets_get({path: 'assets/logo.png'}) reports that binary snippets are unsupported.",
+      "Get code snippet by path. Returns content with line range.\n" +
+      "Example: snippets_get({path: 'src/auth/login.ts', view: 'full'})",
     inputSchema: {
       type: "object",
       required: ["path"],
       additionalProperties: true,
       properties: {
-        path: {
-          type: "string",
-          pattern: "^(?!.*\\.\\.)[A-Za-z0-9_./\\-]+$",
-        },
+        path: { type: "string", pattern: "^(?!.*\\\\.\\\\.)[A-Za-z0-9_./\\\\-]+$" },
         start_line: { type: "number", minimum: 0 },
         end_line: { type: "number", minimum: 0 },
-        compact: {
-          type: "boolean",
-          description:
-            "If true, returns only metadata (path, range, totals, symbols) without content payload.",
-        },
+        compact: { type: "boolean", description: "Metadata only (no content)." },
         include_line_numbers: {
           type: "boolean",
-          description:
-            "If true, prefixes each returned line with its line number (ignored when compact is true).",
+          description: "Prefix each line with line number.",
         },
         view: {
           type: "string",
           enum: ["auto", "symbol", "lines", "full"],
           description:
-            'Retrieval strategy: "auto" (default) uses symbol boundaries if available, "symbol" forces symbol-based snippets, "lines" uses line-based retrieval ignoring symbols, "full" returns entire file (up to 500 lines).',
+            "auto=symbol boundaries, lines=exact range, full=entire file (max 500 lines).",
         },
       },
     },
@@ -454,21 +359,21 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
   {
     name: "deps_closure",
     description:
-      "Dependency graph traversal from a starting file. Use it during impact analysis to map outbound imports or inbound dependents before large refactors.\n\n" +
-      "Returns {root, direction, nodes, edges}; nodes/edges include depth metadata and never mutate repository state. Invalid paths, excessive depth, or non-indexed files raise MCP errors with remediation tips.\n\n" +
-      "Example: deps_closure({path: 'src/shared/config.ts', direction: 'inbound', max_depth: 2}) lists consumers. Invalid: deps_closure({path: '../secret'}) fails path validation.",
+      "Analyze dependencies. Returns nodes and edges for a file.\n" +
+      "Example: deps_closure({path: 'src/shared/config.ts', direction: 'inbound'})",
     inputSchema: {
       type: "object",
       required: ["path"],
       additionalProperties: true,
       properties: {
-        path: {
+        path: { type: "string", pattern: "^(?!.*\\\\.\\\\.)[A-Za-z0-9_./\\\\-]+$" },
+        max_depth: { type: "number", minimum: 0, description: "Max traversal depth." },
+        direction: {
           type: "string",
-          pattern: "^(?!.*\\.\\.)[A-Za-z0-9_./\\-]+$",
+          enum: ["outbound", "inbound"],
+          description: "outbound=imports, inbound=dependents.",
         },
-        max_depth: { type: "number", minimum: 0 },
-        direction: { type: "string", enum: ["outbound", "inbound"] },
-        include_packages: { type: "boolean" },
+        include_packages: { type: "boolean", description: "Include node_modules dependencies." },
       },
     },
     outputSchema: OUTPUT_SCHEMAS.deps_closure,
@@ -940,7 +845,12 @@ export function createRpcHandler(
         }
         case "tools/list": {
           // MCP standard format: tools array without nextCursor (no pagination)
-          result = { tools: TOOL_DESCRIPTORS };
+          // Note: outputSchemaを除外してレスポンスサイズを削減（Claude Code互換性のため）
+          // outputSchemaは大きなJSONとなり、Claude CodeのMCPクライアントでパースエラーを起こす
+          const toolsWithoutOutputSchema = TOOL_DESCRIPTORS.map(
+            ({ outputSchema: _unused, ...rest }) => rest
+          );
+          result = { tools: toolsWithoutOutputSchema };
           break;
         }
         case "resources/list": {
