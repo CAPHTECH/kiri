@@ -314,4 +314,37 @@ describe("detectAndCleanupZombie with options", () => {
 
     consoleSpy.mockRestore();
   });
+
+  it("does not kill daemon when socket file exists but ping fails (custom socket path case)", async () => {
+    // ソケットファイルは存在するがpingに応答しないサーバーをシミュレート
+    // これは別の--socket-pathで起動されたdaemonの可能性があるケース
+    const server = net.createServer((socket) => {
+      // pingに応答しない（無効なレスポンスを返す）
+      socket.on("data", () => {
+        socket.write('{"invalid": "response"}\n');
+      });
+    });
+
+    await new Promise<void>((resolve) => {
+      server.listen(socketPath, () => resolve());
+    });
+
+    const logMessages: string[] = [];
+
+    try {
+      // 現在のプロセスをテスト（ソケットファイル存在 + ping失敗）
+      const result = await detectAndCleanupZombie(process.pid, socketPath, {
+        logger: (msg) => logMessages.push(msg),
+        socketTimeoutMs: 100,
+      });
+
+      // ゾンビとして扱わない（killしない）
+      expect(result).toBe(false);
+      expect(logMessages.join(" ")).toContain("may be using a different socket path");
+    } finally {
+      await new Promise<void>((resolve) => {
+        server.close(() => resolve());
+      });
+    }
+  });
 });

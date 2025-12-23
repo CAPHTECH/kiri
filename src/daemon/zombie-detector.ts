@@ -7,6 +7,7 @@
  * @see Issue #168 - ゾンビソケットの自動検出・クリーンアップ機能
  */
 
+import * as fs from "fs";
 import net from "net";
 
 import { isProcessRunning } from "./lifecycle.js";
@@ -163,17 +164,34 @@ export async function detectAndCleanupZombie(
     return true; // 呼び出し元でリトライ可能
   }
 
-  // プロセスは生きているが、ソケットをリッスンしているか確認
-  const isListening = await isProcessListeningOnSocket(socketPath, socketTimeoutMs);
+  // ソケットファイルが存在するか確認
+  // 注意: 既存daemonが異なる--socket-pathで起動されていた場合、
+  // このソケットパスへのpingは失敗するが、それはゾンビではない。
+  // ソケットファイルが存在しない場合のみゾンビとして扱う。
+  const socketExists = fs.existsSync(socketPath);
 
-  if (isListening) {
-    // 正常に動作中のdaemon
-    logger(`Another daemon (PID ${pid}) is running normally`);
+  if (socketExists) {
+    // ソケットファイルが存在する場合、pingで応答確認
+    const isListening = await isProcessListeningOnSocket(socketPath, socketTimeoutMs);
+
+    if (isListening) {
+      // 正常に動作中のdaemon
+      logger(`Another daemon (PID ${pid}) is running normally`);
+      return false;
+    }
+
+    // ソケットファイルは存在するがpingに応答しない
+    // これは別の--socket-pathで起動されたdaemonの可能性があるため、
+    // 安全側に倒してkillしない
+    logger(
+      `Another daemon (PID ${pid}) exists but not responding on this socket. ` +
+        `It may be using a different socket path. Not treating as zombie.`
+    );
     return false;
   }
 
-  // ゾンビ状態: プロセス生存 + ソケット消失
-  logger(`Detected zombie daemon (PID ${pid}): process alive but not listening on socket`);
+  // ゾンビ状態: プロセス生存 + ソケットファイル消失
+  logger(`Detected zombie daemon (PID ${pid}): process alive but socket file does not exist`);
 
   // ゾンビ検出コールバック
   onZombieDetected?.();
