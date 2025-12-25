@@ -5,6 +5,7 @@
  */
 
 import { EventEmitter } from "events";
+import type { Socket } from "net";
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
@@ -20,14 +21,18 @@ vi.mock("../../src/client/start-daemon.js", () => ({
 vi.mock("net", () => {
   return {
     connect: vi.fn(() => {
-      const socket = new EventEmitter();
-      socket.write = vi.fn((data: string, callback?: (err?: Error) => void) => {
-        if (callback) callback();
+      const socket = new EventEmitter() as unknown as Socket;
+      socket.write = ((...args: Parameters<Socket["write"]>) => {
+        const maybeCallback = typeof args[1] === "function" ? args[1] : args[2];
+        if (typeof maybeCallback === "function") {
+          maybeCallback();
+        }
         return true;
-      });
-      socket.end = vi.fn();
-      socket.destroy = vi.fn();
-      socket.removeAllListeners = vi.fn(() => socket);
+      }) as Socket["write"];
+      socket.end = ((..._args: Parameters<Socket["end"]>) => socket) as Socket["end"];
+      socket.destroy = ((..._args: Parameters<Socket["destroy"]>) => socket) as Socket["destroy"];
+      socket.removeAllListeners = ((..._args: Parameters<Socket["removeAllListeners"]>) =>
+        socket) as Socket["removeAllListeners"];
       // 接続成功をシミュレート
       setTimeout(() => socket.emit("connect"), 10);
       return socket;
