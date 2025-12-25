@@ -132,6 +132,8 @@ export async function ensureDatabaseIndexed(
   const absoluteRepoRoot = resolve(repoRoot);
   const lockfilePath = `${absoluteDatabasePath}.lock`;
   const autoReindexOnCorruption = envFlagEnabled(process.env[AUTO_REINDEX_ON_CORRUPTION_ENV], true);
+  let backupAttempted = false;
+  let backupSucceeded = false;
 
   const dbExists = existsSync(absoluteDatabasePath);
 
@@ -189,7 +191,9 @@ export async function ensureDatabaseIndexed(
     }
 
     if (corruptionReindex) {
+      backupAttempted = true;
       const backups = backupDatabaseFiles(absoluteDatabasePath);
+      backupSucceeded = true;
       if (backups.length > 0) {
         process.stderr.write(`ℹ️  Backed up corrupted database files:\n`);
         for (const backup of backups) {
@@ -223,9 +227,14 @@ export async function ensureDatabaseIndexed(
       `❌ Indexing failed: ${error instanceof Error ? error.message : String(error)}\n`
     );
 
+    const skipCleanup = corruptionReindex && backupAttempted && !backupSucceeded;
+    if (skipCleanup) {
+      process.stderr.write(`⚠️  Skipping cleanup because database backup did not complete.\n`);
+    }
+
     // Clean up partial database to prevent corrupt DB usage on next startup
     // DuckDB creates multiple files (.duckdb, .duckdb.wal, .duckdb.tmp)
-    if (existsSync(absoluteDatabasePath)) {
+    if (!skipCleanup && existsSync(absoluteDatabasePath)) {
       process.stderr.write(`ℹ️  Cleaning up partially created database...\n`);
 
       const dbFiles = [
