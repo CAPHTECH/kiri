@@ -57,6 +57,8 @@ export class DaemonLifecycle {
   private zombieCleanupSuccessTotal = 0;
   private zombieCleanupFailureTotal = 0;
 
+  private activeClients = 0;
+  private shuttingDown = false;
   constructor(
     private readonly databasePath: string,
     private readonly idleTimeoutMinutes: number = 5
@@ -272,6 +274,50 @@ export class DaemonLifecycle {
     if (this.activeConnections === 0) {
       this.startIdleTimer();
     }
+    this.maybeShutdownBecauseNoClients();
+  }
+
+  /**
+   * 接続中クライアント数を増やす
+   */
+  incrementClients(): void {
+    this.activeClients++;
+  }
+
+  /**
+   * 接続中クライアント数を減らす
+   */
+  decrementClients(): void {
+    this.activeClients = Math.max(0, this.activeClients - 1);
+    this.maybeShutdownBecauseNoClients();
+  }
+
+  /**
+   * 接続が0でリクエストもなければ即時終了
+   */
+  private maybeShutdownBecauseNoClients(): void {
+    if (this.shuttingDown) {
+      return;
+    }
+
+    if (this.activeClients !== 0 || this.activeConnections !== 0) {
+      return;
+    }
+
+    this.resetIdleTimer();
+
+    void this.shutdownBecauseNoClients();
+  }
+
+  private async shutdownBecauseNoClients(): Promise<void> {
+    this.shuttingDown = true;
+    console.error("[Daemon] No clients connected. Shutting down...");
+    if (this.shutdownCallback) {
+      await this.shutdownCallback();
+    }
+    await this.removePidFile();
+    await this.releaseStartupLock();
+    process.exit(0);
   }
 
   /**

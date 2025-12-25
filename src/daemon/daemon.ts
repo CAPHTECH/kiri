@@ -270,8 +270,8 @@ async function main() {
     // 注意: watch modeの起動に失敗してもデーモン自体は継続起動する
     if (options.watchMode) {
       lifecycle.setWatchModeActive(true);
-      await lifecycle.log("Watch mode enabled (daemon will not auto-stop)");
-      console.error("[Daemon] Watch mode enabled (daemon will not auto-stop)");
+      await lifecycle.log("Watch mode enabled (idle timeout disabled)");
+      console.error("[Daemon] Watch mode enabled (idle timeout disabled)");
 
       watcher = new IndexWatcher({
         repoRoot: options.repoRoot,
@@ -304,6 +304,12 @@ async function main() {
     // ソケットサーバーを作成（プラットフォームに応じてUnixソケットまたはWindows名前付きパイプ）
     const closeServer = await createSocketServer({
       socketPath,
+      onClientConnected: () => {
+        lifecycle.incrementClients();
+      },
+      onClientDisconnected: () => {
+        lifecycle.decrementClients();
+      },
       onRequest: async (request) => {
         lifecycle.incrementConnections();
         try {

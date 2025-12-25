@@ -23,6 +23,10 @@ export interface SocketServerOptions {
   socketPath: string;
   /** Handler function for JSON-RPC requests */
   onRequest: (request: JsonRpcRequest) => Promise<RpcHandleResult | null>;
+  /** Optional callback when a client connects */
+  onClientConnected?: () => void;
+  /** Optional callback when a client disconnects */
+  onClientDisconnected?: () => void;
   /** Optional error handler for connection errors */
   onError?: (error: Error) => void;
 }
@@ -36,7 +40,7 @@ export interface SocketServerOptions {
 export async function createSocketServer(
   options: SocketServerOptions
 ): Promise<() => Promise<void>> {
-  const { socketPath, onRequest, onError } = options;
+  const { socketPath, onRequest, onError, onClientConnected, onClientDisconnected } = options;
   const isWindows = os.platform() === "win32";
 
   // プラットフォーム非依存の排他ロックでデーモン重複起動を防止
@@ -68,6 +72,19 @@ export async function createSocketServer(
   // ロックファイルにより二重起動は既に防止済み
 
   const server = net.createServer((socket) => {
+    onClientConnected?.();
+
+    let closed = false;
+    const markClosed = () => {
+      if (closed) {
+        return;
+      }
+      closed = true;
+      onClientDisconnected?.();
+    };
+
+    socket.on("close", markClosed);
+
     handleClientConnection(socket, onRequest, onError);
   });
 
