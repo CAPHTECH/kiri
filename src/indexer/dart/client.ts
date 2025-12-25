@@ -129,6 +129,21 @@ export class DartAnalysisClient {
           throw new DAPProtocolError("Failed to spawn Analysis Server: stdio not available");
         }
 
+        const stdin = this.process.stdin;
+
+        stdin.on("error", (error) => {
+          const code = (error as NodeJS.ErrnoException).code;
+          const suffix = code ? ` (${code})` : "";
+          console.error(`[DartAnalysisClient] stdin error:`, error);
+          this.rejectAllPending(
+            new DAPProtocolError(
+              `Analysis Server stdin error${suffix}. Restart the Analysis Server and retry the request.`
+            )
+          );
+          // Fix #1: Reset state to allow reinitialization after crash
+          this.cleanupState();
+        });
+
         // readline で行単位で JSON を読み取る
         this.readline = createInterface({
           input: this.process.stdout,
@@ -408,8 +423,11 @@ export class DartAnalysisClient {
     params: unknown,
     timeoutMs: number = 30000
   ): Promise<TResult> {
-    if (!this.process?.stdin) {
-      throw new DAPProtocolError("Analysis Server process not running");
+    const stdin = this.process?.stdin;
+    if (!stdin || stdin.destroyed || stdin.writableEnded) {
+      throw new DAPProtocolError(
+        "Analysis Server stdin is closed. Restart the Analysis Server and retry the request."
+      );
     }
 
     const id = `${++this.requestId}`;
@@ -430,7 +448,17 @@ export class DartAnalysisClient {
 
       // JSON-RPC メッセージ送信（改行区切り）
       const message = JSON.stringify(request) + "\n";
-      this.process!.stdin!.write(message);
+      try {
+        stdin.write(message);
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        const suffix = code ? ` (${code})` : "";
+        const err = new DAPProtocolError(
+          `Analysis Server stdin write failed${suffix}. Restart the Analysis Server and retry the request.`
+        );
+        this.rejectAllPending(err);
+        this.cleanupState();
+      }
     });
   }
 
