@@ -151,6 +151,7 @@ describe("DaemonLifecycle", () => {
   });
 
   it("tracks active connections correctly", () => {
+    lifecycle.incrementClients();
     lifecycle.incrementConnections();
     lifecycle.incrementConnections();
     expect(() => lifecycle.incrementConnections()).not.toThrow();
@@ -169,6 +170,7 @@ describe("DaemonLifecycle", () => {
       await shutdownCallback();
     });
 
+    lifecycle.incrementClients();
     lifecycle.setWatchModeActive(true);
 
     // 接続が0になってもシャットダウンされないはず
@@ -178,6 +180,28 @@ describe("DaemonLifecycle", () => {
     // 少し待機してもシャットダウンされないことを確認
     await new Promise((resolve) => setTimeout(resolve, 200));
     expect(shutdownCallback).not.toHaveBeenCalled();
+  });
+
+  it("watch mode still shuts down when no clients", async () => {
+    const exitSpy = vi
+      .spyOn(process, "exit")
+      .mockImplementation((() => {}) as (code?: string | number | null) => never);
+
+    const shutdownCallback = vi.fn();
+    lifecycle.onShutdown(async () => {
+      await shutdownCallback();
+    });
+
+    lifecycle.setWatchModeActive(true);
+
+    lifecycle.incrementConnections();
+    lifecycle.decrementConnections();
+
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(shutdownCallback).toHaveBeenCalled();
+    expect(exitSpy).toHaveBeenCalledWith(0);
+
+    exitSpy.mockRestore();
   });
 
   it("idle timeout triggers shutdown when connections reach zero", async () => {
@@ -191,6 +215,7 @@ describe("DaemonLifecycle", () => {
       await shutdownCallback();
     });
 
+    lifecycle.incrementClients();
     lifecycle.incrementConnections();
     lifecycle.decrementConnections();
 
