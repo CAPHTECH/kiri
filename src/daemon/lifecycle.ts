@@ -304,9 +304,25 @@ export class DaemonLifecycle {
       return;
     }
 
-    this.resetIdleTimer();
+    const stateSummary = `clients=${this.activeClients}, connections=${this.activeConnections}, watch=${this.watchModeActive}`;
 
-    void this.shutdownBecauseNoClients();
+    if (this.watchModeActive) {
+      void this.log(`No clients connected (${stateSummary}). Skipping auto-shutdown.`);
+      return;
+    }
+
+    if (this.idleTimeoutMinutes === 0) {
+      void this.log(
+        `No clients connected (${stateSummary}). Shutting down immediately (idle timeout disabled).`
+      );
+      void this.shutdownBecauseNoClients();
+      return;
+    }
+
+    void this.log(
+      `No clients connected (${stateSummary}). Idle shutdown scheduled in ${this.idleTimeoutMinutes} minutes.`
+    );
+    this.startIdleTimer();
   }
 
   private async shutdownBecauseNoClients(): Promise<void> {
