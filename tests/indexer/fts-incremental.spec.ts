@@ -399,9 +399,12 @@ describe("FTS incremental rebuild via IndexWatcher (Issue #158)", () => {
     }
 
     // 8. blobテーブルに存在することを確認
-    const blobResults = await db.all<{ hash: string; content: string }>(
-      "SELECT hash, content FROM blob WHERE content LIKE '%GHERKINUNIQUE158%'"
-    );
+    const fetchBlobResults = async () =>
+      db.all<{ hash: string; content: string }>(
+        "SELECT hash, content FROM blob WHERE content LIKE '%GHERKINUNIQUE158%'"
+      );
+    await waitForCondition(async () => (await fetchBlobResults()).length > 0);
+    const blobResults = await fetchBlobResults();
     expect(blobResults.length).toBeGreaterThan(0);
 
     // 9. ILIKEで見つかることを確認

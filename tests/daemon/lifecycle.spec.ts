@@ -182,7 +182,7 @@ describe("DaemonLifecycle", () => {
     expect(shutdownCallback).not.toHaveBeenCalled();
   });
 
-  it("watch mode still shuts down when no clients", async () => {
+  it("watch mode does not shut down even when no clients", async () => {
     const exitSpy = vi
       .spyOn(process, "exit")
       .mockImplementation((() => {}) as (code?: string | number | null) => never);
@@ -198,8 +198,8 @@ describe("DaemonLifecycle", () => {
     lifecycle.decrementConnections();
 
     await new Promise((resolve) => setTimeout(resolve, 200));
-    expect(shutdownCallback).toHaveBeenCalled();
-    expect(exitSpy).toHaveBeenCalledWith(0);
+    expect(shutdownCallback).not.toHaveBeenCalled();
+    expect(exitSpy).not.toHaveBeenCalled();
 
     exitSpy.mockRestore();
   });
