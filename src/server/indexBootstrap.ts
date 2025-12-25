@@ -1,4 +1,4 @@
-import { existsSync, unlinkSync } from "node:fs";
+import { existsSync, renameSync, unlinkSync } from "node:fs";
 import { access, constants, mkdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
@@ -17,7 +17,65 @@ import { ensureDbParentDir, normalizeDbPath } from "../shared/utils/path.js";
  * @param databasePath - Absolute path to database
  * @returns true if reindex is needed, false if not needed or error occurred
  */
-async function needsMigrationReindex(databasePath: string): Promise<boolean> {
+const AUTO_REINDEX_ON_CORRUPTION_ENV = "KIRI_AUTO_REINDEX_ON_CORRUPTION";
+
+type DatabaseStateCheck = {
+  migrationNeeded: boolean;
+  corruptionDetected: boolean;
+};
+
+function envFlagEnabled(value: string | undefined, defaultValue: boolean): boolean {
+  if (value == null) {
+    return defaultValue;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) {
+    return defaultValue;
+  }
+  return ["1", "true", "yes", "on"].includes(normalized);
+}
+
+function isCorruptDatabaseError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  const message = error.message ?? "";
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes("serialization error") ||
+    normalized.includes("failed to deserialize") ||
+    normalized.includes("field id mismatch") ||
+    normalized.includes("database file is not compatible") ||
+    normalized.includes("file is not a database") ||
+    (normalized.includes("catalog error") && normalized.includes("type"))
+  );
+}
+
+function backupDatabaseFiles(databasePath: string): string[] {
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const candidates = [databasePath, `${databasePath}.wal`, `${databasePath}.tmp`];
+  const backedUp: string[] = [];
+
+  for (const file of candidates) {
+    if (!existsSync(file)) {
+      continue;
+    }
+    const backupPath = `${file}.bak-${timestamp}`;
+    try {
+      renameSync(file, backupPath);
+      backedUp.push(backupPath);
+    } catch (error) {
+      const err = error as Error;
+      throw new Error(
+        `Failed to backup ${file}: ${err.message}. Stop other daemon processes and retry.`
+      );
+    }
+  }
+
+  return backedUp;
+}
+
+async function needsMigrationReindex(databasePath: string): Promise<DatabaseStateCheck> {
   let db: DuckDBClient | null = null;
   try {
     db = await DuckDBClient.connect({ databasePath });
@@ -28,7 +86,7 @@ async function needsMigrationReindex(databasePath: string): Promise<boolean> {
     // Defensive: check array element exists and has valid count
     const firstRow = filesExist[0];
     if (!firstRow || typeof firstRow.count !== "number") {
-      return false;
+      return { migrationNeeded: false, corruptionDetected: false };
     }
 
     const hasFiles = firstRow.count > 0;
@@ -37,11 +95,14 @@ async function needsMigrationReindex(databasePath: string): Promise<boolean> {
     const metadataEmpty = await isDocumentMetadataEmpty(db);
 
     // Migration needed if files exist but metadata is empty
-    return hasFiles && metadataEmpty;
-  } catch {
-    // On any error (corrupt DB, missing table, etc.), assume no migration needed
+    return { migrationNeeded: hasFiles && metadataEmpty, corruptionDetected: false };
+  } catch (error) {
+    if (isCorruptDatabaseError(error)) {
+      return { migrationNeeded: false, corruptionDetected: true };
+    }
+    // On any other error (missing table, etc.), assume no migration needed
     // The subsequent indexing attempt will surface the real error
-    return false;
+    return { migrationNeeded: false, corruptionDetected: false };
   } finally {
     if (db) {
       await db.close();
@@ -70,13 +131,28 @@ export async function ensureDatabaseIndexed(
   const absoluteDatabasePath = normalizeDbPath(databasePath);
   const absoluteRepoRoot = resolve(repoRoot);
   const lockfilePath = `${absoluteDatabasePath}.lock`;
+  const autoReindexOnCorruption = envFlagEnabled(process.env[AUTO_REINDEX_ON_CORRUPTION_ENV], true);
+  let backupAttempted = false;
+  let backupSucceeded = false;
 
-  // Check if migration requires reindex
-  const migrationNeeded = existsSync(absoluteDatabasePath)
+  const dbExists = existsSync(absoluteDatabasePath);
+
+  // Check if migration or corruption requires reindex
+  const { migrationNeeded, corruptionDetected } = dbExists
     ? await needsMigrationReindex(absoluteDatabasePath)
-    : false;
+    : { migrationNeeded: false, corruptionDetected: false };
 
-  const shouldIndex = !existsSync(absoluteDatabasePath) || forceReindex || migrationNeeded;
+  if (corruptionDetected && !autoReindexOnCorruption) {
+    const message =
+      "Corrupt or incompatible database detected. " +
+      `Set ${AUTO_REINDEX_ON_CORRUPTION_ENV}=1 or run a full reindex.`;
+    process.stderr.write(`❌ ${message}\n`);
+    throw new Error(message);
+  }
+
+  const corruptionReindex = dbExists && corruptionDetected && autoReindexOnCorruption;
+
+  const shouldIndex = !dbExists || forceReindex || migrationNeeded || corruptionReindex;
 
   if (!shouldIndex) {
     // Database exists and no reindex requested
@@ -114,12 +190,26 @@ export async function ensureDatabaseIndexed(
       throw error;
     }
 
+    if (corruptionReindex) {
+      backupAttempted = true;
+      const backups = backupDatabaseFiles(absoluteDatabasePath);
+      backupSucceeded = true;
+      if (backups.length > 0) {
+        process.stderr.write(`ℹ️  Backed up corrupted database files:\n`);
+        for (const backup of backups) {
+          process.stderr.write(`   • ${backup}\n`);
+        }
+      }
+    }
+
     // Run indexer
-    const reason = migrationNeeded
-      ? "Document metadata migration detected"
-      : forceReindex
-        ? "Manual reindex requested"
-        : "Database not found";
+    const reason = corruptionReindex
+      ? `Corrupt or incompatible database detected (${AUTO_REINDEX_ON_CORRUPTION_ENV}=1)`
+      : migrationNeeded
+        ? "Document metadata migration detected"
+        : forceReindex
+          ? "Manual reindex requested"
+          : "Database not found";
     process.stderr.write(`⚠️  ${reason}. Running indexer for ${absoluteRepoRoot}...\n`);
 
     await runIndexer({
@@ -137,9 +227,14 @@ export async function ensureDatabaseIndexed(
       `❌ Indexing failed: ${error instanceof Error ? error.message : String(error)}\n`
     );
 
+    const skipCleanup = corruptionReindex && backupAttempted && !backupSucceeded;
+    if (skipCleanup) {
+      process.stderr.write(`⚠️  Skipping cleanup because database backup did not complete.\n`);
+    }
+
     // Clean up partial database to prevent corrupt DB usage on next startup
     // DuckDB creates multiple files (.duckdb, .duckdb.wal, .duckdb.tmp)
-    if (existsSync(absoluteDatabasePath)) {
+    if (!skipCleanup && existsSync(absoluteDatabasePath)) {
       process.stderr.write(`ℹ️  Cleaning up partially created database...\n`);
 
       const dbFiles = [
