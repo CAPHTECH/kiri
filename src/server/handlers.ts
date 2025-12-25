@@ -3663,13 +3663,35 @@ function readPenaltyFlags(): PenaltyFlags {
   };
 }
 
+function parseByteSize(raw: string): number | null {
+  const trimmed = raw.trim().toLowerCase();
+  const match = /^(\d+)([kmg]?)(b)?$/.exec(trimmed);
+  if (!match) {
+    return null;
+  }
+  const value = Number.parseInt(match[1] ?? "", 10);
+  if (!Number.isFinite(value)) {
+    return null;
+  }
+  const unit = match[2] ?? "";
+  let multiplier = 1;
+  if (unit === "k") {
+    multiplier = 1024;
+  } else if (unit === "m") {
+    multiplier = 1024 * 1024;
+  } else if (unit === "g") {
+    multiplier = 1024 * 1024 * 1024;
+  }
+  return value * multiplier;
+}
+
 function readFileCacheMaxBytes(): number {
   const raw = process.env.KIRI_FILECACHE_MAX_BYTES;
   if (raw === undefined) {
     return DEFAULT_FILECACHE_MAX_BYTES;
   }
-  const parsed = Number.parseInt(raw, 10);
-  if (Number.isNaN(parsed)) {
+  const parsed = parseByteSize(raw);
+  if (parsed === null || Number.isNaN(parsed)) {
     return DEFAULT_FILECACHE_MAX_BYTES;
   }
   return Math.max(0, parsed);
@@ -4284,10 +4306,10 @@ async function contextBundleImpl(
         candidate.matchLine === null ? line : Math.min(candidate.matchLine, line);
       candidate.lang ??= row.lang;
       candidate.ext ??= row.ext;
-      const totalLines = coerceLineCount(row.line_count);
-      if (totalLines !== null) {
-        candidate.totalLines ??= totalLines;
-      }
+      const totalLines =
+        coerceLineCount(row.line_count) ??
+        (row.content.length === 0 ? 0 : row.content.split(/\r?\n/).length);
+      candidate.totalLines ??= totalLines;
       candidate.embedding ??= parseEmbedding(row.vector_json ?? null, row.vector_dims ?? null);
       stringMatchSeeds.add(row.path);
       if (!fileCache.has(row.path)) {
@@ -4377,10 +4399,10 @@ async function contextBundleImpl(
         candidate.matchLine === null ? line : Math.min(candidate.matchLine, line);
       candidate.lang ??= row.lang;
       candidate.ext ??= row.ext;
-      const totalLines = coerceLineCount(row.line_count);
-      if (totalLines !== null) {
-        candidate.totalLines ??= totalLines;
-      }
+      const totalLines =
+        coerceLineCount(row.line_count) ??
+        (row.content.length === 0 ? 0 : row.content.split(/\r?\n/).length);
+      candidate.totalLines ??= totalLines;
       candidate.embedding ??= parseEmbedding(row.vector_json ?? null, row.vector_dims ?? null);
       stringMatchSeeds.add(row.path);
       if (!fileCache.has(row.path)) {
@@ -4446,7 +4468,9 @@ async function contextBundleImpl(
       candidate.matchLine ??= 1;
       candidate.lang ??= row.lang;
       candidate.ext ??= row.ext;
-      const totalLines = coerceLineCount(row.line_count);
+      const totalLines =
+        coerceLineCount(row.line_count) ??
+        (row.content ? (row.content.length === 0 ? 0 : row.content.split(/\r?\n/).length) : null);
       if (totalLines !== null) {
         candidate.totalLines ??= totalLines;
       }
@@ -4718,7 +4742,9 @@ async function contextBundleImpl(
     }
     for (const row of metadataRows) {
       const candidate = ensureCandidate(candidates, row.path);
-      const totalLines = coerceLineCount(row.line_count);
+      const totalLines =
+        coerceLineCount(row.line_count) ??
+        (row.content ? (row.content.length === 0 ? 0 : row.content.split(/\r?\n/).length) : null);
       if (totalLines !== null) {
         candidate.totalLines ??= totalLines;
       }
