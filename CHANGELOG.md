@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.25.0] - 2025-12-25
+
+### Added
+
+- **クライアント未接続時のdaemon自動停止** (PR #178): 全クライアント切断後にdaemonが自動停止
+  - アイドルタイムアウト機能と連携し、リソース効率を改善
+
+### Fixed
+
+- **context_bundleファイルキャッシュ制限** (PR #179): メモリ使用量（RSS）の肥大化を防止
+  - LRUキャッシュによる上限管理を導入
+- **Dart stdinエラーガード** (PR #172): Dart解析時のstdinエラーを適切にハンドリング
+
 ## [0.24.4] - 2025-12-25
 
 ### Added
