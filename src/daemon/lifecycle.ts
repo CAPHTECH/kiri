@@ -315,6 +315,8 @@ export class DaemonLifecycle {
     if (this.shutdownCallback) {
       await this.shutdownCallback();
     }
+    await this.removePidFile();
+    await this.releaseStartupLock();
     process.exit(0);
   }
 
