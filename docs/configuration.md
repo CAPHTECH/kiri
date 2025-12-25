@@ -18,17 +18,18 @@ Environment variables and advanced configuration options.
 
 ### Core Settings
 
-| Variable                          | Default        | Description                                                                            |
-| --------------------------------- | -------------- | -------------------------------------------------------------------------------------- |
-| `KIRI_DAEMON_READY_TIMEOUT`       | `240`          | Daemon initialization timeout (seconds). Increase for large repositories               |
-| `KIRI_AUTO_REINDEX_ON_CORRUPTION` | `1`            | Auto rebuild index when DuckDB corruption/incompatibility is detected (`0` to disable) |
-| `KIRI_SOCKET_DIR`                 | OS tmp dir     | Directory for Unix socket fallback when repo paths are too long                        |
-| `KIRI_TOKENIZATION_STRATEGY`      | `phrase-aware` | Tokenization strategy for search                                                       |
-| `KIRI_SCORE_THRESHOLD`            | `0.05`         | Minimum score threshold for search results                                             |
-| `KIRI_ENABLE_DOMAIN_TERMS`        | `0`            | Enable domain-specific term expansion (`1` to enable)                                  |
-| `KIRI_HINT_LOG`                   | `0`            | Enable hint expansion logging (`1` to enable)                                          |
-| `KIRI_SERVER_COMMAND`             | -              | Override MCP server binary (e.g., `npx -y kiri-mcp-server@0.10.0`)                     |
-| `DEBUG`                           | -              | Enable verbose logging (set to `kiri:*`)                                               |
+| Variable                          | Default        | Description                                                                                               |
+| --------------------------------- | -------------- | --------------------------------------------------------------------------------------------------------- |
+| `KIRI_DAEMON_READY_TIMEOUT`       | `240`          | Daemon initialization timeout (seconds). Increase for large repositories                                  |
+| `KIRI_AUTO_REINDEX_ON_CORRUPTION` | `1`            | Auto rebuild index when DuckDB corruption/incompatibility is detected (`0` to disable)                    |
+| `KIRI_SOCKET_DIR`                 | OS tmp dir     | Directory for Unix socket fallback when repo paths are too long                                           |
+| `KIRI_TOKENIZATION_STRATEGY`      | `phrase-aware` | Tokenization strategy for search                                                                          |
+| `KIRI_SCORE_THRESHOLD`            | `0.05`         | Minimum score threshold for search results                                                                |
+| `KIRI_ENABLE_DOMAIN_TERMS`        | `0`            | Enable domain-specific term expansion (`1` to enable)                                                     |
+| `KIRI_HINT_LOG`                   | `0`            | Enable hint expansion logging (`1` to enable)                                                             |
+| `KIRI_FILECACHE_MAX_BYTES`        | `64mb`         | Max bytes for context_bundle content cache (supports k/m/g suffixes). Use `0` to disable content caching. |
+| `KIRI_SERVER_COMMAND`             | -              | Override MCP server binary (e.g., `npx -y kiri-mcp-server@0.10.0`)                                        |
+| `DEBUG`                           | -              | Enable verbose logging (set to `kiri:*`)                                                                  |
 
 ### Dart Analysis Server
 

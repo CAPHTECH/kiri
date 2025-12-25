@@ -868,6 +868,7 @@ const HINT_DICTIONARY_LIMIT = Math.max(
   0,
   Number.parseInt(process.env.KIRI_HINT_DICTIONARY_LIMIT ?? "2", 10)
 );
+const DEFAULT_FILECACHE_MAX_BYTES = 64 * 1024 * 1024;
 
 // Issue #68: Path/Large File Penalty configuration (環境変数で上書き可能)
 const PATH_MISS_DELTA = serverConfig.penalties.pathMissDelta;
@@ -1027,6 +1028,7 @@ interface FileRow {
   lang: string | null;
   ext: string | null;
   content: string | null;
+  line_count?: number | bigint | null;
   score?: number; // FTS検索時のBM25スコア
 }
 
@@ -1035,6 +1037,16 @@ interface FileWithBinaryRow extends FileRow {
 }
 
 interface FileWithEmbeddingRow extends FileWithBinaryRow {
+  vector_json: string | null;
+  vector_dims: number | null;
+}
+
+interface FileMetadataRow {
+  path: string;
+  lang: string | null;
+  ext: string | null;
+  is_binary: boolean;
+  line_count: number | bigint | null;
   vector_json: string | null;
   vector_dims: number | null;
 }
@@ -1251,6 +1263,18 @@ interface FileContentCacheEntry {
   ext: string | null;
   totalLines: number;
   embedding: number[] | null;
+}
+
+interface FileMetadataEntry {
+  lang: string | null;
+  ext: string | null;
+  totalLines: number | null;
+  embedding: number[] | null;
+}
+
+interface FileCacheEntry extends FileMetadataEntry {
+  content?: string;
+  contentBytes?: number;
 }
 
 function normalizeBundleLimit(limit?: number): number {
@@ -1499,7 +1523,7 @@ interface ExpandHintParams {
   repoId: number;
   hintPaths: string[];
   candidates: Map<string, CandidateInfo>;
-  fileCache: Map<string, FileContentCacheEntry>;
+  fileCache: Map<string, FileCacheEntry>;
   weights: ScoringWeights;
   config: HintExpansionConfig;
   hintSeedMeta?: Map<string, HintSeedMeta>;
@@ -1590,7 +1614,7 @@ interface PathHintPromotionArgs {
   repoId: number;
   hintTargets: ResolvedPathHint[];
   candidates: Map<string, CandidateInfo>;
-  fileCache: Map<string, FileContentCacheEntry>;
+  fileCache: Map<string, FileCacheEntry>;
   weights: ScoringWeights;
   hintSeedMeta: Map<string, HintSeedMeta>;
 }
@@ -1972,6 +1996,17 @@ function parseEmbedding(
   }
 }
 
+function coerceLineCount(value: number | bigint | null | undefined): number | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  const numeric = typeof value === "bigint" ? Number(value) : value;
+  if (!Number.isFinite(numeric) || numeric < 0) {
+    return null;
+  }
+  return numeric;
+}
+
 function applyStructuralScores(
   candidates: CandidateInfo[],
   queryEmbedding: number[] | null,
@@ -2219,7 +2254,7 @@ async function loadFileContent(
 ): Promise<FileContentCacheEntry | null> {
   const rows = await db.all<FileWithEmbeddingRow>(
     `
-      SELECT f.path, f.lang, f.ext, f.is_binary, b.content, fe.vector_json, fe.dims AS vector_dims
+      SELECT f.path, f.lang, f.ext, f.is_binary, b.content, b.line_count, fe.vector_json, fe.dims AS vector_dims
       FROM file f
       JOIN blob b ON b.hash = f.blob_hash
       LEFT JOIN file_embedding fe
@@ -2234,12 +2269,44 @@ async function loadFileContent(
   if (!row || row.is_binary || row.content === null) {
     return null;
   }
-  const totalLines = row.content.length === 0 ? 0 : row.content.split(/\r?\n/).length;
+  const totalLines =
+    coerceLineCount(row.line_count) ??
+    (row.content.length === 0 ? 0 : row.content.split(/\r?\n/).length);
   return {
     content: row.content,
     lang: row.lang,
     ext: row.ext,
     totalLines,
+    embedding: parseEmbedding(row.vector_json ?? null, row.vector_dims ?? null),
+  };
+}
+
+async function loadFileMetadata(
+  db: DuckDBClient,
+  repoId: number,
+  filePath: string
+): Promise<FileMetadataEntry | null> {
+  const rows = await db.all<FileMetadataRow>(
+    `
+      SELECT f.path, f.lang, f.ext, f.is_binary, b.line_count, fe.vector_json, fe.dims AS vector_dims
+      FROM file f
+      JOIN blob b ON b.hash = f.blob_hash
+      LEFT JOIN file_embedding fe
+        ON fe.repo_id = f.repo_id
+       AND fe.path = f.path
+      WHERE f.repo_id = ? AND f.path = ?
+      LIMIT 1
+    `,
+    [repoId, filePath]
+  );
+  const row = rows[0];
+  if (!row || row.is_binary) {
+    return null;
+  }
+  return {
+    lang: row.lang,
+    ext: row.ext,
+    totalLines: coerceLineCount(row.line_count),
     embedding: parseEmbedding(row.vector_json ?? null, row.vector_dims ?? null),
   };
 }
@@ -2582,7 +2649,7 @@ async function fetchMetadataOnlyCandidates(
   }
 
   const sql = `
-    SELECT f.path, f.lang, f.ext, b.content
+    SELECT f.path, f.lang, f.ext, b.content, b.line_count
     FROM file f
     JOIN blob b ON b.hash = f.blob_hash
     WHERE ${whereClauses.join(" AND ")}
@@ -2933,7 +3000,7 @@ async function fetchPathFallbackCandidates(
 
   return await db.all<FileWithEmbeddingRow>(
     `
-      SELECT f.path, f.lang, f.ext, f.is_binary, b.content, fe.vector_json, fe.dims AS vector_dims
+      SELECT f.path, f.lang, f.ext, f.is_binary, b.content, b.line_count, fe.vector_json, fe.dims AS vector_dims
       FROM file f
       JOIN blob b ON b.hash = f.blob_hash
       LEFT JOIN file_embedding fe
@@ -3596,6 +3663,40 @@ function readPenaltyFlags(): PenaltyFlags {
   };
 }
 
+function parseByteSize(raw: string): number | null {
+  const trimmed = raw.trim().toLowerCase();
+  const match = /^(\d+)([kmg]?)(b)?$/.exec(trimmed);
+  if (!match) {
+    return null;
+  }
+  const value = Number.parseInt(match[1] ?? "", 10);
+  if (!Number.isFinite(value)) {
+    return null;
+  }
+  const unit = match[2] ?? "";
+  let multiplier = 1;
+  if (unit === "k") {
+    multiplier = 1024;
+  } else if (unit === "m") {
+    multiplier = 1024 * 1024;
+  } else if (unit === "g") {
+    multiplier = 1024 * 1024 * 1024;
+  }
+  return value * multiplier;
+}
+
+function readFileCacheMaxBytes(): number {
+  const raw = process.env.KIRI_FILECACHE_MAX_BYTES;
+  if (raw === undefined) {
+    return DEFAULT_FILECACHE_MAX_BYTES;
+  }
+  const parsed = parseByteSize(raw);
+  if (parsed === null || Number.isNaN(parsed)) {
+    return DEFAULT_FILECACHE_MAX_BYTES;
+  }
+  return Math.max(0, parsed);
+}
+
 /**
  * クエリ統計を計算（単語数と平均単語長）
  */
@@ -4020,7 +4121,71 @@ async function contextBundleImpl(
 
   const candidates = new Map<string, CandidateInfo>();
   const stringMatchSeeds = new Set<string>();
-  const fileCache = new Map<string, FileContentCacheEntry>();
+  const fileCache = new Map<string, FileCacheEntry>();
+  const fileCacheMaxBytes = readFileCacheMaxBytes();
+  let fileCacheBytes = 0;
+
+  const estimateContentBytes = (content: string): number => Buffer.byteLength(content, "utf8");
+
+  const touchFileCache = (filePath: string): FileCacheEntry | undefined => {
+    const entry = fileCache.get(filePath);
+    if (!entry) {
+      return undefined;
+    }
+    fileCache.delete(filePath);
+    fileCache.set(filePath, entry);
+    return entry;
+  };
+
+  const pruneFileCache = (): void => {
+    if (fileCacheMaxBytes <= 0) {
+      if (fileCacheBytes <= 0) {
+        return;
+      }
+      for (const entry of fileCache.values()) {
+        if (!entry.contentBytes) {
+          continue;
+        }
+        delete entry.content;
+        delete entry.contentBytes;
+      }
+      fileCacheBytes = 0;
+      return;
+    }
+    if (fileCacheBytes <= fileCacheMaxBytes) {
+      return;
+    }
+    for (const entry of fileCache.values()) {
+      if (!entry.contentBytes) {
+        continue;
+      }
+      fileCacheBytes = Math.max(0, fileCacheBytes - entry.contentBytes);
+      delete entry.content;
+      delete entry.contentBytes;
+      if (fileCacheBytes <= fileCacheMaxBytes) {
+        break;
+      }
+    }
+  };
+
+  const setFileCacheEntry = (filePath: string, next: FileCacheEntry): void => {
+    const existing = fileCache.get(filePath);
+    if (existing?.contentBytes) {
+      fileCacheBytes = Math.max(0, fileCacheBytes - existing.contentBytes);
+    }
+    const merged: FileCacheEntry = { ...existing, ...next };
+    if (fileCacheMaxBytes <= 0 || !merged.content) {
+      delete merged.content;
+      delete merged.contentBytes;
+    } else {
+      const contentBytes = estimateContentBytes(merged.content);
+      merged.contentBytes = contentBytes;
+      fileCacheBytes += contentBytes;
+    }
+    fileCache.delete(filePath);
+    fileCache.set(filePath, merged);
+    pruneFileCache();
+  };
 
   // Phase 2: IDF重み付けプロバイダーの初期化
   // キーワードの文書頻度に基づいて重みを計算し、高頻度語を自動的に減衰
@@ -4073,7 +4238,7 @@ async function contextBundleImpl(
 
     const rows = await db.all<FileWithEmbeddingRow>(
       `
-        SELECT f.path, f.lang, f.ext, f.is_binary, b.content, fe.vector_json, fe.dims AS vector_dims
+        SELECT f.path, f.lang, f.ext, f.is_binary, b.content, b.line_count, fe.vector_json, fe.dims AS vector_dims
         FROM file f
         JOIN blob b ON b.hash = f.blob_hash
         LEFT JOIN file_embedding fe
@@ -4139,18 +4304,19 @@ async function contextBundleImpl(
       const { line } = buildPreview(row.content, matchedPhrases[0]!);
       candidate.matchLine =
         candidate.matchLine === null ? line : Math.min(candidate.matchLine, line);
-      candidate.content ??= row.content;
       candidate.lang ??= row.lang;
       candidate.ext ??= row.ext;
-      candidate.totalLines ??= row.content.length === 0 ? 0 : row.content.split(/\r?\n/).length;
+      const totalLines =
+        coerceLineCount(row.line_count) ??
+        (row.content.length === 0 ? 0 : row.content.split(/\r?\n/).length);
+      candidate.totalLines ??= totalLines;
       candidate.embedding ??= parseEmbedding(row.vector_json ?? null, row.vector_dims ?? null);
       stringMatchSeeds.add(row.path);
       if (!fileCache.has(row.path)) {
-        fileCache.set(row.path, {
-          content: row.content,
+        setFileCacheEntry(row.path, {
           lang: row.lang,
           ext: row.ext,
-          totalLines: candidate.totalLines ?? 0,
+          totalLines: candidate.totalLines,
           embedding: candidate.embedding,
         });
       }
@@ -4177,7 +4343,7 @@ async function contextBundleImpl(
 
     const rows = await db.all<FileWithEmbeddingRow>(
       `
-        SELECT f.path, f.lang, f.ext, f.is_binary, b.content, fe.vector_json, fe.dims AS vector_dims
+        SELECT f.path, f.lang, f.ext, f.is_binary, b.content, b.line_count, fe.vector_json, fe.dims AS vector_dims
         FROM file f
         JOIN blob b ON b.hash = f.blob_hash
         LEFT JOIN file_embedding fe
@@ -4231,18 +4397,19 @@ async function contextBundleImpl(
       const { line } = buildPreview(row.content, matchedKeywords[0]!);
       candidate.matchLine =
         candidate.matchLine === null ? line : Math.min(candidate.matchLine, line);
-      candidate.content ??= row.content;
       candidate.lang ??= row.lang;
       candidate.ext ??= row.ext;
-      candidate.totalLines ??= row.content.length === 0 ? 0 : row.content.split(/\r?\n/).length;
+      const totalLines =
+        coerceLineCount(row.line_count) ??
+        (row.content.length === 0 ? 0 : row.content.split(/\r?\n/).length);
+      candidate.totalLines ??= totalLines;
       candidate.embedding ??= parseEmbedding(row.vector_json ?? null, row.vector_dims ?? null);
       stringMatchSeeds.add(row.path);
       if (!fileCache.has(row.path)) {
-        fileCache.set(row.path, {
-          content: row.content,
+        setFileCacheEntry(row.path, {
           lang: row.lang,
           ext: row.ext,
-          totalLines: candidate.totalLines ?? 0,
+          totalLines: candidate.totalLines,
           embedding: candidate.embedding,
         });
       }
@@ -4301,19 +4468,22 @@ async function contextBundleImpl(
       candidate.matchLine ??= 1;
       candidate.lang ??= row.lang;
       candidate.ext ??= row.ext;
-      candidate.totalLines ??= row.content?.split(/\r?\n/).length ?? null;
-      candidate.content ??= row.content;
+      const totalLines =
+        coerceLineCount(row.line_count) ??
+        (row.content ? (row.content.length === 0 ? 0 : row.content.split(/\r?\n/).length) : null);
+      if (totalLines !== null) {
+        candidate.totalLines ??= totalLines;
+      }
       candidate.embedding ??= parseEmbedding(row.vector_json ?? null, row.vector_dims ?? null);
       if (boostProfile !== "none") {
         applyBoostProfile(candidate, row, profileConfig, weights, extractedTerms);
       }
       stringMatchSeeds.add(row.path);
-      if (!fileCache.has(row.path) && row.content) {
-        fileCache.set(row.path, {
-          content: row.content,
+      if (!fileCache.has(row.path)) {
+        setFileCacheEntry(row.path, {
           lang: row.lang,
           ext: row.ext,
-          totalLines: candidate.totalLines ?? 0,
+          totalLines: candidate.totalLines,
           embedding: candidate.embedding,
         });
       }
@@ -4524,26 +4694,33 @@ async function contextBundleImpl(
       if (isSuppressedPath(candidate.path)) {
         continue;
       }
-      if (!candidate.content) {
-        const cached = fileCache.get(candidate.path);
-        if (cached) {
-          candidate.content = cached.content;
-          candidate.lang = cached.lang;
-          candidate.ext = cached.ext;
-          candidate.totalLines = cached.totalLines;
-          candidate.embedding = cached.embedding;
-        } else {
-          const loaded = await loadFileContent(db, repoId, candidate.path);
-          if (!loaded) {
-            continue;
-          }
-          candidate.content = loaded.content;
-          candidate.lang = loaded.lang;
-          candidate.ext = loaded.ext;
-          candidate.totalLines = loaded.totalLines;
-          candidate.embedding = loaded.embedding;
-          fileCache.set(candidate.path, loaded);
+      const cached = touchFileCache(candidate.path);
+      if (cached) {
+        candidate.lang ??= cached.lang;
+        candidate.ext ??= cached.ext;
+        candidate.totalLines ??= cached.totalLines;
+        candidate.embedding ??= cached.embedding;
+      }
+      const needsMetadata =
+        candidate.lang === null || candidate.ext === null || candidate.totalLines === null;
+      const hasTextEvidence =
+        candidate.keywordHits.size > 0 ||
+        candidate.phraseHits > 0 ||
+        candidate.fallbackTextHits > 0;
+      const needsEmbedding = candidate.embedding === null && !hasTextEvidence;
+      if (needsMetadata || needsEmbedding) {
+        const loaded = await loadFileMetadata(db, repoId, candidate.path);
+        if (!loaded) {
+          continue;
         }
+        candidate.lang ??= loaded.lang;
+        candidate.ext ??= loaded.ext;
+        candidate.totalLines ??= loaded.totalLines;
+        candidate.embedding ??= loaded.embedding;
+        setFileCacheEntry(candidate.path, {
+          ...(cached ?? {}),
+          ...loaded,
+        });
       }
       result.push(candidate);
     }
@@ -4567,11 +4744,14 @@ async function contextBundleImpl(
     }
     for (const row of metadataRows) {
       const candidate = ensureCandidate(candidates, row.path);
-      if (row.content) {
-        candidate.content = row.content;
-        candidate.totalLines = row.content.split(/\r?\n/).length;
-        fileCache.set(row.path, {
-          content: row.content,
+      const totalLines =
+        coerceLineCount(row.line_count) ??
+        (row.content ? (row.content.length === 0 ? 0 : row.content.split(/\r?\n/).length) : null);
+      if (totalLines !== null) {
+        candidate.totalLines ??= totalLines;
+      }
+      if (!fileCache.has(row.path)) {
+        setFileCacheEntry(row.path, {
           lang: row.lang,
           ext: row.ext,
           totalLines: candidate.totalLines,
@@ -4804,9 +4984,38 @@ async function contextBundleImpl(
 
   const maxScore = Math.max(...prioritizedCandidates.map((candidate) => candidate.score));
 
+  const ensureCandidateContent = async (candidate: CandidateInfo): Promise<boolean> => {
+    if (candidate.content) {
+      return true;
+    }
+    const cached = touchFileCache(candidate.path);
+    if (cached?.content) {
+      candidate.content = cached.content;
+      candidate.lang ??= cached.lang;
+      candidate.ext ??= cached.ext;
+      candidate.totalLines ??= cached.totalLines;
+      candidate.embedding ??= cached.embedding;
+      return true;
+    }
+    const loaded = await loadFileContent(db, repoId, candidate.path);
+    if (!loaded) {
+      return false;
+    }
+    candidate.content = loaded.content;
+    candidate.lang ??= loaded.lang;
+    candidate.ext ??= loaded.ext;
+    candidate.totalLines ??= loaded.totalLines;
+    candidate.embedding ??= loaded.embedding;
+    setFileCacheEntry(candidate.path, {
+      ...(cached ?? {}),
+      ...loaded,
+    });
+    return true;
+  };
+
   const results: ContextBundleItem[] = [];
   for (const candidate of prioritizedCandidates) {
-    if (!candidate.content) {
+    if (!(await ensureCandidateContent(candidate))) {
       continue;
     }
     const snippets = await db.all<SnippetRow>(
@@ -4883,7 +5092,7 @@ async function contextBundleImpl(
 
     // Add preview only if not in compact mode
     if (!params.compact) {
-      item.preview = buildSnippetPreview(candidate.content, startLine, endLine);
+      item.preview = buildSnippetPreview(candidate.content!, startLine, endLine);
     }
 
     results.push(item);

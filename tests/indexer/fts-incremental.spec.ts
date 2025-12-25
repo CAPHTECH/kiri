@@ -29,6 +29,43 @@ interface CleanupTarget {
   dispose: () => Promise<void>;
 }
 
+const waitForCondition = async (
+  predicate: () => Promise<boolean> | boolean,
+  timeoutMs = 10_000,
+  intervalMs = 200
+): Promise<void> => {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await predicate()) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  throw new Error(`Timed out after ${timeoutMs}ms waiting for condition`);
+};
+
+const waitForFtsResults = async (
+  db: DuckDBClient,
+  keyword: string,
+  timeoutMs = 10_000,
+  intervalMs = 200
+): Promise<{ hash: string; score: number | null }[]> => {
+  const deadline = Date.now() + timeoutMs;
+  let results: { hash: string; score: number | null }[] = [];
+  const query = `SELECT hash, fts_main_blob.match_bm25(hash, '${keyword}') AS score
+       FROM blob
+       WHERE score IS NOT NULL
+       LIMIT 10`;
+  while (Date.now() < deadline) {
+    results = await db.all<{ hash: string; score: number | null }>(query);
+    if (results.length > 0) {
+      return results;
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  return results;
+};
+
 describe("FTS incremental rebuild (Issue #158)", () => {
   const cleanupTargets: CleanupTarget[] = [];
 
@@ -348,10 +385,7 @@ describe("FTS incremental rebuild via IndexWatcher (Issue #158)", () => {
     await execa("git", ["commit", "-m", "Add gherkin feature file"], { cwd: repo.path });
 
     // 6. Watcherがリインデックスを完了するまで待機
-    await new Promise((resolve) => setTimeout(resolve, 3000));
-
-    const stats = watcher.getStatistics();
-    expect(stats.reindexCount).toBeGreaterThanOrEqual(1);
+    await waitForCondition(() => watcher.getStatistics().reindexCount >= 1);
 
     // 7. DB接続してFTS検索
     const db = await DuckDBClient.connect({ databasePath: dbPath });
@@ -378,12 +412,7 @@ describe("FTS incremental rebuild via IndexWatcher (Issue #158)", () => {
 
     // 10. FTS (match_bm25) で見つかることを確認
     await db.run("LOAD fts;");
-    const ftsResults = await db.all<{ hash: string; score: number | null }>(
-      `SELECT hash, fts_main_blob.match_bm25(hash, 'GHERKINUNIQUE158') AS score
-       FROM blob
-       WHERE score IS NOT NULL
-       LIMIT 10`
-    );
+    const ftsResults = await waitForFtsResults(db, "GHERKINUNIQUE158");
 
     // Issue #158: FTS検索で新規追加されたblobが見つかることを確認
     expect(ftsResults.length).toBeGreaterThan(0);
