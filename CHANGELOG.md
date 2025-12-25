@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.4] - 2025-12-25
+
+### Added
+
+- **DB不整合の自動復旧** (PR #171): 起動時にDuckDBの破損/互換性エラーを検知したらバックアップ後にフル再インデックス
+  - `KIRI_AUTO_REINDEX_ON_CORRUPTION` で自動復旧の有効/無効を切り替え可能（デフォルト有効）
+
+### Fixed
+
+- **バックアップ失敗時の安全性** (PR #171): 自動復旧のバックアップが完了しない場合はDB削除をスキップ
+
 ## [0.24.3] - 2025-12-23
 
 ### Fixed
