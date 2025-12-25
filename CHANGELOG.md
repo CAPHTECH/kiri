@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.25.1] - 2025-12-25
+
+### Fixed
+
+- **Daemon idle shutdown behavior** (PR #180): avoid immediate shutdown when no clients are connected; keep daemon alive in watch mode
+  - idle timeout now schedules a delayed shutdown instead of exiting immediately
+
+### Tests
+
+- **FTS watcher reindex stability** (PR #180): wait for blob visibility to reduce flakiness
+
 ## [0.25.0] - 2025-12-25
 
 ### Added
