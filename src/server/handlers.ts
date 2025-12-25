@@ -4146,8 +4146,8 @@ async function contextBundleImpl(
         if (!entry.contentBytes) {
           continue;
         }
-        entry.content = undefined;
-        entry.contentBytes = undefined;
+        delete entry.content;
+        delete entry.contentBytes;
       }
       fileCacheBytes = 0;
       return;
@@ -4160,8 +4160,8 @@ async function contextBundleImpl(
         continue;
       }
       fileCacheBytes = Math.max(0, fileCacheBytes - entry.contentBytes);
-      entry.content = undefined;
-      entry.contentBytes = undefined;
+      delete entry.content;
+      delete entry.contentBytes;
       if (fileCacheBytes <= fileCacheMaxBytes) {
         break;
       }
@@ -4175,8 +4175,8 @@ async function contextBundleImpl(
     }
     const merged: FileCacheEntry = { ...existing, ...next };
     if (fileCacheMaxBytes <= 0 || !merged.content) {
-      merged.content = undefined;
-      merged.contentBytes = undefined;
+      delete merged.content;
+      delete merged.contentBytes;
     } else {
       const contentBytes = estimateContentBytes(merged.content);
       merged.contentBytes = contentBytes;
@@ -4704,7 +4704,9 @@ async function contextBundleImpl(
       const needsMetadata =
         candidate.lang === null || candidate.ext === null || candidate.totalLines === null;
       const hasTextEvidence =
-        candidate.keywordHits.size > 0 || candidate.phraseHits > 0 || candidate.fallbackTextHits > 0;
+        candidate.keywordHits.size > 0 ||
+        candidate.phraseHits > 0 ||
+        candidate.fallbackTextHits > 0;
       const needsEmbedding = candidate.embedding === null && !hasTextEvidence;
       if (needsMetadata || needsEmbedding) {
         const loaded = await loadFileMetadata(db, repoId, candidate.path);
@@ -5090,7 +5092,7 @@ async function contextBundleImpl(
 
     // Add preview only if not in compact mode
     if (!params.compact) {
-      item.preview = buildSnippetPreview(candidate.content, startLine, endLine);
+      item.preview = buildSnippetPreview(candidate.content!, startLine, endLine);
     }
 
     results.push(item);
