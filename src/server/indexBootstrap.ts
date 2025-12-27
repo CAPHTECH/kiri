@@ -42,11 +42,11 @@ function isCorruptDatabaseError(error: unknown): boolean {
   const message = error.message ?? "";
   const normalized = message.toLowerCase();
   const ioCorruptionHints =
-    normalized.includes("deserialize") ||
-    normalized.includes("corrupted file") ||
     normalized.includes("deserializedeletes") ||
-    normalized.includes("vector_index") ||
-    normalized.includes("row group size");
+    (normalized.includes("deserialize") &&
+      (normalized.includes("corrupted file") ||
+        normalized.includes("vector_index") ||
+        normalized.includes("row group size")));
   return (
     normalized.includes("serialization error") ||
     normalized.includes("failed to deserialize") ||
