@@ -41,13 +41,20 @@ function isCorruptDatabaseError(error: unknown): boolean {
   }
   const message = error.message ?? "";
   const normalized = message.toLowerCase();
+  const ioCorruptionHints =
+    normalized.includes("deserialize") ||
+    normalized.includes("corrupted file") ||
+    normalized.includes("deserializedeletes") ||
+    normalized.includes("vector_index") ||
+    normalized.includes("row group size");
   return (
     normalized.includes("serialization error") ||
     normalized.includes("failed to deserialize") ||
     normalized.includes("field id mismatch") ||
     normalized.includes("database file is not compatible") ||
     normalized.includes("file is not a database") ||
-    (normalized.includes("catalog error") && normalized.includes("type"))
+    (normalized.includes("catalog error") && normalized.includes("type")) ||
+    (normalized.includes("io error") && ioCorruptionHints)
   );
 }
 
