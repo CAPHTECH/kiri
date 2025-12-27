@@ -41,7 +41,7 @@ function isCorruptDatabaseError(error: unknown): boolean {
   }
   const message = error.message ?? "";
   const normalized = message.toLowerCase();
-  const ioCorruptionHints =
+  const deserializeCorruption =
     normalized.includes("deserializedeletes") ||
     (normalized.includes("deserialize") &&
       (normalized.includes("corrupted file") ||
@@ -49,12 +49,11 @@ function isCorruptDatabaseError(error: unknown): boolean {
         normalized.includes("row group size")));
   return (
     normalized.includes("serialization error") ||
-    normalized.includes("failed to deserialize") ||
     normalized.includes("field id mismatch") ||
     normalized.includes("database file is not compatible") ||
     normalized.includes("file is not a database") ||
     (normalized.includes("catalog error") && normalized.includes("type")) ||
-    (normalized.includes("io error") && ioCorruptionHints)
+    (normalized.includes("io error") && deserializeCorruption)
   );
 }
 
