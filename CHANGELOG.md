@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.25.2] - 2025-12-27
+
+### Fixed
+
+- **IO破損検知の自動リカバリ** (PR #181): DeserializeDeletes などのIO破損兆候を破損判定に含め、起動時の自動フル再インデックスを確実化
+
 ## [0.25.1] - 2025-12-25
 
 ### Fixed
