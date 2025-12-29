@@ -32,7 +32,7 @@ export interface SnippetResult {
   totalLines: number;
   symbolName: string | null;
   symbolKind: string | null;
-  truncated?: boolean; // view: "full" でファイルが MAX_FULL_LINES を超えた場合 true
+  truncated?: boolean; // 返却行数が安全上限を超える場合 true
 }
 
 /**
@@ -63,7 +63,7 @@ interface SnippetRow {
  * Constants
  */
 const DEFAULT_SNIPPET_WINDOW = 150;
-const MAX_FULL_LINES = 500; // view: "full" 時の安全上限
+const MAX_SNIPPET_LINES = 500; // 全モード共通の安全上限
 
 /**
  * 行番号をプレフィックスとして追加する（動的幅調整）
@@ -185,7 +185,7 @@ export async function snippetsGet(
       // ファイル全体を返す（安全上限付き、start_line/end_line は無視）
       useSymbolSnippets = false;
       requestedStart = 1; // 常に1行目から開始
-      requestedEnd = Math.min(totalLines, MAX_FULL_LINES);
+      requestedEnd = Math.min(totalLines, MAX_SNIPPET_LINES);
       break;
     case "auto":
     default: {
@@ -218,6 +218,7 @@ export async function snippetsGet(
   let endLine: number;
   let symbolName: string | null = null;
   let symbolKind: string | null = null;
+  let truncated = false;
 
   if (snippetSelection) {
     startLine = snippetSelection.start_line;
@@ -229,6 +230,38 @@ export async function snippetsGet(
     endLine = Math.max(startLine, Math.min(totalLines, requestedEnd));
   }
 
+  if (view === "full" && totalLines > MAX_SNIPPET_LINES) {
+    truncated = true;
+  }
+
+  const limitEnd = snippetSelection ? Math.min(snippetSelection.end_line, totalLines) : totalLines;
+
+  if (snippetSelection) {
+    const symbolLineCount = snippetSelection.end_line - snippetSelection.start_line + 1;
+    if (symbolLineCount > MAX_SNIPPET_LINES) {
+      const anchor = Math.max(
+        snippetSelection.start_line,
+        Math.min(snippetSelection.end_line, requestedStart)
+      );
+      const maxStart = Math.max(
+        snippetSelection.start_line,
+        snippetSelection.end_line - MAX_SNIPPET_LINES + 1
+      );
+      startLine = Math.min(Math.max(anchor, snippetSelection.start_line), maxStart);
+      endLine = Math.min(limitEnd, startLine + MAX_SNIPPET_LINES - 1);
+      truncated = true;
+    }
+  }
+
+  if (endLine > limitEnd) {
+    endLine = limitEnd;
+  }
+
+  if (endLine - startLine + 1 > MAX_SNIPPET_LINES) {
+    endLine = Math.min(limitEnd, startLine + MAX_SNIPPET_LINES - 1);
+    truncated = true;
+  }
+
   const isCompact = params.compact === true;
   const addLineNumbers = params.includeLineNumbers === true && !isCompact;
 
@@ -237,9 +270,6 @@ export async function snippetsGet(
     const snippetContent = lines.slice(startLine - 1, endLine).join("\n");
     content = addLineNumbers ? prependLineNumbers(snippetContent, startLine) : snippetContent;
   }
-
-  // view: "full" でファイルが MAX_FULL_LINES を超えた場合に truncated フラグを設定
-  const truncated = view === "full" && totalLines > MAX_FULL_LINES;
 
   return {
     path: row.path,
