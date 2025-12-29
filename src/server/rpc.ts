@@ -214,6 +214,7 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
     name: "context_bundle",
     description:
       "Find relevant code for a goal. Returns ranked snippets with path, range, score. Use concrete keywords.\n" +
+      "Query language: code -> repository programming language identifiers/errors; docs -> English or project language.\n" +
       "Example: context_bundle({goal: 'pagination off-by-one bug src/catalog/products.ts'})",
     inputSchema: {
       type: "object",
@@ -294,6 +295,7 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
     name: "files_search",
     description:
       "Search files by keyword. Returns path, matchLine, score.\n" +
+      "Query language: code -> repository programming language identifiers/errors; docs -> English or project language.\n" +
       "Example: files_search({query: 'handleUserLogin', ext: '.ts'})",
     inputSchema: {
       type: "object",
