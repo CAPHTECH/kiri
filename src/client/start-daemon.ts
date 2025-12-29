@@ -27,9 +27,15 @@ function isProcessRunning(pid: number): boolean {
     // シグナル0はプロセスを停止せず、存在チェックのみ
     process.kill(pid, 0);
     return true;
-  } catch {
-    // ESRCHはプロセスが存在しないことを意味
-    return false;
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    // ESRCH = プロセス不存在
+    // EPERM = プロセスは存在するが権限なし（他ユーザーのプロセス）
+    if (code === "ESRCH") {
+      return false;
+    }
+    // EPERMやその他のエラーは「存在するが操作できない」= 存在扱い
+    return true;
   }
 }
 
@@ -121,6 +127,69 @@ function releaseStartupLock(startupLockPath: string): void {
       console.error(`[StartDaemon] Failed to release startup lock: ${err}`);
     }
   }
+}
+
+/**
+ * ソケットが準備完了するまでポーリング
+ *
+ * startDaemonとwaitForDaemonReadyで共通のポーリングロジック
+ *
+ * @param socketPath - ソケットパス
+ * @param readyTimeoutMs - タイムアウト（ミリ秒、未指定時は環境変数または240秒）
+ * @param successMessage - 成功時に出力するメッセージ
+ */
+async function pollSocketReady(
+  socketPath: string,
+  readyTimeoutMs: number | undefined,
+  successMessage: string
+): Promise<void> {
+  const envTimeoutSeconds = process.env.KIRI_DAEMON_READY_TIMEOUT
+    ? Number.parseFloat(process.env.KIRI_DAEMON_READY_TIMEOUT)
+    : undefined;
+  const effectiveTimeoutMs =
+    readyTimeoutMs ??
+    (Number.isFinite(envTimeoutSeconds) && envTimeoutSeconds! > 0
+      ? envTimeoutSeconds! * 1000
+      : 240_000);
+  const pollIntervalMs = 500;
+  const maxAttempts = Math.max(1, Math.ceil(effectiveTimeoutMs / pollIntervalMs));
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      // ソケット接続を試みる
+      const socket = net.connect(socketPath);
+      await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          socket.destroy();
+          reject(new Error("Socket connection timeout"));
+        }, pollIntervalMs);
+
+        socket.on("connect", () => {
+          clearTimeout(timeout);
+          socket.end();
+          resolve();
+        });
+
+        socket.on("error", (err) => {
+          clearTimeout(timeout);
+          reject(err);
+        });
+      });
+
+      // 接続成功
+      console.error(successMessage);
+      return;
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    } catch (_err) {
+      // まだ準備できていない、再試行
+      await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+    }
+  }
+
+  // タイムアウト
+  throw new Error(
+    `Daemon did not become ready within ${Math.round(effectiveTimeoutMs / 1000)} seconds.`
+  );
 }
 
 /**
@@ -323,7 +392,11 @@ export async function startDaemon(options: StartDaemonOptions): Promise<void> {
     readyTimeoutMs,
   } = options;
 
-  // スタートアップロックパス（lifecycle.tsと同じパスを使用）
+  // データベースの親ディレクトリを自動作成（ロック取得前に必要）
+  const dbDir = path.dirname(databasePath);
+  await fs.mkdir(dbDir, { recursive: true });
+
+  // スタートアップロックパス（daemon側でも同一パスを使用: src/daemon/lifecycle.ts参照）
   const startupLockPath = `${databasePath}.daemon.starting`;
 
   // スタートアップロックを取得
@@ -368,75 +441,32 @@ export async function startDaemon(options: StartDaemonOptions): Promise<void> {
       args.push("--security-lock", securityLockPath);
     }
 
-    // データベースの親ディレクトリを自動作成（.kiri/ などが存在しない場合）
-    const dbDir = path.dirname(databasePath);
-    await fs.mkdir(dbDir, { recursive: true });
-
     // デーモンログファイル
     const logFilePath = `${databasePath}.daemon.log`;
-    const logFile = await fs.open(logFilePath, "a");
+    let logFile: fs.FileHandle | undefined;
 
-    // デタッチモードでデーモンを起動
-    const daemon = spawn(process.execPath, [daemonScriptPath, ...args], {
-      detached: true,
-      stdio: ["ignore", logFile.fd, logFile.fd],
-    });
+    try {
+      logFile = await fs.open(logFilePath, "a");
 
-    daemon.unref(); // 親プロセスがデーモンの終了を待たない
+      // デタッチモードでデーモンを起動
+      const daemon = spawn(process.execPath, [daemonScriptPath, ...args], {
+        detached: true,
+        stdio: ["ignore", logFile.fd, logFile.fd],
+      });
 
-    console.error(`[StartDaemon] Spawned daemon process (PID: ${daemon.pid})`);
-    console.error(`[StartDaemon] Daemon log: ${logFilePath}`);
+      daemon.unref(); // 親プロセスがデーモンの終了を待たない
 
-    // ソケットが準備完了するまで待つ（既定で240秒、環境変数で調整可能）
-    const envTimeoutSeconds = process.env.KIRI_DAEMON_READY_TIMEOUT
-      ? Number.parseFloat(process.env.KIRI_DAEMON_READY_TIMEOUT)
-      : undefined;
-    const effectiveTimeoutMs =
-      readyTimeoutMs ??
-      (Number.isFinite(envTimeoutSeconds) && envTimeoutSeconds! > 0
-        ? envTimeoutSeconds! * 1000
-        : 240_000);
-    const pollIntervalMs = 500;
-    const maxAttempts = Math.max(1, Math.ceil(effectiveTimeoutMs / pollIntervalMs));
+      console.error(`[StartDaemon] Spawned daemon process (PID: ${daemon.pid})`);
+      console.error(`[StartDaemon] Daemon log: ${logFilePath}`);
 
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      try {
-        // ソケット接続を試みる
-        const socket = net.connect(socketPath);
-        await new Promise<void>((resolve, reject) => {
-          const timeout = setTimeout(() => {
-            socket.destroy();
-            reject(new Error("Socket connection timeout"));
-          }, pollIntervalMs);
-
-          socket.on("connect", () => {
-            clearTimeout(timeout);
-            socket.end();
-            resolve();
-          });
-
-          socket.on("error", (err) => {
-            clearTimeout(timeout);
-            reject(err);
-          });
-        });
-
-        // 接続成功
-        console.error("[StartDaemon] Daemon is ready");
-        await logFile.close();
-        return;
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      } catch (_err) {
-        // まだ準備できていない、再試行
-        await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+      // ソケットが準備完了するまで待つ
+      await pollSocketReady(socketPath, readyTimeoutMs, "[StartDaemon] Daemon is ready");
+    } finally {
+      // logFileハンドルを必ず閉じる
+      if (logFile) {
+        await logFile.close().catch(() => {});
       }
     }
-
-    // タイムアウト
-    await logFile.close();
-    throw new Error(
-      `Daemon did not become ready within ${Math.round(effectiveTimeoutMs / 1000)} seconds. Check log: ${logFilePath}`
-    );
   } finally {
     // スタートアップロックを解放（成功/失敗に関わらず）
     releaseStartupLock(startupLockPath);
@@ -452,51 +482,9 @@ export async function startDaemon(options: StartDaemonOptions): Promise<void> {
  * @param readyTimeoutMs - タイムアウト（ミリ秒）
  */
 async function waitForDaemonReady(socketPath: string, readyTimeoutMs?: number): Promise<void> {
-  const envTimeoutSeconds = process.env.KIRI_DAEMON_READY_TIMEOUT
-    ? Number.parseFloat(process.env.KIRI_DAEMON_READY_TIMEOUT)
-    : undefined;
-  const effectiveTimeoutMs =
-    readyTimeoutMs ??
-    (Number.isFinite(envTimeoutSeconds) && envTimeoutSeconds! > 0
-      ? envTimeoutSeconds! * 1000
-      : 240_000);
-  const pollIntervalMs = 500;
-  const maxAttempts = Math.max(1, Math.ceil(effectiveTimeoutMs / pollIntervalMs));
-
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    try {
-      // ソケット接続を試みる
-      const socket = net.connect(socketPath);
-      await new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          socket.destroy();
-          reject(new Error("Socket connection timeout"));
-        }, pollIntervalMs);
-
-        socket.on("connect", () => {
-          clearTimeout(timeout);
-          socket.end();
-          resolve();
-        });
-
-        socket.on("error", (err) => {
-          clearTimeout(timeout);
-          reject(err);
-        });
-      });
-
-      // 接続成功
-      console.error("[StartDaemon] Daemon (started by another process) is ready");
-      return;
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    } catch (_err) {
-      // まだ準備できていない、再試行
-      await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
-    }
-  }
-
-  // タイムアウト
-  throw new Error(
-    `Daemon did not become ready within ${Math.round(effectiveTimeoutMs / 1000)} seconds.`
+  await pollSocketReady(
+    socketPath,
+    readyTimeoutMs,
+    "[StartDaemon] Daemon (started by another process) is ready"
   );
 }
