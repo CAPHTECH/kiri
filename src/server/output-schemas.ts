@@ -74,7 +74,7 @@ export const SnippetResultSchema = z.object({
   totalLines: z.number().describe("ファイルの総行数"),
   symbolName: z.string().nullable().describe("シンボル名"),
   symbolKind: z.string().nullable().describe("シンボル種別"),
-  truncated: z.boolean().optional().describe("ファイルが切り詰められたか（view=fullの場合）"),
+  truncated: z.boolean().optional().describe("行数または文字数の安全上限で切り詰められたか"),
 });
 
 // =============================================================================

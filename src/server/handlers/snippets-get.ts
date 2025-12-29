@@ -32,7 +32,7 @@ export interface SnippetResult {
   totalLines: number;
   symbolName: string | null;
   symbolKind: string | null;
-  truncated?: boolean; // 返却行数が安全上限を超える場合 true
+  truncated?: boolean; // 行数/文字数の安全上限で切り詰められた場合 true
 }
 
 /**
@@ -64,6 +64,7 @@ interface SnippetRow {
  */
 const DEFAULT_SNIPPET_WINDOW = 150;
 const MAX_SNIPPET_LINES = 500; // 全モード共通の安全上限
+const MAX_SNIPPET_CHARS = 200_000; // 返却内容の安全上限（1レスポンスの最大文字数）
 
 /**
  * 行番号をプレフィックスとして追加する（動的幅調整）
@@ -268,7 +269,15 @@ export async function snippetsGet(
   let content: string | undefined;
   if (!isCompact) {
     const snippetContent = lines.slice(startLine - 1, endLine).join("\n");
-    content = addLineNumbers ? prependLineNumbers(snippetContent, startLine) : snippetContent;
+    const numberedContent = addLineNumbers
+      ? prependLineNumbers(snippetContent, startLine)
+      : snippetContent;
+    if (numberedContent.length > MAX_SNIPPET_CHARS) {
+      content = numberedContent.slice(0, MAX_SNIPPET_CHARS);
+      truncated = true;
+    } else {
+      content = numberedContent;
+    }
   }
 
   return {

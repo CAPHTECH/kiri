@@ -197,6 +197,46 @@ describe("snippets_get", () => {
     expect(lines[2]).toMatch(/^\s*3→/);
   });
 
+  it("truncates content when it exceeds max chars", async () => {
+    const longLine = "x".repeat(210_000);
+    const repo = await createTempRepo({
+      "src/long.ts": longLine,
+    });
+    cleanupTargets.push({ dispose: repo.cleanup });
+
+    const dbDir = await mkdtemp(join(tmpdir(), "kiri-db-long-line-"));
+    const dbPath = join(dbDir, "index.duckdb");
+    cleanupTargets.push({ dispose: async () => await rm(dbDir, { recursive: true, force: true }) });
+
+    await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+    const db = await DuckDBClient.connect({ databasePath: dbPath });
+    cleanupTargets.push({ dispose: async () => await db.close() });
+
+    const repoId = await resolveRepoId(db, repo.path);
+    const tableAvailability = await checkTableAvailability(db);
+    const context: ServerContext = {
+      db,
+      repoId,
+      services: createServerServices(db),
+      tableAvailability,
+      warningManager: new WarningManager(),
+    };
+
+    const snippet = await snippetsGet(context, {
+      path: "src/long.ts",
+      start_line: 1,
+      end_line: 1,
+      view: "lines",
+    });
+
+    expect(snippet.truncated).toBe(true);
+    expect(snippet.startLine).toBe(1);
+    expect(snippet.endLine).toBe(1);
+    expect(snippet.content).toBeDefined();
+    expect((snippet.content ?? "").length).toBe(200_000);
+  });
+
   it("throws error when blob content is NULL", async () => {
     const repo = await createTempRepo({
       "src/data.ts": "export const value = 42;\n",
