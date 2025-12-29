@@ -2,7 +2,7 @@
 
 > Intelligent code context extraction for LLMs via Model Context Protocol
 
-[![Version](https://img.shields.io/badge/version-0.25.2-blue.svg)](package.json)
+[![Version](https://img.shields.io/badge/version-0.25.3-blue.svg)](package.json)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.6-blue.svg)](https://www.typescriptlang.org/)
 [![MCP](https://img.shields.io/badge/MCP-Compatible-green.svg)](https://modelcontextprotocol.io/)
@@ -139,10 +139,10 @@ See [CHANGELOG.md](CHANGELOG.md) for release notes.
 
 **Recent highlights:**
 
+- **v0.25.3**: Query language guidance in MCP tool descriptions (PR #182)
 - **v0.25.2**: Auto reindex on DeserializeDeletes IO corruption (PR #181)
 - **v0.24.4**: Auto reindex on corrupt/incompatible DB (PR #171)
 - **v0.24.2**: Zombie daemon auto-detection and cleanup (PR #169)
-- **v0.24.1**: DaemonLifecycle stale lock detection (PR #168)
 
 ---
 
@@ -221,4 +221,4 @@ Built with [Model Context Protocol](https://modelcontextprotocol.io/), [DuckDB](
 
 ---
 
-**Status**: v0.25.2 (Beta) - Production-ready for MCP clients
+**Status**: v0.25.3 (Beta) - Production-ready for MCP clients

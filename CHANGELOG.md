@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.25.3] - 2025-12-29
+
+### Changed
+
+- **Query language guidance in MCP tool descriptions** (PR #182): Clarified query language usage in `context_bundle` / `files_search` descriptions
+  - Use repository's programming language for code searches
+  - Use English or project language for documentation searches
+
 ## [0.25.2] - 2025-12-27
 
 ### Fixed
