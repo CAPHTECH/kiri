@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.25.4] - 2025-12-30
+
+### Fixed
+
+- **snippets_get content size handling**: Properly truncate snippet ranges according to `max_answer_chars` parameter
+  - Align line range boundaries with content truncation
+  - Cap output size before returning to client
+
 ## [0.25.3] - 2025-12-29
 
 ### Changed
