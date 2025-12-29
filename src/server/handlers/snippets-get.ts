@@ -275,6 +275,11 @@ export async function snippetsGet(
     if (numberedContent.length > MAX_SNIPPET_CHARS) {
       content = numberedContent.slice(0, MAX_SNIPPET_CHARS);
       truncated = true;
+      const effectiveLineCount = Math.max(
+        1,
+        content.split("\n").length - (content.endsWith("\n") ? 1 : 0)
+      );
+      endLine = Math.min(endLine, startLine + effectiveLineCount - 1);
     } else {
       content = numberedContent;
     }

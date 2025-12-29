@@ -198,9 +198,9 @@ describe("snippets_get", () => {
   });
 
   it("truncates content when it exceeds max chars", async () => {
-    const longLine = "x".repeat(210_000);
+    const line = "x".repeat(100_000);
     const repo = await createTempRepo({
-      "src/long.ts": longLine,
+      "src/long.ts": [line, line, line].join("\n"),
     });
     cleanupTargets.push({ dispose: repo.cleanup });
 
@@ -226,13 +226,13 @@ describe("snippets_get", () => {
     const snippet = await snippetsGet(context, {
       path: "src/long.ts",
       start_line: 1,
-      end_line: 1,
+      end_line: 3,
       view: "lines",
     });
 
     expect(snippet.truncated).toBe(true);
     expect(snippet.startLine).toBe(1);
-    expect(snippet.endLine).toBe(1);
+    expect(snippet.endLine).toBe(2);
     expect(snippet.content).toBeDefined();
     expect((snippet.content ?? "").length).toBe(200_000);
   });
