@@ -28,10 +28,8 @@ Environment variables and advanced configuration options.
 | `KIRI_ENABLE_DOMAIN_TERMS`        | `0`            | Enable domain-specific term expansion (`1` to enable)                                                     |
 | `KIRI_HINT_LOG`                   | `0`            | Enable hint expansion logging (`1` to enable)                                                             |
 | `KIRI_FILECACHE_MAX_BYTES`        | `64mb`         | Max bytes for context_bundle content cache (supports k/m/g suffixes). Use `0` to disable content caching. |
-| `KIRI_SERVER_COMMAND`             | -              | Override MCP server binary (e.g., `npx -y kiri-mcp-server@0.10.0 --`)                                     |
+| `KIRI_SERVER_COMMAND`             | -              | Override MCP server binary (e.g., `npx -y kiri-mcp-server@0.10.0`)                                        |
 | `DEBUG`                           | -              | Enable verbose logging (set to `kiri:*`)                                                                  |
-
-**Note**: The `--` separator is only for `npx`/`npm exec` so npm doesn't parse `--repo/--db`. If the separator reaches `kiri-mcp-server` directly (e.g., a wrapper that forwards all args), options after it are ignored. In that case, omit `--`.
 
 ### Dart Analysis Server
 

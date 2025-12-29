@@ -48,22 +48,14 @@ No installation needed. Configure your MCP client to use `npx` directly.
 
 Edit `~/.claude/mcp.json`:
 
-**With npx:** (include `--` so npm doesn't swallow `--repo/--db`)
+**With npx:**
 
 ```json
 {
   "mcpServers": {
     "kiri": {
       "command": "npx",
-      "args": [
-        "kiri-mcp-server@latest",
-        "--",
-        "--repo",
-        ".",
-        "--db",
-        ".kiri/index.duckdb",
-        "--watch"
-      ]
+      "args": ["kiri-mcp-server@latest", "--repo", ".", "--db", ".kiri/index.duckdb", "--watch"]
     }
   }
 }
@@ -107,7 +99,7 @@ Edit `~/.config/codex/mcp.toml`:
 ```toml
 [mcp_servers.kiri]
 command = "npx"
-args = ["kiri-mcp-server@latest", "--", "--repo", ".", "--db", ".kiri/index.duckdb", "--watch"]
+args = ["kiri-mcp-server@latest", "--repo", ".", "--db", ".kiri/index.duckdb", "--watch"]
 startup_timeout_sec = 240
 ```
 
@@ -124,8 +116,7 @@ startup_timeout_sec = 240
 
 KIRI works with any MCP-compatible client. General configuration:
 
-- **Command**: `kiri` (global) or `npx kiri-mcp-server@latest --`
-- **Note**: If you run `npx` directly in a shell and `--full` is ignored, omit the separator.
+- **Command**: `kiri` (global) or `npx kiri-mcp-server@latest`
 - **Arguments**: `--repo . --db .kiri/index.duckdb --watch`
 - **Protocol**: stdio (JSON-RPC 2.0)
 

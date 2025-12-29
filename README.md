@@ -168,9 +168,7 @@ npm list -g kiri-mcp-server
 npm link kiri-mcp-server
 
 # Or use npx
-npx kiri-mcp-server@latest -- --repo . --db .kiri/index.duckdb
-# If flags like --full are ignored in your shell, drop the separator:
-# npx kiri-mcp-server@latest --repo . --db .kiri/index.duckdb --full
+npx kiri-mcp-server@latest --repo . --db .kiri/index.duckdb
 ```
 
 ### Slow Indexing
