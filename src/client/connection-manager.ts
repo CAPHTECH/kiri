@@ -440,23 +440,28 @@ export class ConnectionManager extends EventEmitter {
    * ソケットイベントリスナーを設定
    */
   private setupSocketListeners(socket: net.Socket): void {
+    // 大きなレスポンスは複数のチャンクに分割されて到着するため、
+    // バッファリングして完全な行のみを処理する
+    let dequeueBuffer = "";
+
     socket.on("data", (data) => {
       this.emit("data", data);
 
       // レスポンスを受信したらキューから削除
-      try {
-        const lines = data
-          .toString()
-          .split("\n")
-          .filter((line) => line.trim());
-        for (const line of lines) {
+      dequeueBuffer += data.toString();
+      const lines = dequeueBuffer.split("\n");
+      dequeueBuffer = lines.pop() ?? "";
+
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
           const response = JSON.parse(line);
           if (response.id !== undefined && response.id !== null) {
             this.requestQueue.dequeue(response.id);
           }
+        } catch {
+          // JSONパースエラーは無視
         }
-      } catch {
-        // JSONパースエラーは無視
       }
     });
 

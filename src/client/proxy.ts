@@ -375,14 +375,21 @@ function createReconnectingBridge(connectionManager: ConnectionManager): void {
 
   // socket → stdout のイベントリスナーを設定
   // Note: dequeue処理はConnectionManager.setupSocketListeners()で行われる
+  // 大きなレスポンスは複数のチャンクに分割されて到着するため、
+  // バッファリングして完全な行（改行で終わる）のみを出力する
+  let socketBuffer = "";
   connectionManager.on("data", (data) => {
-    // 改行区切りでレスポンスを処理し、stdoutへ出力
-    const lines = data
-      .toString()
-      .split("\n")
-      .filter((line) => line.trim());
+    socketBuffer += data.toString();
+
+    // 改行で分割し、最後の要素（不完全な行の可能性）はバッファに残す
+    const lines = socketBuffer.split("\n");
+    socketBuffer = lines.pop() ?? "";
+
+    // 完全な行のみを出力
     for (const line of lines) {
-      console.log(line);
+      if (line.trim()) {
+        console.log(line);
+      }
     }
   });
 
