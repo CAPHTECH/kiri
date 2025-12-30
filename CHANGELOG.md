@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.25.8] - 2025-12-30
+
+### Fixed
+
+- **Large response TCP chunking fix**: Fix incomplete JSON output when responses exceed TCP chunk boundaries
+  - Problem: TCP splits large data into arbitrary chunks, causing JSON-RPC responses to be fragmented
+  - `deps_closure` (52KB+ responses) would never complete due to incomplete JSON being output mid-chunk
+  - Solution: Add buffering in `proxy.ts` and `connection-manager.ts` to only output/process complete lines
+
 ## [0.25.7] - 2025-12-30
 
 ### Fixed
