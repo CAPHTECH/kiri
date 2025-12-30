@@ -74,6 +74,7 @@ Add a new row to the "Results Summary" table below with:
 
 | Date       | Version | Git SHA | Dataset             | P@10  | Avg TFFU | Notes                                                                                      |
 | ---------- | ------- | ------- | ------------------- | ----- | -------- | ------------------------------------------------------------------------------------------ |
+| 2025-12-30 | 0.25.8  | ef2fc09 | v2025-11-docs-plain | 0.243 | 7ms      | Issue #186 baseline measurement; R@5=0.597, TokenSavings=96.7%, Metadata/Inbound Pass=100% |
 | 2025-11-17 | 0.10.0  | 9e59843 | v2025-11-docs-plain | 0.286 | 1ms      | Baseline after metadata hint/docmeta split; docs pass=100%, docs-plain intentionally fails |
 
 **Legend:**
