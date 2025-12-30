@@ -12,6 +12,8 @@ import * as net from "net";
 import * as os from "os";
 import * as readline from "readline";
 
+import PQueue from "p-queue";
+
 import type { JsonRpcRequest, RpcHandleResult } from "../server/rpc.js";
 import { acquireLock, releaseLock } from "../shared/utils/lockfile.js";
 
@@ -145,12 +147,24 @@ export async function createSocketServer(
 }
 
 /**
+ * リクエストキューの同時実行数
+ * DuckDBは単一接続で同時クエリをサポートしないため、
+ * 並列リクエストによるタイムアウトを防ぐために1に設定
+ *
+ * @see Issue #XXX: 並列リクエストでAbortErrorが発生する問題
+ */
+const REQUEST_QUEUE_CONCURRENCY = 1;
+
+/**
  * クライアント接続を処理する
  *
  * 各接続に対して：
  * 1. 改行区切りのJSON-RPCメッセージを読み取る
- * 2. onRequestハンドラを呼び出す
+ * 2. onRequestハンドラを呼び出す（キューで順次処理）
  * 3. レスポンスを改行区切りで返す
+ *
+ * Note: リクエストはPQueueでシリアライズされ、DuckDBへの
+ * 同時クエリによるタイムアウトを防止します。
  */
 function handleClientConnection(
   socket: net.Socket,
@@ -162,61 +176,69 @@ function handleClientConnection(
     crlfDelay: Infinity,
   });
 
-  rl.on("line", async (line) => {
-    let request: JsonRpcRequest | null = null;
-    try {
-      request = JSON.parse(line) as JsonRpcRequest;
-    } catch (err) {
-      const error = err as Error;
-      if (onError) {
-        onError(error);
-      }
+  // リクエストをシリアライズするためのキュー
+  // DuckDBは単一接続で複数の同時クエリを処理できないため、
+  // 並列リクエストを順次処理することでタイムアウトを防止
+  const requestQueue = new PQueue({ concurrency: REQUEST_QUEUE_CONCURRENCY });
 
-      const errorResponse = {
-        jsonrpc: "2.0" as const,
-        id: null,
-        error: {
-          code: -32700,
-          message: "Parse error: Invalid JSON received.",
-        },
-      };
-      socket.write(JSON.stringify(errorResponse) + "\n");
-      return;
-    }
-
-    try {
-      const result = await onRequest(request);
-      if (result) {
-        const hasResponseId = typeof request.id === "string" || typeof request.id === "number";
-        if (!hasResponseId) {
-          return;
+  rl.on("line", (line) => {
+    // キューに追加して順次処理（awaitしないことで入力受付を継続）
+    requestQueue.add(async () => {
+      let request: JsonRpcRequest | null = null;
+      try {
+        request = JSON.parse(line) as JsonRpcRequest;
+      } catch (err) {
+        const error = err as Error;
+        if (onError) {
+          onError(error);
         }
-        // Extract response from RpcHandleResult (statusCode is only for HTTP)
-        socket.write(JSON.stringify(result.response) + "\n");
-      }
-    } catch (err) {
-      const error = err as Error;
-      if (onError) {
-        onError(error);
-      }
 
-      const hasResponseId =
-        request && (typeof request.id === "string" || typeof request.id === "number");
-      if (!hasResponseId) {
+        const errorResponse = {
+          jsonrpc: "2.0" as const,
+          id: null,
+          error: {
+            code: -32700,
+            message: "Parse error: Invalid JSON received.",
+          },
+        };
+        socket.write(JSON.stringify(errorResponse) + "\n");
         return;
       }
 
-      // エラーレスポンスを送信
-      const errorResponse = {
-        jsonrpc: "2.0" as const,
-        id: request.id,
-        error: {
-          code: -32603,
-          message: `Internal error: ${error.message}`,
-        },
-      };
-      socket.write(JSON.stringify(errorResponse) + "\n");
-    }
+      try {
+        const result = await onRequest(request);
+        if (result) {
+          const hasResponseId = typeof request.id === "string" || typeof request.id === "number";
+          if (!hasResponseId) {
+            return;
+          }
+          // Extract response from RpcHandleResult (statusCode is only for HTTP)
+          socket.write(JSON.stringify(result.response) + "\n");
+        }
+      } catch (err) {
+        const error = err as Error;
+        if (onError) {
+          onError(error);
+        }
+
+        const hasResponseId =
+          request && (typeof request.id === "string" || typeof request.id === "number");
+        if (!hasResponseId) {
+          return;
+        }
+
+        // エラーレスポンスを送信
+        const errorResponse = {
+          jsonrpc: "2.0" as const,
+          id: request.id,
+          error: {
+            code: -32603,
+            message: `Internal error: ${error.message}`,
+          },
+        };
+        socket.write(JSON.stringify(errorResponse) + "\n");
+      }
+    });
   });
 
   socket.on("error", (err) => {
@@ -227,5 +249,8 @@ function handleClientConnection(
 
   socket.on("end", () => {
     rl.close();
+    // キューが空になるのを待たずに接続を閉じる
+    // 残っているタスクは完了まで実行される
+    requestQueue.clear();
   });
 }
