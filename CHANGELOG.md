@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.25.7] - 2025-12-30
+
+### Fixed
+
+- **Parallel request AbortError prevention** (PR #185): Fix timeout/AbortError when multiple parallel requests are sent to the daemon
+  - Problem: DuckDB single connection cannot handle concurrent queries, causing parallel requests to timeout
+  - Solution: Serialize requests using p-queue (concurrency=1) to ensure sequential processing
+  - Pending requests in queue are processed to completion even after socket closes (batch request pattern support)
+
 ## [0.25.6] - 2025-12-30
 
 ### Fixed
