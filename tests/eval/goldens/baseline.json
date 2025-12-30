@@ -1,94 +1,122 @@
 {
-  "version": "0.10.0",
-  "gitSha": "9e59843",
-  "date": "2025-11-17T01:56:59.937Z",
+  "version": "0.25.8",
+  "gitSha": "ef2fc09",
+  "date": "2025-12-30T07:00:00.000Z",
   "datasetVersion": "v2025-11-docs-plain",
-  "description": "Baseline measurement after metadata hint vs docmeta filter split (docs vs docs-plain comparison).",
+  "description": "Issue #186 baseline measurement - goldens基準線を固定（現状値記録）",
   "thresholds": {
     "minP10": 0.7,
     "minR5": 0.5,
     "maxTTFU": 1000,
     "minMetadataPassRate": 1,
     "minInboundPassRate": 1,
-    "description": "Target metrics from docs/overview.md: P@10 ≥ 0.7, TTFU ≤ 1.0s"
+    "description": "Target metrics from docs/overview.md: P@10 >= 0.7, TTFU <= 1.0s"
   },
   "overall": {
-    "precisionAtK": 0.2863636364,
-    "avgTTFU": 1.1470588235,
-    "totalQueries": 22,
-    "successfulQueries": 17,
-    "failedQueries": 5,
-    "avgTokensEstimate": 42461.7273,
-    "avgBaselineTokens": 457694.1176,
-    "avgTokenSavingsRatio": 0.8951621479,
-    "avgHintCoverage": 0.1411764706,
-    "metadataPassRate": 0.5,
-    "inboundPassRate": 0.5
+    "precisionAtK": 0.243,
+    "recallAt5": 0.597,
+    "avgTTFU": 7,
+    "totalQueries": 36,
+    "successfulQueries": 36,
+    "failedQueries": 0,
+    "avgTokensEstimate": 3976,
+    "avgBaselineTokens": 236857,
+    "avgTokenSavingsRatio": 0.967,
+    "avgHintCoverage": 0.056,
+    "metadataPassRate": 1.0,
+    "inboundPassRate": 1.0
   },
   "byCategory": {
     "editor": {
-      "precisionAtK": 0.2,
+      "precisionAtK": 0.35,
+      "recallAt5": 0.833,
       "avgTTFU": 0,
       "count": 2,
-      "avgTokenSavingsRatio": 0.9809868942,
-      "avgHintCoverage": 0.3,
+      "avgTokenSavingsRatio": 0.966,
+      "avgHintCoverage": 0.2,
       "metadataPassRate": null,
       "inboundPassRate": null
     },
     "api": {
-      "precisionAtK": 0.1333333333,
+      "precisionAtK": 0.2,
+      "recallAt5": 0.917,
       "avgTTFU": 0,
       "count": 3,
-      "avgTokenSavingsRatio": 0.8790261687,
-      "avgHintCoverage": 0.1666666667,
+      "avgTokenSavingsRatio": 0.988,
+      "avgHintCoverage": 0.133,
       "metadataPassRate": null,
       "inboundPassRate": null
     },
     "debug": {
       "precisionAtK": 0.15,
+      "recallAt5": 1.0,
       "avgTTFU": 0,
       "count": 2,
-      "avgTokenSavingsRatio": 0.8104621471,
+      "avgTokenSavingsRatio": 0.974,
       "avgHintCoverage": 0.15,
       "metadataPassRate": null,
       "inboundPassRate": null
     },
     "feature": {
-      "precisionAtK": 0.125,
+      "precisionAtK": 0.267,
+      "recallAt5": 0.482,
       "avgTTFU": 0,
-      "count": 4,
-      "avgTokenSavingsRatio": 0.9860883952,
-      "avgHintCoverage": 0.175,
+      "count": 6,
+      "avgTokenSavingsRatio": 0.985,
+      "avgHintCoverage": 0.083,
       "metadataPassRate": null,
       "inboundPassRate": null
     },
     "infra": {
-      "precisionAtK": 0.2,
+      "precisionAtK": 0.6,
+      "recallAt5": 1.0,
       "avgTTFU": 0,
       "count": 1,
-      "avgTokenSavingsRatio": 0.6274278364,
-      "avgHintCoverage": 0.3,
+      "avgTokenSavingsRatio": 0.96,
+      "avgHintCoverage": 0.4,
       "metadataPassRate": null,
       "inboundPassRate": null
     },
     "docs": {
-      "precisionAtK": 0.9,
-      "avgTTFU": 3.9,
-      "count": 5,
-      "avgTokenSavingsRatio": 0.8851997017,
-      "avgHintCoverage": 0,
-      "metadataPassRate": 1,
-      "inboundPassRate": 1
-    },
-    "docs-plain": {
-      "precisionAtK": 0,
+      "precisionAtK": 0.25,
+      "recallAt5": 0.567,
       "avgTTFU": 0,
       "count": 5,
-      "avgTokenSavingsRatio": null,
-      "avgHintCoverage": null,
-      "metadataPassRate": 0,
-      "inboundPassRate": 0
+      "avgTokenSavingsRatio": 0.973,
+      "avgHintCoverage": 0,
+      "metadataPassRate": 1.0,
+      "inboundPassRate": 1.0
+    },
+    "docs-plain": {
+      "precisionAtK": 0.3,
+      "recallAt5": 0.9,
+      "avgTTFU": 1,
+      "count": 5,
+      "avgTokenSavingsRatio": 0.882,
+      "avgHintCoverage": 0,
+      "metadataPassRate": 1.0,
+      "inboundPassRate": 1.0
+    },
+    "graph-test": {
+      "precisionAtK": 0.183,
+      "recallAt5": 0.319,
+      "avgTTFU": 19,
+      "count": 6,
+      "avgTokenSavingsRatio": 0.989,
+      "avgHintCoverage": 0,
+      "metadataPassRate": null,
+      "inboundPassRate": null
+    },
+    "graph-test-baseline": {
+      "precisionAtK": 0.183,
+      "recallAt5": 0.319,
+      "avgTTFU": 29,
+      "count": 6,
+      "avgTokenSavingsRatio": 0.988,
+      "avgHintCoverage": 0,
+      "metadataPassRate": null,
+      "inboundPassRate": null
     }
   },
-  "notes": "Metrics captured from pnpm run eval:golden on 2025-11-17 after metadata hint vs docmeta filter changes."
+  "notes": "Issue #186 baseline measurement on 2025-12-30. LLM再ランキングなし、1仮説/1パラメータ（測定のみ）、対象ドメイン非依存。"
 }
