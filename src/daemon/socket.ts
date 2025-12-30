@@ -249,8 +249,8 @@ function handleClientConnection(
 
   socket.on("end", () => {
     rl.close();
-    // キューが空になるのを待たずに接続を閉じる
-    // 残っているタスクは完了まで実行される
-    requestQueue.clear();
+    // Note: requestQueueはクリアしない
+    // クライアントがソケットを閉じた後でも、既に受信したリクエストは
+    // 処理を完了させる（バッチリクエストのパターンに対応）
   });
 }
