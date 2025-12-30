@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.25.6] - 2025-12-30
+
+### Fixed
+
+- **Daemon startup deadlock caused by duplicate locking** (Issue from v0.25.5): Fix proxy-side startup lock acquisition that prevented daemon from starting
+  - Problem: Proxy and daemon both tried to acquire the same startup lock, causing daemon to exit with "Another daemon is starting up"
+  - Solution: Remove startup lock logic from proxy side; daemon-only lock management ensures single daemon invariant while allowing proper startup
+
 ## [0.25.5] - 2025-12-30
 
 ### Fixed
