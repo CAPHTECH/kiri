@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.25.5] - 2025-12-30
+
+### Fixed
+
+- **Daemon多重起動のレースコンディション防止** (PR #184): 複数MCPクライアントが同時にdaemonを起動しようとした際の競合を防止
+  - スタートアップロックによる排他制御を追加
+  - isProcessRunning: EPERM エラーを「プロセス存在」として正しく扱う
+  - ディレクトリ作成順序修正でENOENTエラーを防止
+  - logFileハンドルリーク修正
+  - ポーリングロジックを共通化
+
 ## [0.25.4] - 2025-12-30
 
 ### Fixed
