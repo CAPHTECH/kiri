@@ -48,6 +48,7 @@ interface IndexerOptions {
   changedPaths?: string[]; // For incremental indexing: only reindex these files
   skipLocking?: boolean; // Fix #1: Internal use only - allows caller (e.g., watcher) to manage lock
   skipCochange?: boolean; // Skip co-change graph computation (use --no-cochange flag)
+  configPath?: string; // Path to denylist.yml configuration file
 }
 
 interface BlobRecord {
@@ -1548,6 +1549,70 @@ async function reconcileDeletedFiles(
 }
 
 /**
+ * Remove files from index that are now denied by denylist/gitignore.
+ * This handles cases where .gitignore or denylist.yml is updated to add new patterns,
+ * requiring cleanup of previously indexed files that now match the deny patterns.
+ *
+ * @param db - Database client
+ * @param repoId - Repository ID
+ * @param denylistFilter - Denylist filter instance
+ * @returns Array of paths that were purged from the index
+ */
+async function purgeDeniedFiles(
+  db: DuckDBClient,
+  repoId: number,
+  denylistFilter: ReturnType<typeof createDenylistFilter>
+): Promise<string[]> {
+  // Get all indexed files from database
+  const indexedFiles = await db.all<{ path: string }>("SELECT path FROM file WHERE repo_id = ?", [
+    repoId,
+  ]);
+
+  // Find files that are now denied
+  const deniedPaths: string[] = [];
+  for (const row of indexedFiles) {
+    if (denylistFilter.isDenied(row.path)) {
+      deniedPaths.push(row.path);
+    }
+  }
+
+  // Delete all records for denied files in a single transaction
+  if (deniedPaths.length > 0) {
+    await db.transaction(async () => {
+      const placeholders = deniedPaths.map(() => "?").join(", ");
+      const params = [repoId, ...deniedPaths];
+
+      await db.run(`DELETE FROM symbol WHERE repo_id = ? AND path IN (${placeholders})`, params);
+      await db.run(`DELETE FROM snippet WHERE repo_id = ? AND path IN (${placeholders})`, params);
+      await db.run(
+        `DELETE FROM dependency WHERE repo_id = ? AND src_path IN (${placeholders})`,
+        params
+      );
+      await db.run(
+        `DELETE FROM file_embedding WHERE repo_id = ? AND path IN (${placeholders})`,
+        params
+      );
+      await db.run(
+        `DELETE FROM document_metadata WHERE repo_id = ? AND path IN (${placeholders})`,
+        params
+      );
+      await db.run(
+        `DELETE FROM document_metadata_kv WHERE repo_id = ? AND path IN (${placeholders})`,
+        params
+      );
+      await db.run(
+        `DELETE FROM markdown_link WHERE repo_id = ? AND src_path IN (${placeholders})`,
+        params
+      );
+      await db.run(`DELETE FROM tree WHERE repo_id = ? AND path IN (${placeholders})`, params);
+      await db.run(`DELETE FROM file WHERE repo_id = ? AND path IN (${placeholders})`, params);
+    });
+  }
+
+  return deniedPaths;
+}
+
+/**
  * 単一ファイルのレコードを削除する（トランザクション内で使用）
  * Delete all records for a single file (must be called within a transaction)
  *
@@ -1663,7 +1728,7 @@ export async function runIndexer(options: IndexerOptions): Promise<void> {
       if (options.changedPaths) {
         // Apply denylist filter for --since mode (watch mode already filters)
         // This ensures sensitive files are never indexed even if git-tracked
-        const denylistFilter = createDenylistFilter(repoRoot);
+        const denylistFilter = createDenylistFilter(repoRoot, options.configPath);
         const filteredChangedPaths = options.changedPaths.filter(
           (p) => !denylistFilter.isDenied(p)
         );
@@ -1678,6 +1743,12 @@ export async function runIndexer(options: IndexerOptions): Promise<void> {
         const deletedPaths = await reconcileDeletedFiles(dbClient, repoId, repoRoot, excludeSet);
         if (deletedPaths.length > 0) {
           console.info(`Removed ${deletedPaths.length} deleted file(s) from index.`);
+        }
+
+        // Purge files that are now denied (handles updated .gitignore or denylist.yml)
+        const purgedPaths = await purgeDeniedFiles(dbClient, repoId, denylistFilter);
+        if (purgedPaths.length > 0) {
+          console.info(`Purged ${purgedPaths.length} file(s) now denied by denylist.`);
         }
 
         const existingHashes = await getExistingFileHashes(dbClient, repoId);
@@ -1914,7 +1985,7 @@ export async function runIndexer(options: IndexerOptions): Promise<void> {
       // Apply denylist filter to exclude sensitive files (e.g., *.pem, secrets/**)
       // This ensures consistency with watch mode and protects against files
       // that were accidentally committed to git but should not be indexed
-      const denylistFilter = createDenylistFilter(repoRoot);
+      const denylistFilter = createDenylistFilter(repoRoot, options.configPath);
       const beforeFilterCount = paths.length;
       paths = paths.filter((p) => !denylistFilter.isDenied(p));
       const filteredCount = beforeFilterCount - paths.length;
