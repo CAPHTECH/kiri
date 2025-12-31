@@ -28,6 +28,7 @@ import {
 import { computeGraphMetrics, incrementalGraphUpdate } from "./graph-metrics.js";
 import { detectLanguage } from "./language.js";
 import { mergeRepoRecords } from "./migrations/repo-merger.js";
+import { createDenylistFilter } from "./pipeline/filters/denylist.js";
 import { getIndexerQueue } from "./queue.js";
 import {
   ensureBaseSchema,
@@ -47,6 +48,7 @@ interface IndexerOptions {
   changedPaths?: string[]; // For incremental indexing: only reindex these files
   skipLocking?: boolean; // Fix #1: Internal use only - allows caller (e.g., watcher) to manage lock
   skipCochange?: boolean; // Skip co-change graph computation (use --no-cochange flag)
+  configPath?: string; // Path to denylist.yml configuration file
 }
 
 interface BlobRecord {
@@ -1483,6 +1485,108 @@ async function getExistingFileHashes(
  * @param excludePaths - Paths to exclude from deletion (e.g., changedPaths from watch mode)
  * @returns Array of deleted file paths
  */
+
+/**
+ * Chunk size for batched DELETE operations.
+ * Prevents SQL placeholder limit issues with large file counts.
+ */
+const DELETE_CHUNK_SIZE = 500;
+
+/**
+ * パスをrepoRoot基準のPOSIX相対パスに正規化する
+ * セキュリティ: パストラバーサル（..）を検出して拒否
+ *
+ * @param filePath - 正規化するファイルパス
+ * @returns 正規化されたPOSIX相対パス
+ * @throws パストラバーサルが検出された場合
+ */
+function normalizePathForDenylist(filePath: string): string {
+  // バックスラッシュをスラッシュに変換（Windows対応）
+  let normalized = filePath.replace(/\\/g, "/");
+  // 先頭の ./ を除去
+  if (normalized.startsWith("./")) {
+    normalized = normalized.slice(2);
+  }
+  // 先頭の / を除去（絶対パスを相対パスに）
+  if (normalized.startsWith("/")) {
+    normalized = normalized.slice(1);
+  }
+  // パストラバーサル検出（セキュリティ）
+  if (normalized.includes("..")) {
+    throw new Error(`Path traversal detected: ${filePath}`);
+  }
+  return normalized;
+}
+
+/**
+ * パスを保持するテーブルとカラムの定義
+ * スキーマ変更時の追従漏れを防ぐため、単一の定義に集約
+ *
+ * Security: deny/purge時にすべてのテーブルから確実に削除するため
+ */
+const PATH_TABLES: ReadonlyArray<{ table: string; column: string }> = [
+  // Standard file-related tables
+  { table: "symbol", column: "path" },
+  { table: "snippet", column: "path" },
+  { table: "dependency", column: "src_path" },
+  { table: "dependency", column: "dst" },
+  { table: "file_embedding", column: "path" },
+  { table: "document_metadata", column: "path" },
+  { table: "document_metadata_kv", column: "path" },
+  { table: "markdown_link", column: "src_path" },
+  { table: "markdown_link", column: "resolved_path" },
+  { table: "tree", column: "path" },
+  { table: "file", column: "path" },
+  // Graph layer tables - prevent sensitive file path leakage
+  { table: "graph_metrics", column: "path" },
+  { table: "inbound_edges", column: "target_path" },
+  { table: "inbound_edges", column: "source_path" },
+  { table: "cochange", column: "file1" },
+  { table: "cochange", column: "file2" },
+];
+
+/**
+ * Delete file records from all related tables.
+ * Handles chunking for large batches to avoid SQL placeholder limits.
+ *
+ * Security: Uses PATH_TABLES definition to ensure all path-containing tables
+ * are cleaned up, preventing sensitive file path leakage after deletion.
+ *
+ * @param db - DuckDB client
+ * @param repoId - Repository ID
+ * @param paths - File paths to delete
+ */
+async function deleteFilesFromAllTables(
+  db: DuckDBClient,
+  repoId: number,
+  paths: string[]
+): Promise<void> {
+  if (paths.length === 0) return;
+
+  // 重複排除: 無駄なDELETE実行を削減
+  const uniquePaths = [...new Set(paths)];
+
+  // Single transaction for atomicity - all chunks succeed or all fail together
+  // This prevents partial deletion that could leave sensitive files in some tables
+  await db.transaction(async () => {
+    // Process in chunks to avoid SQL placeholder limits
+    for (let i = 0; i < uniquePaths.length; i += DELETE_CHUNK_SIZE) {
+      const chunk = uniquePaths.slice(i, i + DELETE_CHUNK_SIZE);
+      const placeholders = chunk.map(() => "?").join(", ");
+      const params = [repoId, ...chunk];
+
+      // PATH_TABLES定義からすべてのテーブルを削除
+      // スキーマ変更時の追従漏れを防ぐ
+      for (const { table, column } of PATH_TABLES) {
+        await db.run(
+          `DELETE FROM ${table} WHERE repo_id = ? AND ${column} IN (${placeholders})`,
+          params
+        );
+      }
+    }
+  });
+}
+
 async function reconcileDeletedFiles(
   db: DuckDBClient,
   repoId: number,
@@ -1509,41 +1613,46 @@ async function reconcileDeletedFiles(
     }
   }
 
-  // Delete all records for removed files in a single transaction
-  // Batched DELETE operations to avoid N+1 query problem
-  if (deletedPaths.length > 0) {
-    await db.transaction(async () => {
-      const placeholders = deletedPaths.map(() => "?").join(", ");
-      const params = [repoId, ...deletedPaths];
-
-      await db.run(`DELETE FROM symbol WHERE repo_id = ? AND path IN (${placeholders})`, params);
-      await db.run(`DELETE FROM snippet WHERE repo_id = ? AND path IN (${placeholders})`, params);
-      await db.run(
-        `DELETE FROM dependency WHERE repo_id = ? AND src_path IN (${placeholders})`,
-        params
-      );
-      await db.run(
-        `DELETE FROM file_embedding WHERE repo_id = ? AND path IN (${placeholders})`,
-        params
-      );
-      await db.run(
-        `DELETE FROM document_metadata WHERE repo_id = ? AND path IN (${placeholders})`,
-        params
-      );
-      await db.run(
-        `DELETE FROM document_metadata_kv WHERE repo_id = ? AND path IN (${placeholders})`,
-        params
-      );
-      await db.run(
-        `DELETE FROM markdown_link WHERE repo_id = ? AND src_path IN (${placeholders})`,
-        params
-      );
-      await db.run(`DELETE FROM tree WHERE repo_id = ? AND path IN (${placeholders})`, params);
-      await db.run(`DELETE FROM file WHERE repo_id = ? AND path IN (${placeholders})`, params);
-    });
-  }
+  // Delete all records for removed files (includes graph layer tables for security)
+  await deleteFilesFromAllTables(db, repoId, deletedPaths);
 
   return deletedPaths;
+}
+
+/**
+ * Remove files from index that are now denied by denylist/gitignore.
+ * This handles cases where .gitignore or denylist.yml is updated to add new patterns,
+ * requiring cleanup of previously indexed files that now match the deny patterns.
+ *
+ * @param db - Database client
+ * @param repoId - Repository ID
+ * @param denylistFilter - Denylist filter instance
+ * @returns Array of paths that were purged from the index
+ */
+async function purgeDeniedFiles(
+  db: DuckDBClient,
+  repoId: number,
+  denylistFilter: ReturnType<typeof createDenylistFilter>
+): Promise<string[]> {
+  // Get all indexed files from database
+  const indexedFiles = await db.all<{ path: string }>("SELECT path FROM file WHERE repo_id = ?", [
+    repoId,
+  ]);
+
+  // Find files that are now denied
+  // パス正規化を適用してdeny判定の一貫性を保証
+  const deniedPaths: string[] = [];
+  for (const row of indexedFiles) {
+    // DBのパスも正規化してからdeny判定（パス形式の不一致を防止）
+    if (denylistFilter.isDenied(normalizePathForDenylist(row.path))) {
+      deniedPaths.push(row.path);
+    }
+  }
+
+  // Delete all records for denied files (includes graph layer tables for security)
+  await deleteFilesFromAllTables(db, repoId, deniedPaths);
+
+  return deniedPaths;
 }
 
 /**
@@ -1660,18 +1769,36 @@ export async function runIndexer(options: IndexerOptions): Promise<void> {
 
       // Incremental mode: only reindex files in changedPaths (empty array means no-op)
       if (options.changedPaths) {
+        // Apply denylist filter for --since mode (watch mode already filters)
+        // This ensures sensitive files are never indexed even if git-tracked
+        const denylistFilter = createDenylistFilter(repoRoot, options.configPath);
+        // パス正規化を適用してdeny判定の一貫性を保証
+        const filteredChangedPaths = options.changedPaths.filter(
+          (p) => !denylistFilter.isDenied(normalizePathForDenylist(p))
+        );
+        const filteredCount = options.changedPaths.length - filteredChangedPaths.length;
+        if (filteredCount > 0) {
+          console.info(`Filtered ${filteredCount} file(s) by denylist in incremental mode.`);
+        }
+
         // First, reconcile deleted files (handle renames/deletions)
         // Fix #157: changedPathsをexcludePathsとして渡し、watchで検出されたファイルが誤って削除されないようにする
-        const excludeSet = new Set(options.changedPaths);
+        const excludeSet = new Set(filteredChangedPaths);
         const deletedPaths = await reconcileDeletedFiles(dbClient, repoId, repoRoot, excludeSet);
         if (deletedPaths.length > 0) {
           console.info(`Removed ${deletedPaths.length} deleted file(s) from index.`);
         }
 
+        // Purge files that are now denied (handles updated .gitignore or denylist.yml)
+        const purgedPaths = await purgeDeniedFiles(dbClient, repoId, denylistFilter);
+        if (purgedPaths.length > 0) {
+          console.info(`Purged ${purgedPaths.length} file(s) now denied by denylist.`);
+        }
+
         const existingHashes = await getExistingFileHashes(dbClient, repoId);
         const { blobs, files, embeddings, missingPaths } = await scanFilesInBatches(
           repoRoot,
-          options.changedPaths
+          filteredChangedPaths
         );
 
         // Filter out files that haven't actually changed (same hash)
@@ -1690,13 +1817,19 @@ export async function runIndexer(options: IndexerOptions): Promise<void> {
         }
 
         if (changedFiles.length === 0 && missingPaths.length === 0) {
+          // ログはフィルタ後の件数を使用して正確な情報を提供
           console.info(
-            `No actual changes detected in ${options.changedPaths.length} file(s). Skipping reindex.`
+            `No actual changes detected in ${filteredChangedPaths.length} file(s)` +
+              (filteredCount > 0 ? ` (${filteredCount} filtered by denylist)` : "") +
+              `. Skipping reindex.`
           );
 
-          // Fix #3 & #4: If files were deleted (git or watch mode), still need to dirty FTS and rebuild
-          if (deletedPaths.length > 0) {
-            console.info(`${deletedPaths.length} file(s) deleted (git) - marking FTS dirty`);
+          // Fix #3 & #4: If files were deleted or purged, still need to dirty FTS and rebuild
+          if (deletedPaths.length > 0 || purgedPaths.length > 0) {
+            const totalRemoved = deletedPaths.length + purgedPaths.length;
+            console.info(
+              `${totalRemoved} file(s) removed (deleted: ${deletedPaths.length}, purged: ${purgedPaths.length}) - marking FTS dirty`
+            );
 
             if (defaultBranch) {
               await dbClient.run(
@@ -1711,6 +1844,10 @@ export async function runIndexer(options: IndexerOptions): Promise<void> {
             }
 
             await rebuildFTSIfNeeded(dbClient, repoId);
+
+            // Garbage collect orphaned blobs from deleted/purged files
+            // Security: Prevents sensitive file content from remaining in blob table
+            await garbageCollectBlobs(dbClient);
           } else {
             // No deletions either - just update timestamp
             if (defaultBranch) {
@@ -1884,6 +2021,10 @@ export async function runIndexer(options: IndexerOptions): Promise<void> {
           await incrementalCochangeUpdate(dbClient, repoId, repoRoot);
         }
 
+        // Garbage collect orphaned blobs after incremental updates
+        // Security: Prevents sensitive file content from remaining in blob table
+        await garbageCollectBlobs(dbClient);
+
         return;
       }
 
@@ -1898,6 +2039,29 @@ export async function runIndexer(options: IndexerOptions): Promise<void> {
           paths = fallbackPaths;
         }
       }
+
+      // Apply denylist filter to exclude sensitive files (e.g., *.pem, secrets/**)
+      // This ensures consistency with watch mode and protects against files
+      // that were accidentally committed to git but should not be indexed
+      const denylistFilter = createDenylistFilter(repoRoot, options.configPath);
+      const beforeFilterCount = paths.length;
+      // パス正規化を適用してdeny判定の一貫性を保証
+      paths = paths.filter((p) => !denylistFilter.isDenied(normalizePathForDenylist(p)));
+      const filteredCount = beforeFilterCount - paths.length;
+      if (filteredCount > 0) {
+        console.info(`Filtered ${filteredCount} file(s) by denylist.`);
+      }
+
+      // Purge previously indexed files that are now denied
+      // Important: This ensures that if .gitignore or denylist.yml is updated,
+      // previously indexed sensitive files are removed from the database
+      const purgedPaths = await purgeDeniedFiles(dbClient, repoId, denylistFilter);
+      if (purgedPaths.length > 0) {
+        console.info(
+          `Purged ${purgedPaths.length} previously indexed file(s) now denied by denylist.`
+        );
+      }
+
       const { blobs, files, embeddings, missingPaths } = await scanFilesInBatches(repoRoot, paths);
 
       // In full mode, missingPaths should be rare (git ls-files returns existing files)
