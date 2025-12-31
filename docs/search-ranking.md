@@ -41,17 +41,20 @@ tokenization:
 
 ### 戦略の種類
 
-| 戦略                          | 説明                                       | 例: "page-agent" の処理           |
-| ----------------------------- | ------------------------------------------ | --------------------------------- |
-| **phrase-aware** (デフォルト) | ハイフン区切り用語を単一ユニットとして保持 | `["page-agent"]`                  |
-| **legacy**                    | ハイフンで分割（従来の動作）               | `["page", "agent"]`               |
-| **hybrid**                    | フレーズと分割キーワードの両方を出力       | `["page-agent", "page", "agent"]` |
+| 戦略                          | 説明                                                 | 例: "page-agent" の処理           |
+| ----------------------------- | ---------------------------------------------------- | --------------------------------- |
+| **phrase-aware** (デフォルト) | 複合用語を保持しつつ、分割キーワードも出力           | `["page-agent", "page", "agent"]` |
+| **legacy**                    | ハイフンで分割（従来の動作、複合用語は保持されない） | `["page", "agent"]`               |
+| **hybrid**                    | phrase-awareと同等（handlers.tsでの処理が異なる）    | `["page-agent", "page", "agent"]` |
+
+> **Note**: `tokenizeText()` 関数（src/shared/tokenizer.ts）では phrase-aware と hybrid は同一動作です。
+> handlers.ts の `extractKeywords()` でのみ hybrid は phrases と keywords を分離して管理します。
 
 ### 推奨設定
 
-- **一般的な使用**: `phrase-aware` (デフォルト) - 最も正確なマッチングを提供
-- **後方互換性が必要な場合**: `legacy` - 従来の動作を維持
-- **網羅的な検索**: `hybrid` - 最も広範なマッチングを提供（トークン数増加のトレードオフあり）
+- **一般的な使用**: `phrase-aware` (デフォルト) - 複合用語と分割キーワードの両方でマッチング
+- **後方互換性が必要な場合**: `legacy` - 従来の動作を維持（複合用語なし）
+- **handlers.ts での分離管理**: `hybrid` - ExtractedTerms 構造体で phrases/keywords を分離
 
 ## ストップワード設定
 

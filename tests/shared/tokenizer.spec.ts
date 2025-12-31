@@ -32,4 +32,25 @@ describe("tokenizeText", () => {
     expect(tokens).toEqual(expect.arrayContaining(["foo", "bar", "baz"]));
     expect(tokens).not.toContain("foo-bar");
   });
+
+  // LAW-token-hybrid-consistency: hybrid戦略はphrase-awareと同一動作
+  // @see Issue #189
+  describe("hybrid strategy", () => {
+    it("outputs both compound terms and split keywords (same as phrase-aware)", () => {
+      const tokens = tokenizeText("page-agent handler", "hybrid");
+      expect(tokens).toEqual(expect.arrayContaining(["page-agent", "page", "agent", "handler"]));
+    });
+
+    it("handles snake_case same as phrase-aware", () => {
+      const tokens = tokenizeText("worker_pool", "hybrid");
+      expect(tokens).toEqual(expect.arrayContaining(["worker_pool", "worker", "pool"]));
+    });
+
+    it("produces identical output to phrase-aware", () => {
+      const input = "context-bundle ISO8601Parser";
+      const phraseAwareTokens = tokenizeText(input, "phrase-aware");
+      const hybridTokens = tokenizeText(input, "hybrid");
+      expect(hybridTokens).toEqual(phraseAwareTokens);
+    });
+  });
 });

@@ -58,11 +58,11 @@ Control how KIRI tokenizes and matches compound terms:
 export KIRI_TOKENIZATION_STRATEGY=phrase-aware  # default
 ```
 
-| Strategy       | Behavior                                                                  | Best For                      |
-| -------------- | ------------------------------------------------------------------------- | ----------------------------- |
-| `phrase-aware` | Compound terms (kebab-case, snake_case) treated as phrases with 2× weight | Consistent naming conventions |
-| `legacy`       | Traditional word-by-word tokenization                                     | Backward compatibility        |
-| `hybrid`       | Both phrase and word-level matching                                       | Maximum flexibility           |
+| Strategy       | Behavior                                                                                                | Best For                  |
+| -------------- | ------------------------------------------------------------------------------------------------------- | ------------------------- |
+| `phrase-aware` | Compound terms preserved + split keywords output (e.g., "page-agent" → ["page-agent", "page", "agent"]) | General use (default)     |
+| `legacy`       | Traditional word-by-word tokenization (compound terms not preserved)                                    | Backward compatibility    |
+| `hybrid`       | Same as phrase-aware in tokenizer.ts; handlers.ts separates phrases/keywords                            | ExtractedTerms separation |
 
 ## Scoring Profiles
 
