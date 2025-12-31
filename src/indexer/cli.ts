@@ -1510,20 +1510,24 @@ async function deleteFilesFromAllTables(
 ): Promise<void> {
   if (paths.length === 0) return;
 
-  // Process in chunks to avoid SQL placeholder limits
-  for (let i = 0; i < paths.length; i += DELETE_CHUNK_SIZE) {
-    const chunk = paths.slice(i, i + DELETE_CHUNK_SIZE);
-    const placeholders = chunk.map(() => "?").join(", ");
-    const params = [repoId, ...chunk];
+  // Single transaction for atomicity - all chunks succeed or all fail together
+  // This prevents partial deletion that could leave sensitive files in some tables
+  await db.transaction(async () => {
+    // Process in chunks to avoid SQL placeholder limits
+    for (let i = 0; i < paths.length; i += DELETE_CHUNK_SIZE) {
+      const chunk = paths.slice(i, i + DELETE_CHUNK_SIZE);
+      const placeholders = chunk.map(() => "?").join(", ");
+      const params = [repoId, ...chunk];
 
-    await db.transaction(async () => {
       // Standard file-related tables
       await db.run(`DELETE FROM symbol WHERE repo_id = ? AND path IN (${placeholders})`, params);
       await db.run(`DELETE FROM snippet WHERE repo_id = ? AND path IN (${placeholders})`, params);
+      // dependency: cleanup both src_path (file as source) and dst (file as target)
       await db.run(
         `DELETE FROM dependency WHERE repo_id = ? AND src_path IN (${placeholders})`,
         params
       );
+      await db.run(`DELETE FROM dependency WHERE repo_id = ? AND dst IN (${placeholders})`, params);
       await db.run(
         `DELETE FROM file_embedding WHERE repo_id = ? AND path IN (${placeholders})`,
         params
@@ -1536,8 +1540,13 @@ async function deleteFilesFromAllTables(
         `DELETE FROM document_metadata_kv WHERE repo_id = ? AND path IN (${placeholders})`,
         params
       );
+      // markdown_link: cleanup both src_path (source) and resolved_path (target)
       await db.run(
         `DELETE FROM markdown_link WHERE repo_id = ? AND src_path IN (${placeholders})`,
+        params
+      );
+      await db.run(
+        `DELETE FROM markdown_link WHERE repo_id = ? AND resolved_path IN (${placeholders})`,
         params
       );
       await db.run(`DELETE FROM tree WHERE repo_id = ? AND path IN (${placeholders})`, params);
@@ -1561,8 +1570,8 @@ async function deleteFilesFromAllTables(
       // cochange: co-change graph edges (file1 and file2)
       await db.run(`DELETE FROM cochange WHERE repo_id = ? AND file1 IN (${placeholders})`, params);
       await db.run(`DELETE FROM cochange WHERE repo_id = ? AND file2 IN (${placeholders})`, params);
-    });
-  }
+    }
+  });
 }
 
 async function reconcileDeletedFiles(
@@ -1816,6 +1825,10 @@ export async function runIndexer(options: IndexerOptions): Promise<void> {
             }
 
             await rebuildFTSIfNeeded(dbClient, repoId);
+
+            // Garbage collect orphaned blobs from deleted/purged files
+            // Security: Prevents sensitive file content from remaining in blob table
+            await garbageCollectBlobs(dbClient);
           } else {
             // No deletions either - just update timestamp
             if (defaultBranch) {
@@ -1988,6 +2001,10 @@ export async function runIndexer(options: IndexerOptions): Promise<void> {
         if (!options.skipCochange) {
           await incrementalCochangeUpdate(dbClient, repoId, repoRoot);
         }
+
+        // Garbage collect orphaned blobs after incremental updates
+        // Security: Prevents sensitive file content from remaining in blob table
+        await garbageCollectBlobs(dbClient);
 
         return;
       }
