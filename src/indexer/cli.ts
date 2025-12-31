@@ -1493,11 +1493,64 @@ async function getExistingFileHashes(
 const DELETE_CHUNK_SIZE = 500;
 
 /**
+ * パスをrepoRoot基準のPOSIX相対パスに正規化する
+ * セキュリティ: パストラバーサル（..）を検出して拒否
+ *
+ * @param filePath - 正規化するファイルパス
+ * @returns 正規化されたPOSIX相対パス
+ * @throws パストラバーサルが検出された場合
+ */
+function normalizePathForDenylist(filePath: string): string {
+  // バックスラッシュをスラッシュに変換（Windows対応）
+  let normalized = filePath.replace(/\\/g, "/");
+  // 先頭の ./ を除去
+  if (normalized.startsWith("./")) {
+    normalized = normalized.slice(2);
+  }
+  // 先頭の / を除去（絶対パスを相対パスに）
+  if (normalized.startsWith("/")) {
+    normalized = normalized.slice(1);
+  }
+  // パストラバーサル検出（セキュリティ）
+  if (normalized.includes("..")) {
+    throw new Error(`Path traversal detected: ${filePath}`);
+  }
+  return normalized;
+}
+
+/**
+ * パスを保持するテーブルとカラムの定義
+ * スキーマ変更時の追従漏れを防ぐため、単一の定義に集約
+ *
+ * Security: deny/purge時にすべてのテーブルから確実に削除するため
+ */
+const PATH_TABLES: ReadonlyArray<{ table: string; column: string }> = [
+  // Standard file-related tables
+  { table: "symbol", column: "path" },
+  { table: "snippet", column: "path" },
+  { table: "dependency", column: "src_path" },
+  { table: "dependency", column: "dst" },
+  { table: "file_embedding", column: "path" },
+  { table: "document_metadata", column: "path" },
+  { table: "document_metadata_kv", column: "path" },
+  { table: "markdown_link", column: "src_path" },
+  { table: "markdown_link", column: "resolved_path" },
+  { table: "tree", column: "path" },
+  { table: "file", column: "path" },
+  // Graph layer tables - prevent sensitive file path leakage
+  { table: "graph_metrics", column: "path" },
+  { table: "inbound_edges", column: "target_path" },
+  { table: "inbound_edges", column: "source_path" },
+  { table: "cochange", column: "file1" },
+  { table: "cochange", column: "file2" },
+];
+
+/**
  * Delete file records from all related tables.
  * Handles chunking for large batches to avoid SQL placeholder limits.
  *
- * Security: Includes graph layer tables (graph_metrics, inbound_edges, cochange)
- * to prevent sensitive file path leakage after file deletion.
+ * Security: Uses PATH_TABLES definition to ensure all path-containing tables
+ * are cleaned up, preventing sensitive file path leakage after deletion.
  *
  * @param db - DuckDB client
  * @param repoId - Repository ID
@@ -1510,66 +1563,26 @@ async function deleteFilesFromAllTables(
 ): Promise<void> {
   if (paths.length === 0) return;
 
+  // 重複排除: 無駄なDELETE実行を削減
+  const uniquePaths = [...new Set(paths)];
+
   // Single transaction for atomicity - all chunks succeed or all fail together
   // This prevents partial deletion that could leave sensitive files in some tables
   await db.transaction(async () => {
     // Process in chunks to avoid SQL placeholder limits
-    for (let i = 0; i < paths.length; i += DELETE_CHUNK_SIZE) {
-      const chunk = paths.slice(i, i + DELETE_CHUNK_SIZE);
+    for (let i = 0; i < uniquePaths.length; i += DELETE_CHUNK_SIZE) {
+      const chunk = uniquePaths.slice(i, i + DELETE_CHUNK_SIZE);
       const placeholders = chunk.map(() => "?").join(", ");
       const params = [repoId, ...chunk];
 
-      // Standard file-related tables
-      await db.run(`DELETE FROM symbol WHERE repo_id = ? AND path IN (${placeholders})`, params);
-      await db.run(`DELETE FROM snippet WHERE repo_id = ? AND path IN (${placeholders})`, params);
-      // dependency: cleanup both src_path (file as source) and dst (file as target)
-      await db.run(
-        `DELETE FROM dependency WHERE repo_id = ? AND src_path IN (${placeholders})`,
-        params
-      );
-      await db.run(`DELETE FROM dependency WHERE repo_id = ? AND dst IN (${placeholders})`, params);
-      await db.run(
-        `DELETE FROM file_embedding WHERE repo_id = ? AND path IN (${placeholders})`,
-        params
-      );
-      await db.run(
-        `DELETE FROM document_metadata WHERE repo_id = ? AND path IN (${placeholders})`,
-        params
-      );
-      await db.run(
-        `DELETE FROM document_metadata_kv WHERE repo_id = ? AND path IN (${placeholders})`,
-        params
-      );
-      // markdown_link: cleanup both src_path (source) and resolved_path (target)
-      await db.run(
-        `DELETE FROM markdown_link WHERE repo_id = ? AND src_path IN (${placeholders})`,
-        params
-      );
-      await db.run(
-        `DELETE FROM markdown_link WHERE repo_id = ? AND resolved_path IN (${placeholders})`,
-        params
-      );
-      await db.run(`DELETE FROM tree WHERE repo_id = ? AND path IN (${placeholders})`, params);
-      await db.run(`DELETE FROM file WHERE repo_id = ? AND path IN (${placeholders})`, params);
-
-      // Graph layer tables - prevent sensitive file path leakage
-      // graph_metrics: centrality metrics by path
-      await db.run(
-        `DELETE FROM graph_metrics WHERE repo_id = ? AND path IN (${placeholders})`,
-        params
-      );
-      // inbound_edges: dependency closure (target_path and source_path)
-      await db.run(
-        `DELETE FROM inbound_edges WHERE repo_id = ? AND target_path IN (${placeholders})`,
-        params
-      );
-      await db.run(
-        `DELETE FROM inbound_edges WHERE repo_id = ? AND source_path IN (${placeholders})`,
-        params
-      );
-      // cochange: co-change graph edges (file1 and file2)
-      await db.run(`DELETE FROM cochange WHERE repo_id = ? AND file1 IN (${placeholders})`, params);
-      await db.run(`DELETE FROM cochange WHERE repo_id = ? AND file2 IN (${placeholders})`, params);
+      // PATH_TABLES定義からすべてのテーブルを削除
+      // スキーマ変更時の追従漏れを防ぐ
+      for (const { table, column } of PATH_TABLES) {
+        await db.run(
+          `DELETE FROM ${table} WHERE repo_id = ? AND ${column} IN (${placeholders})`,
+          params
+        );
+      }
     }
   });
 }
@@ -1627,9 +1640,11 @@ async function purgeDeniedFiles(
   ]);
 
   // Find files that are now denied
+  // パス正規化を適用してdeny判定の一貫性を保証
   const deniedPaths: string[] = [];
   for (const row of indexedFiles) {
-    if (denylistFilter.isDenied(row.path)) {
+    // DBのパスも正規化してからdeny判定（パス形式の不一致を防止）
+    if (denylistFilter.isDenied(normalizePathForDenylist(row.path))) {
       deniedPaths.push(row.path);
     }
   }
@@ -1757,8 +1772,9 @@ export async function runIndexer(options: IndexerOptions): Promise<void> {
         // Apply denylist filter for --since mode (watch mode already filters)
         // This ensures sensitive files are never indexed even if git-tracked
         const denylistFilter = createDenylistFilter(repoRoot, options.configPath);
+        // パス正規化を適用してdeny判定の一貫性を保証
         const filteredChangedPaths = options.changedPaths.filter(
-          (p) => !denylistFilter.isDenied(p)
+          (p) => !denylistFilter.isDenied(normalizePathForDenylist(p))
         );
         const filteredCount = options.changedPaths.length - filteredChangedPaths.length;
         if (filteredCount > 0) {
@@ -1801,8 +1817,11 @@ export async function runIndexer(options: IndexerOptions): Promise<void> {
         }
 
         if (changedFiles.length === 0 && missingPaths.length === 0) {
+          // ログはフィルタ後の件数を使用して正確な情報を提供
           console.info(
-            `No actual changes detected in ${options.changedPaths.length} file(s). Skipping reindex.`
+            `No actual changes detected in ${filteredChangedPaths.length} file(s)` +
+              (filteredCount > 0 ? ` (${filteredCount} filtered by denylist)` : "") +
+              `. Skipping reindex.`
           );
 
           // Fix #3 & #4: If files were deleted or purged, still need to dirty FTS and rebuild
@@ -2026,7 +2045,8 @@ export async function runIndexer(options: IndexerOptions): Promise<void> {
       // that were accidentally committed to git but should not be indexed
       const denylistFilter = createDenylistFilter(repoRoot, options.configPath);
       const beforeFilterCount = paths.length;
-      paths = paths.filter((p) => !denylistFilter.isDenied(p));
+      // パス正規化を適用してdeny判定の一貫性を保証
+      paths = paths.filter((p) => !denylistFilter.isDenied(normalizePathForDenylist(p)));
       const filteredCount = beforeFilterCount - paths.length;
       if (filteredCount > 0) {
         console.info(`Filtered ${filteredCount} file(s) by denylist.`);
