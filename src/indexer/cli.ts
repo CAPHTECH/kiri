@@ -28,6 +28,7 @@ import {
 import { computeGraphMetrics, incrementalGraphUpdate } from "./graph-metrics.js";
 import { detectLanguage } from "./language.js";
 import { mergeRepoRecords } from "./migrations/repo-merger.js";
+import { createDenylistFilter } from "./pipeline/filters/denylist.js";
 import { getIndexerQueue } from "./queue.js";
 import {
   ensureBaseSchema,
@@ -1660,9 +1661,20 @@ export async function runIndexer(options: IndexerOptions): Promise<void> {
 
       // Incremental mode: only reindex files in changedPaths (empty array means no-op)
       if (options.changedPaths) {
+        // Apply denylist filter for --since mode (watch mode already filters)
+        // This ensures sensitive files are never indexed even if git-tracked
+        const denylistFilter = createDenylistFilter(repoRoot);
+        const filteredChangedPaths = options.changedPaths.filter(
+          (p) => !denylistFilter.isDenied(p)
+        );
+        const filteredCount = options.changedPaths.length - filteredChangedPaths.length;
+        if (filteredCount > 0) {
+          console.info(`Filtered ${filteredCount} file(s) by denylist in incremental mode.`);
+        }
+
         // First, reconcile deleted files (handle renames/deletions)
         // Fix #157: changedPathsをexcludePathsとして渡し、watchで検出されたファイルが誤って削除されないようにする
-        const excludeSet = new Set(options.changedPaths);
+        const excludeSet = new Set(filteredChangedPaths);
         const deletedPaths = await reconcileDeletedFiles(dbClient, repoId, repoRoot, excludeSet);
         if (deletedPaths.length > 0) {
           console.info(`Removed ${deletedPaths.length} deleted file(s) from index.`);
@@ -1671,7 +1683,7 @@ export async function runIndexer(options: IndexerOptions): Promise<void> {
         const existingHashes = await getExistingFileHashes(dbClient, repoId);
         const { blobs, files, embeddings, missingPaths } = await scanFilesInBatches(
           repoRoot,
-          options.changedPaths
+          filteredChangedPaths
         );
 
         // Filter out files that haven't actually changed (same hash)
@@ -1898,6 +1910,18 @@ export async function runIndexer(options: IndexerOptions): Promise<void> {
           paths = fallbackPaths;
         }
       }
+
+      // Apply denylist filter to exclude sensitive files (e.g., *.pem, secrets/**)
+      // This ensures consistency with watch mode and protects against files
+      // that were accidentally committed to git but should not be indexed
+      const denylistFilter = createDenylistFilter(repoRoot);
+      const beforeFilterCount = paths.length;
+      paths = paths.filter((p) => !denylistFilter.isDenied(p));
+      const filteredCount = beforeFilterCount - paths.length;
+      if (filteredCount > 0) {
+        console.info(`Filtered ${filteredCount} file(s) by denylist.`);
+      }
+
       const { blobs, files, embeddings, missingPaths } = await scanFilesInBatches(repoRoot, paths);
 
       // In full mode, missingPaths should be rare (git ls-files returns existing files)
