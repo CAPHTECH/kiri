@@ -1485,6 +1485,86 @@ async function getExistingFileHashes(
  * @param excludePaths - Paths to exclude from deletion (e.g., changedPaths from watch mode)
  * @returns Array of deleted file paths
  */
+
+/**
+ * Chunk size for batched DELETE operations.
+ * Prevents SQL placeholder limit issues with large file counts.
+ */
+const DELETE_CHUNK_SIZE = 500;
+
+/**
+ * Delete file records from all related tables.
+ * Handles chunking for large batches to avoid SQL placeholder limits.
+ *
+ * Security: Includes graph layer tables (graph_metrics, inbound_edges, cochange)
+ * to prevent sensitive file path leakage after file deletion.
+ *
+ * @param db - DuckDB client
+ * @param repoId - Repository ID
+ * @param paths - File paths to delete
+ */
+async function deleteFilesFromAllTables(
+  db: DuckDBClient,
+  repoId: number,
+  paths: string[]
+): Promise<void> {
+  if (paths.length === 0) return;
+
+  // Process in chunks to avoid SQL placeholder limits
+  for (let i = 0; i < paths.length; i += DELETE_CHUNK_SIZE) {
+    const chunk = paths.slice(i, i + DELETE_CHUNK_SIZE);
+    const placeholders = chunk.map(() => "?").join(", ");
+    const params = [repoId, ...chunk];
+
+    await db.transaction(async () => {
+      // Standard file-related tables
+      await db.run(`DELETE FROM symbol WHERE repo_id = ? AND path IN (${placeholders})`, params);
+      await db.run(`DELETE FROM snippet WHERE repo_id = ? AND path IN (${placeholders})`, params);
+      await db.run(
+        `DELETE FROM dependency WHERE repo_id = ? AND src_path IN (${placeholders})`,
+        params
+      );
+      await db.run(
+        `DELETE FROM file_embedding WHERE repo_id = ? AND path IN (${placeholders})`,
+        params
+      );
+      await db.run(
+        `DELETE FROM document_metadata WHERE repo_id = ? AND path IN (${placeholders})`,
+        params
+      );
+      await db.run(
+        `DELETE FROM document_metadata_kv WHERE repo_id = ? AND path IN (${placeholders})`,
+        params
+      );
+      await db.run(
+        `DELETE FROM markdown_link WHERE repo_id = ? AND src_path IN (${placeholders})`,
+        params
+      );
+      await db.run(`DELETE FROM tree WHERE repo_id = ? AND path IN (${placeholders})`, params);
+      await db.run(`DELETE FROM file WHERE repo_id = ? AND path IN (${placeholders})`, params);
+
+      // Graph layer tables - prevent sensitive file path leakage
+      // graph_metrics: centrality metrics by path
+      await db.run(
+        `DELETE FROM graph_metrics WHERE repo_id = ? AND path IN (${placeholders})`,
+        params
+      );
+      // inbound_edges: dependency closure (target_path and source_path)
+      await db.run(
+        `DELETE FROM inbound_edges WHERE repo_id = ? AND target_path IN (${placeholders})`,
+        params
+      );
+      await db.run(
+        `DELETE FROM inbound_edges WHERE repo_id = ? AND source_path IN (${placeholders})`,
+        params
+      );
+      // cochange: co-change graph edges (file1 and file2)
+      await db.run(`DELETE FROM cochange WHERE repo_id = ? AND file1 IN (${placeholders})`, params);
+      await db.run(`DELETE FROM cochange WHERE repo_id = ? AND file2 IN (${placeholders})`, params);
+    });
+  }
+}
+
 async function reconcileDeletedFiles(
   db: DuckDBClient,
   repoId: number,
@@ -1511,39 +1591,8 @@ async function reconcileDeletedFiles(
     }
   }
 
-  // Delete all records for removed files in a single transaction
-  // Batched DELETE operations to avoid N+1 query problem
-  if (deletedPaths.length > 0) {
-    await db.transaction(async () => {
-      const placeholders = deletedPaths.map(() => "?").join(", ");
-      const params = [repoId, ...deletedPaths];
-
-      await db.run(`DELETE FROM symbol WHERE repo_id = ? AND path IN (${placeholders})`, params);
-      await db.run(`DELETE FROM snippet WHERE repo_id = ? AND path IN (${placeholders})`, params);
-      await db.run(
-        `DELETE FROM dependency WHERE repo_id = ? AND src_path IN (${placeholders})`,
-        params
-      );
-      await db.run(
-        `DELETE FROM file_embedding WHERE repo_id = ? AND path IN (${placeholders})`,
-        params
-      );
-      await db.run(
-        `DELETE FROM document_metadata WHERE repo_id = ? AND path IN (${placeholders})`,
-        params
-      );
-      await db.run(
-        `DELETE FROM document_metadata_kv WHERE repo_id = ? AND path IN (${placeholders})`,
-        params
-      );
-      await db.run(
-        `DELETE FROM markdown_link WHERE repo_id = ? AND src_path IN (${placeholders})`,
-        params
-      );
-      await db.run(`DELETE FROM tree WHERE repo_id = ? AND path IN (${placeholders})`, params);
-      await db.run(`DELETE FROM file WHERE repo_id = ? AND path IN (${placeholders})`, params);
-    });
-  }
+  // Delete all records for removed files (includes graph layer tables for security)
+  await deleteFilesFromAllTables(db, repoId, deletedPaths);
 
   return deletedPaths;
 }
@@ -1576,38 +1625,8 @@ async function purgeDeniedFiles(
     }
   }
 
-  // Delete all records for denied files in a single transaction
-  if (deniedPaths.length > 0) {
-    await db.transaction(async () => {
-      const placeholders = deniedPaths.map(() => "?").join(", ");
-      const params = [repoId, ...deniedPaths];
-
-      await db.run(`DELETE FROM symbol WHERE repo_id = ? AND path IN (${placeholders})`, params);
-      await db.run(`DELETE FROM snippet WHERE repo_id = ? AND path IN (${placeholders})`, params);
-      await db.run(
-        `DELETE FROM dependency WHERE repo_id = ? AND src_path IN (${placeholders})`,
-        params
-      );
-      await db.run(
-        `DELETE FROM file_embedding WHERE repo_id = ? AND path IN (${placeholders})`,
-        params
-      );
-      await db.run(
-        `DELETE FROM document_metadata WHERE repo_id = ? AND path IN (${placeholders})`,
-        params
-      );
-      await db.run(
-        `DELETE FROM document_metadata_kv WHERE repo_id = ? AND path IN (${placeholders})`,
-        params
-      );
-      await db.run(
-        `DELETE FROM markdown_link WHERE repo_id = ? AND src_path IN (${placeholders})`,
-        params
-      );
-      await db.run(`DELETE FROM tree WHERE repo_id = ? AND path IN (${placeholders})`, params);
-      await db.run(`DELETE FROM file WHERE repo_id = ? AND path IN (${placeholders})`, params);
-    });
-  }
+  // Delete all records for denied files (includes graph layer tables for security)
+  await deleteFilesFromAllTables(db, repoId, deniedPaths);
 
   return deniedPaths;
 }
