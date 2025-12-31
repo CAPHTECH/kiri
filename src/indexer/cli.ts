@@ -1796,9 +1796,12 @@ export async function runIndexer(options: IndexerOptions): Promise<void> {
             `No actual changes detected in ${options.changedPaths.length} file(s). Skipping reindex.`
           );
 
-          // Fix #3 & #4: If files were deleted (git or watch mode), still need to dirty FTS and rebuild
-          if (deletedPaths.length > 0) {
-            console.info(`${deletedPaths.length} file(s) deleted (git) - marking FTS dirty`);
+          // Fix #3 & #4: If files were deleted or purged, still need to dirty FTS and rebuild
+          if (deletedPaths.length > 0 || purgedPaths.length > 0) {
+            const totalRemoved = deletedPaths.length + purgedPaths.length;
+            console.info(
+              `${totalRemoved} file(s) removed (deleted: ${deletedPaths.length}, purged: ${purgedPaths.length}) - marking FTS dirty`
+            );
 
             if (defaultBranch) {
               await dbClient.run(
@@ -2010,6 +2013,16 @@ export async function runIndexer(options: IndexerOptions): Promise<void> {
       const filteredCount = beforeFilterCount - paths.length;
       if (filteredCount > 0) {
         console.info(`Filtered ${filteredCount} file(s) by denylist.`);
+      }
+
+      // Purge previously indexed files that are now denied
+      // Important: This ensures that if .gitignore or denylist.yml is updated,
+      // previously indexed sensitive files are removed from the database
+      const purgedPaths = await purgeDeniedFiles(dbClient, repoId, denylistFilter);
+      if (purgedPaths.length > 0) {
+        console.info(
+          `Purged ${purgedPaths.length} previously indexed file(s) now denied by denylist.`
+        );
       }
 
       const { blobs, files, embeddings, missingPaths } = await scanFilesInBatches(repoRoot, paths);
