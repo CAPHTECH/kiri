@@ -9,7 +9,7 @@ Comprehensive test verification system for KIRI that includes:
 - Dart Analysis Server tests
 - MCP tools actual operation tests
 - Watch mode functionality tests
-- Evaluation tests
+- Evaluation runs (assay-kit)
 
 ## Quick Start
 
@@ -23,7 +23,7 @@ pnpm run verify:dart          # Dart tests only
 pnpm run verify:integration   # Integration tests only
 pnpm run verify:tools         # MCP tools operation tests
 pnpm run verify:watch         # Watch mode tests
-pnpm run verify:eval          # Evaluation tests
+pnpm run assay:evaluate       # Evaluation (assay-kit)
 ```
 
 ## Advanced Usage
@@ -36,7 +36,7 @@ tsx scripts/test/verify-all.ts --category all --retry 2 --verbose
 
 ### Options
 
-- `--category <category>`: Specify test category (unit|dart|integration|tools|watch|eval|all)
+- `--category <category>`: Specify test category (unit|dart|integration|tools|watch|all)
 - `--retry <number>`: Number of retries on failure (default: 0)
 - `--skip-coverage`: Skip coverage reporting
 - `--verbose`: Enable verbose output
@@ -101,13 +101,12 @@ Verifies file watch functionality:
 
 **Validates**: File changes trigger automatic re-indexing
 
-### Evaluation Tests (`pnpm run verify:eval`)
+### Evaluation (Assay Kit)
 
-Performance and quality metrics:
+Evaluation runs are executed via assay-kit scripts:
 
-- Search precision/recall
-- Response time benchmarks
-- Coverage metrics
+- `pnpm run assay:evaluate` (quality metrics)
+- `pnpm run assay:compare` (A/B comparisons)
 
 ## CI/CD Integration
 

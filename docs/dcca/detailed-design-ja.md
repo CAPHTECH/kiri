@@ -1049,7 +1049,7 @@ const content = await fs.readFile(path.join(root, userPath));
 | -------- | ----------- | --------------- |
 | ユニット | 関数/クラス | Vitest          |
 | 統合     | DB操作、API | Vitest + 一時DB |
-| 評価     | 検索精度    | Golden Set      |
+| 評価     | 検索精度    | assay-kit       |
 
 #### 9.3.2 テストDB管理
 

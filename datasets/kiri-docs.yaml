@@ -1,0 +1,122 @@
+schemaVersion: "1.0.0"
+name: "kiri-docs"
+datasetId: "kiri-docs"
+version: "v2026-01-01"
+description: "Documentation-focused dataset for KIRI repo (no hints)."
+
+defaultParams:
+  k: 10
+  timeoutMs: 30000
+
+queries:
+  - id: "docs-001"
+    text: "docs/testing.md testing and evaluation guide"
+    goal: "Locate docs/testing.md and related evaluation documentation."
+    metadata:
+      category: "docs"
+      intent: "Find testing docs"
+      tool: "context_bundle"
+      tags: ["docs", "testing"]
+      expected:
+        - path: "docs/testing.md"
+          relevance: 3
+        - path: "docs/runbook.md"
+          relevance: 1
+
+  - id: "docs-002"
+    text: "docs/search-ranking.md search ranking documentation"
+    goal: "Locate docs/search-ranking.md and related ranking docs."
+    metadata:
+      category: "docs"
+      intent: "Find ranking docs"
+      tool: "context_bundle"
+      tags: ["docs", "ranking"]
+      expected:
+        - path: "docs/search-ranking.md"
+          relevance: 3
+        - path: "docs/dcca/detailed-design-ja.md"
+          relevance: 1
+
+  - id: "docs-003"
+    text: "docs/security.md security policy and review process"
+    goal: "Locate docs/security.md and related security documentation."
+    metadata:
+      category: "docs"
+      intent: "Find security docs"
+      tool: "context_bundle"
+      tags: ["docs", "security"]
+      expected:
+        - path: "docs/security.md"
+          relevance: 3
+        - path: "docs/processes/security-review.md"
+          relevance: 2
+
+  - id: "docs-004"
+    text: "configuration reference (docs/configuration.md)"
+    goal: "Locate configuration and setup documentation."
+    metadata:
+      category: "docs"
+      intent: "Find configuration docs"
+      tool: "context_bundle"
+      tags: ["docs", "configuration"]
+      expected:
+        - path: "docs/configuration.md"
+          relevance: 3
+        - path: "docs/setup.md"
+          relevance: 2
+
+  - id: "docs-005"
+    text: "docs/runbook.md operations runbook"
+    goal: "Locate docs/runbook.md and related operations docs."
+    metadata:
+      category: "docs"
+      intent: "Find runbook"
+      tool: "context_bundle"
+      tags: ["docs", "operations"]
+      expected:
+        - path: "docs/runbook.md"
+          relevance: 3
+        - path: "docs/operations.md"
+          relevance: 2
+
+  - id: "docs-006"
+    text: "setup guide (docs/setup.md)"
+    goal: "Locate setup instructions."
+    metadata:
+      category: "docs"
+      intent: "Find setup guide"
+      tool: "context_bundle"
+      tags: ["docs", "setup"]
+      expected:
+        - path: "docs/setup.md"
+          relevance: 3
+        - path: "docs/configuration.md"
+          relevance: 1
+
+  - id: "docs-007"
+    text: "data model documentation (docs/data-model.md)"
+    goal: "Locate data model documentation."
+    metadata:
+      category: "docs"
+      intent: "Find data model docs"
+      tool: "context_bundle"
+      tags: ["docs", "data-model"]
+      expected:
+        - path: "docs/data-model.md"
+          relevance: 3
+        - path: "docs/overview.md"
+          relevance: 1
+
+  - id: "docs-008"
+    text: "configuration profiles and scoring (config/scoring-profiles.yml)"
+    goal: "Locate scoring profile configuration."
+    metadata:
+      category: "docs"
+      intent: "Find scoring profiles"
+      tool: "context_bundle"
+      tags: ["docs", "scoring"]
+      expected:
+        - path: "config/scoring-profiles.yml"
+          relevance: 3
+        - path: "docs/search-ranking.md"
+          relevance: 1

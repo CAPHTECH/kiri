@@ -175,9 +175,15 @@ export class KiriSearchAdapter implements SearchAdapter<KiriQuery, Metrics> {
     }
 
     try {
+      const requestedK = ctx.options.k;
+      const k =
+        typeof requestedK === "number" && Number.isFinite(requestedK) && requestedK > 0
+          ? Math.floor(requestedK)
+          : this.config.limit;
+
       const kiriParams: Record<string, unknown> = {
         goal: query.text,
-        limit: this.config.limit,
+        limit: k,
         compact: this.config.compact,
       };
 
@@ -200,7 +206,6 @@ export class KiriSearchAdapter implements SearchAdapter<KiriQuery, Metrics> {
       const latencyMs = Date.now() - startTime;
       const context = this.extractContext(result);
       const retrievedPaths = context.map((item) => item.path);
-      const k = this.config.limit;
       const expectedPaths = this.getExpectedPaths(query);
 
       // Build relevance grades map for NDCG calculation

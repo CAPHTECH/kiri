@@ -35,7 +35,7 @@ service: "kiri"
 
 ユーザーが `artifacts.hints` を指定しない抽象クエリでも確実に実装へ到達させるため、`hint_expansion` / `hint_dictionary` を定期的に更新する。
 
-1. **ログ計測**: 影響を調べたい間だけ `KIRI_HINT_LOG=1` を付けて `pnpm run eval:golden` などを実行すると、`hint_expansion` テーブルに展開履歴が残る（通常運用では書き込みコストを避けるため OFF）。
+1. **ログ計測**: 影響を調べたい間だけ `KIRI_HINT_LOG=1` を付けて `pnpm run assay:evaluate` などを実行すると、`hint_expansion` テーブルに展開履歴が残る（通常運用では書き込みコストを避けるため OFF）。
 2. **ログ確認**: `pnpm exec tsx scripts/diag/dump-hints.ts --db var/index.duckdb --repo . --limit 200` で直近の展開を確認できる。
 3. **辞書再構築**: 新しいログを基に `pnpm exec tsx scripts/diag/build-hint-dictionary.ts --db var/index.duckdb --repo . --min-freq 2` を実行すると、頻出ヒント→パスのマッピングが更新される。
 4. **TTL 清掃**: 長期間のログは `pnpm exec tsx scripts/diag/cleanup-hints.ts --db var/index.duckdb --days 14` で破棄し、DuckDB サイズ膨張を防ぐ。

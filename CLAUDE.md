@@ -100,8 +100,8 @@ pnpm exec vitest run tests/server/handlers.spec.ts
 # Lint and test together
 pnpm run check
 
-# Run golden set evaluation (P@10/TFFU benchmark)
-pnpm run eval:golden
+# Run Assay evaluation (assay-kit based benchmark)
+pnpm run assay:evaluate
 
 # Unlink the package (if needed)
 npm unlink -g kiri-mcp-server
@@ -109,20 +109,17 @@ npm unlink -g kiri-mcp-server
 
 ## Evaluation System
 
-KIRI includes a golden set evaluation system for measuring search accuracy:
+KIRI uses assay-kit for search quality evaluation:
 
-- **Location**: `tests/eval/goldens/`
-- **Metrics**: P@10 (Precision at K=10), TFFU (Time To First Useful)
-- **Usage**: `pnpm run eval:golden` (local execution only, CI blocked)
+- **Dataset**: `external/assay-kit/examples/kiri-integration/datasets/kiri-golden.yaml`
+- **Metrics**: P@10 / R@5 / TTFU / NDCG など（assay-kit 由来）
+- **Usage**: `pnpm run assay:evaluate` (local execution)
 
 **Key Files:**
 
-- `tests/eval/goldens/queries.yaml` - Representative queries (20-50 queries)
-- `tests/eval/goldens/README.md` - Schema, categories, adding queries
-- `tests/eval/results/README.md` - Results recording workflow
-- `scripts/eval/run-golden.ts` - Benchmark execution script
-
-See [tests/eval/goldens/README.md](tests/eval/goldens/README.md) for complete documentation.
+- `scripts/assay/run-evaluation.ts` - Assay evaluation runner
+- `scripts/assay/run-comparison.ts` - A/B comparison runner
+- `scripts/assay/plugins/` - Custom metrics
 
 ## DuckDB Schema Design
 
@@ -232,7 +229,7 @@ Examples:
 - Use `vitest` for all tests
 - Maintain ≥80% statement and line coverage for new code
 - Name test files to mirror implementation: `tests/server/handlers.spec.ts` ↔ `src/server/handlers.ts`
-- Golden data for evaluation tests goes in `tests/eval/*.spec.ts`
+- Evaluation datasets live in assay-kit YAML (e.g., `external/assay-kit/examples/kiri-integration/datasets/*.yaml`)
 - Target metrics: **P@10 ≥ 0.7** (precision at 10), **TTFU ≤ 1.0s** (time to first useful result)
 
 ## pce-memory とは

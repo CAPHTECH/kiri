@@ -91,7 +91,7 @@ async function compare(runPath: string, options: CliOptions): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  const [mode, rawRunPath = "var/eval/latest.metrics.json", ...rest] = process.argv.slice(2);
+  const [mode, rawRunPath = "var/assay/latest.json", ...rest] = process.argv.slice(2);
   if (!mode || (mode !== "promote" && mode !== "compare")) {
     console.error(
       "Usage: pnpm exec tsx scripts/assay/baseline.ts <promote|compare> [metrics.json] [--target=<id>] [--notes=<text>] [--version=<id>] [--fail-on-regression]"

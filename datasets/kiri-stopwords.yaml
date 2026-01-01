@@ -1,0 +1,136 @@
+schemaVersion: "1.0.0"
+name: "kiri-stopwords"
+datasetId: "kiri-stopwords"
+version: "v2026-01-01"
+description: "Stop-words focused dataset to validate generic word noise reduction."
+
+defaultParams:
+  k: 10
+  timeoutMs: 30000
+
+queries:
+  - id: "stopwords-001"
+    text: "Where is the stop words list (stop-words) defined and loaded in the system config files?"
+    goal: "Locate stop words configuration and its loader in code."
+    metadata:
+      category: "stopwords"
+      intent: "Find stop words configuration"
+      tool: "context_bundle"
+      tags: ["stop-words", "config"]
+      expected:
+        - path: "config/stop-words.yml"
+          relevance: 3
+        - path: "src/server/stop-words.ts"
+          relevance: 2
+
+  - id: "stopwords-002"
+    text: "Find the service/loader that reads stop words and applies them in the code."
+    goal: "Find the stop words loader implementation in code."
+    metadata:
+      category: "stopwords"
+      intent: "Find stop words loader"
+      tool: "context_bundle"
+      tags: ["stop-words", "loader"]
+      expected:
+        - path: "src/server/stop-words.ts"
+          relevance: 3
+        - path: "src/server/domain-terms.ts"
+          relevance: 1
+
+  - id: "stopwords-003"
+    text: "Where is the domain terms config (domain-terms) stored and which module loads it?"
+    goal: "Locate domain-terms config and loader implementation."
+    metadata:
+      category: "stopwords"
+      intent: "Find domain terms config"
+      tool: "context_bundle"
+      tags: ["domain-terms", "config"]
+      expected:
+        - path: "config/domain-terms.yml"
+          relevance: 3
+        - path: "src/server/domain-terms.ts"
+          relevance: 2
+
+  - id: "stopwords-004"
+    text: "In the tokenizer pipeline, where do we filter common words and stop words?"
+    goal: "Find tokenizer logic and stop word usage."
+    metadata:
+      category: "stopwords"
+      intent: "Find tokenizer filtering"
+      tool: "context_bundle"
+      tags: ["tokenizer", "stop-words"]
+      expected:
+        - path: "src/shared/tokenizer.ts"
+          relevance: 3
+        - path: "src/server/stop-words.ts"
+          relevance: 2
+
+  - id: "stopwords-005"
+    text: "How does the IDF provider interact with stop words and weighting in code?"
+    goal: "Locate IDF provider and stop word handling."
+    metadata:
+      category: "stopwords"
+      intent: "Find IDF provider"
+      tool: "context_bundle"
+      tags: ["idf", "stop-words"]
+      expected:
+        - path: "src/server/idf-provider.ts"
+          relevance: 3
+        - path: "src/server/stop-words.ts"
+          relevance: 1
+
+  - id: "stopwords-006"
+    text: "Where are scoring/boost profiles defined and used in the ranking logic?"
+    goal: "Find scoring logic and boost profiles."
+    metadata:
+      category: "stopwords"
+      intent: "Find scoring and boost profiles"
+      tool: "context_bundle"
+      tags: ["scoring", "boost"]
+      expected:
+        - path: "src/server/scoring.ts"
+          relevance: 3
+        - path: "src/server/boost-profiles.ts"
+          relevance: 2
+
+  - id: "stopwords-007"
+    text: "Find the adaptive-k category mapping and how it decides k in code."
+    goal: "Find adaptive-k configuration and category mapping."
+    metadata:
+      category: "stopwords"
+      intent: "Find adaptive-k categories"
+      tool: "context_bundle"
+      tags: ["adaptive-k", "ranking"]
+      expected:
+        - path: "src/shared/adaptive-k.ts"
+          relevance: 3
+        - path: "src/shared/adaptive-k-categories.ts"
+          relevance: 2
+
+  - id: "stopwords-008"
+    text: "Where does context_bundle filter common words and apply stop word rules?"
+    goal: "Find context bundle handler and stop word filtering."
+    metadata:
+      category: "stopwords"
+      intent: "Find context bundle filtering"
+      tool: "context_bundle"
+      tags: ["context_bundle", "stop-words"]
+      expected:
+        - path: "src/server/context.ts"
+          relevance: 3
+        - path: "src/server/stop-words.ts"
+          relevance: 1
+
+  - id: "stopwords-009"
+    text: "Where are abbreviations expanded and how does that connect to tokenization?"
+    goal: "Find abbreviation expansion and tokenizer."
+    metadata:
+      category: "stopwords"
+      intent: "Find abbreviations"
+      tool: "context_bundle"
+      tags: ["abbreviation", "tokenizer"]
+      expected:
+        - path: "src/server/abbreviations.ts"
+          relevance: 3
+        - path: "src/shared/tokenizer.ts"
+          relevance: 2
