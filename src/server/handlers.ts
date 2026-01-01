@@ -22,6 +22,7 @@ import { createIdfProvider } from "./idf-provider.js";
 import { coerceProfileName, loadScoringProfile, type ScoringWeights } from "./scoring.js";
 import { createServerServices, ServerServices } from "./services/index.js";
 import { loadStopWords, type StopWordsService } from "./stop-words.js";
+import { resolveCompactFlag } from "./compact-mode.js";
 
 // Re-export extracted handlers for backward compatibility
 export {
@@ -422,6 +423,7 @@ export interface FilesSearchParams {
   limit?: number;
   boost_profile?: BoostProfileName;
   compact?: boolean; // If true, omit preview to reduce token usage
+  includeWhy?: boolean; // When true, keep why tags even in compact mode
   metadata_filters?: Record<string, string | string[]>;
 }
 
@@ -450,6 +452,7 @@ export interface ContextBundleParams {
   profile?: string;
   boost_profile?: BoostProfileName;
   compact?: boolean; // If true, omit preview field to reduce token usage
+  includeWhy?: boolean; // When true, keep why tags even in compact mode
   includeTokensEstimate?: boolean; // If true, compute tokens_estimate (slower)
   metadata_filters?: Record<string, string | string[]>;
   requestId?: string; // Optional request ID for tracing/debugging
@@ -5080,14 +5083,12 @@ async function contextBundleImpl(
 
     const roundedScore = Number.isFinite(normalizedScore) ? Number(normalizedScore.toFixed(3)) : 0;
 
-    // Select why tags with diversity guarantee (reserves slots for dep/symbol/near)
-    const why = selectWhyTags(reasons);
-
+    const shouldIncludeWhy = !isCompact || params.includeWhy === true;
     const item: ContextBundleItem = {
       path: candidate.path,
       range: [startLine, endLine],
-      why,
       score: roundedScore,
+      why: shouldIncludeWhy ? selectWhyTags(reasons) : [],
     };
 
     // Add preview only if not in compact mode

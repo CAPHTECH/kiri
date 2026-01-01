@@ -95,16 +95,16 @@ describe("context_bundle", () => {
 
     const editing = bundle.context.find((item) => item.path === "src/auth/token.ts");
     expect(editing).toBeDefined();
-    expect(editing?.why).toContain("artifact:editing_path");
-    expect(editing?.why.some((reason) => reason.startsWith("structural:"))).toBe(true);
+    expect(editing?.why ?? []).toContain("artifact:editing_path");
+    expect((editing?.why ?? []).some((reason) => reason.startsWith("structural:"))).toBe(true);
 
     const helper = bundle.context.find((item) => item.path === "src/utils/helper.ts");
     expect(helper).toBeDefined();
-    expect(helper?.why.some((reason) => reason.startsWith("dep:"))).toBe(true);
+    expect((helper?.why ?? []).some((reason) => reason.startsWith("dep:"))).toBe(true);
 
     const nearby = bundle.context.find((item) => item.path === "src/auth/validator.ts");
     expect(nearby).toBeDefined();
-    expect(nearby?.why.some((reason) => reason.startsWith("near:"))).toBe(true);
+    expect((nearby?.why ?? []).some((reason) => reason.startsWith("near:"))).toBe(true);
   }, 10000);
 
   it("promotes files via artifact hints when the goal lacks concrete keywords", async () => {

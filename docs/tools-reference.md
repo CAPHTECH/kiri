@@ -39,6 +39,7 @@ The most powerful tool for getting started with unfamiliar code. Provide a task 
 | `goal`             | string  | Yes      | -         | Task description or question about the code |
 | `limit`            | number  | No       | 7         | Max snippets to return (max: 20)            |
 | `compact`          | boolean | No       | true      | Return only metadata without preview        |
+| `includeWhy`       | boolean | No       | false     | Keep `why[]` even when compact mode is used |
 | `boost_profile`    | string  | No       | "default" | File type boosting mode                     |
 | `path_prefix`      | string  | No       | -         | Filter by path prefix                       |
 | `category`         | string  | No       | -         | Query category for adaptive K               |
@@ -100,16 +101,16 @@ Fast search across all indexed files with BM25 ranking.
 
 ### Parameters
 
-| Parameter          | Type    | Required | Default   | Description                 |
-| ------------------ | ------- | -------- | --------- | --------------------------- |
-| `query`            | string  | Yes      | -         | Search keywords or phrase   |
-| `limit`            | number  | No       | 50        | Max results (max: 200)      |
-| `lang`             | string  | No       | -         | Filter by language          |
-| `ext`              | string  | No       | -         | Filter by extension         |
-| `path_prefix`      | string  | No       | -         | Filter by path prefix       |
-| `boost_profile`    | string  | No       | "default" | File type boosting mode     |
-| `compact`          | boolean | No       | false     | Omit previews               |
-| `metadata_filters` | object  | No       | -         | Filter by document metadata |
+| Parameter          | Type    | Required | Default   | Description                      |
+| ------------------ | ------- | -------- | --------- | -------------------------------- |
+| `query`            | string  | Yes      | -         | Search keywords or phrase        |
+| `limit`            | number  | No       | 50        | Max results (max: 200)           |
+| `lang`             | string  | No       | -         | Filter by language               |
+| `ext`              | string  | No       | -         | Filter by extension              |
+| `path_prefix`      | string  | No       | -         | Filter by path prefix            |
+| `boost_profile`    | string  | No       | "default" | File type boosting mode          |
+| `compact`          | boolean | No       | true      | Omit previews unless you opt out |
+| `metadata_filters` | object  | No       | -         | Filter by document metadata      |
 
 ### Query Syntax
 

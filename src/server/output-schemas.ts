@@ -20,7 +20,10 @@ export const ContextBundleItemSchema = z.object({
   path: z.string().describe("ファイルパス"),
   range: z.tuple([z.number(), z.number()]).describe("行範囲 [start, end]"),
   preview: z.string().optional().describe("コードプレビュー（compact=falseの場合）"),
-  why: z.array(z.string()).describe("スコアリング理由"),
+  why: z
+    .array(z.string())
+    .optional()
+    .describe("スコアリング理由（compact=false または includeWhy=true の場合）"),
   score: z.number().describe("関連度スコア"),
 });
 

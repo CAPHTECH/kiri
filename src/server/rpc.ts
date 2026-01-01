@@ -11,6 +11,7 @@ import { maskValue } from "../shared/security/masker.js";
 import { isValidBoostProfile, BOOST_PROFILES } from "./boost-profiles.js";
 import { ServerContext } from "./context.js";
 import { DegradeController } from "./fallbacks/degradeController.js";
+import { resolveCompactFlag } from "./compact-mode.js";
 import {
   ContextBundleParams,
   DepsClosureParams,
@@ -455,6 +456,10 @@ function parseFilesSearchParams(input: unknown): FilesSearchParams {
   if (typeof record.compact === "boolean") {
     params.compact = record.compact;
   }
+  const includeWhyValue = record.includeWhy ?? record.include_why;
+  if (typeof includeWhyValue === "boolean") {
+    params.includeWhy = includeWhyValue;
+  }
 
   if (record.metadata_filters && typeof record.metadata_filters === "object") {
     params.metadata_filters = record.metadata_filters as Record<string, string | string[]>;
@@ -628,16 +633,14 @@ function parseContextBundleParams(input: unknown, context: ServerContext): Conte
   if (typeof record.compact === "boolean") {
     params.compact = record.compact;
   } else {
-    params.compact = true; // Default to compact mode (v0.8.0+: breaking change)
+    params.compact = resolveCompactFlag(undefined);
 
-    // Show one-time warning about breaking change using WarningManager
-    // forResponse: true adds this warning to the API response
     context.warningManager.warnOnce(
       "compact-default-v0.8.0",
       "BREAKING CHANGE (v0.8.0): compact mode is now default. " +
         "Set compact: false to restore previous behavior. " +
         "See CHANGELOG.md for details.",
-      true // Add to API response
+      true
     );
   }
 
