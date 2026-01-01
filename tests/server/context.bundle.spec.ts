@@ -53,6 +53,79 @@ describe("context_bundle", () => {
     }
   });
 
+  it("omits why array in compact mode by default", async () => {
+    const repo = await createTempRepo({
+      "src/app.ts": "export function alpha() { return 1; }\n",
+    });
+    cleanupTargets.push({ dispose: repo.cleanup });
+
+    const dbDir = await mkdtemp(join(tmpdir(), "kiri-compact-why-default-"));
+    const dbPath = join(dbDir, "index.duckdb");
+    cleanupTargets.push({ dispose: async () => await rm(dbDir, { recursive: true, force: true }) });
+
+    await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+    const db = await DuckDBClient.connect({ databasePath: dbPath });
+    cleanupTargets.push({ dispose: async () => await db.close() });
+
+    const repoId = await resolveRepoId(db, repo.path);
+    const tableAvailability = await checkTableAvailability(db);
+    const context: ServerContext = {
+      db,
+      repoId,
+      services: createServerServices(db),
+      tableAvailability,
+      warningManager: new WarningManager(),
+    };
+
+    const bundle = await contextBundle(context, {
+      goal: "alpha",
+      limit: 1,
+      compact: true,
+    });
+
+    expect(bundle.context.length).toBeGreaterThan(0);
+    const first = bundle.context[0];
+    expect(first?.why).toBeUndefined();
+  });
+
+  it("restores why array when includeWhy=true in compact mode", async () => {
+    const repo = await createTempRepo({
+      "src/app.ts": "export function beta() { return 2; }\n",
+    });
+    cleanupTargets.push({ dispose: repo.cleanup });
+
+    const dbDir = await mkdtemp(join(tmpdir(), "kiri-compact-why-include-"));
+    const dbPath = join(dbDir, "index.duckdb");
+    cleanupTargets.push({ dispose: async () => await rm(dbDir, { recursive: true, force: true }) });
+
+    await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+    const db = await DuckDBClient.connect({ databasePath: dbPath });
+    cleanupTargets.push({ dispose: async () => await db.close() });
+
+    const repoId = await resolveRepoId(db, repo.path);
+    const tableAvailability = await checkTableAvailability(db);
+    const context: ServerContext = {
+      db,
+      repoId,
+      services: createServerServices(db),
+      tableAvailability,
+      warningManager: new WarningManager(),
+    };
+
+    const bundle = await contextBundle(context, {
+      goal: "beta",
+      limit: 1,
+      compact: true,
+      includeWhy: true,
+    });
+
+    const first = bundle.context[0];
+    expect(first?.why).toBeDefined();
+    expect(first?.why?.length ?? 0).toBeGreaterThan(0);
+  });
+
   it("combines string matches, dependencies, and proximity", async () => {
     const repo = await createTempRepo({
       "src/auth/token.ts": `import { calculateExpiry } from "../utils/helper";\n\nexport function verifyToken(token: string): boolean {\n  if (!token) {\n    return false;\n  }\n  const expires = calculateExpiry(token);\n  return Date.now() < expires;\n}\n`,

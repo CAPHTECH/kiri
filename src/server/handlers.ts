@@ -22,7 +22,6 @@ import { createIdfProvider } from "./idf-provider.js";
 import { coerceProfileName, loadScoringProfile, type ScoringWeights } from "./scoring.js";
 import { createServerServices, ServerServices } from "./services/index.js";
 import { loadStopWords, type StopWordsService } from "./stop-words.js";
-import { resolveCompactFlag } from "./compact-mode.js";
 
 // Re-export extracted handlers for backward compatibility
 export {
@@ -423,7 +422,6 @@ export interface FilesSearchParams {
   limit?: number;
   boost_profile?: BoostProfileName;
   compact?: boolean; // If true, omit preview to reduce token usage
-  includeWhy?: boolean; // When true, keep why tags even in compact mode
   metadata_filters?: Record<string, string | string[]>;
 }
 
@@ -464,7 +462,7 @@ export interface ContextBundleItem {
   path: string;
   range: [number, number];
   preview?: string; // Omitted when compact: true
-  why: string[];
+  why?: string[]; // Omitted when compact mode suppresses reasons
   score: number;
 }
 
@@ -1125,21 +1123,28 @@ function normalizeLimit(limit?: number): number {
   return Math.min(Math.max(1, Math.floor(limit)), 100);
 }
 
+const PREVIEW_MATCH_WINDOW = 120;
+const PREVIEW_MAX_LENGTH = 100;
+
 function buildPreview(content: string, query: string): { preview: string; line: number } {
   const lowerContent = content.toLowerCase();
   const lowerQuery = query.toLowerCase();
   const index = lowerContent.indexOf(lowerQuery);
   if (index === -1) {
-    return { preview: content.slice(0, 240), line: 1 };
+    return { preview: content.slice(0, PREVIEW_MAX_LENGTH), line: 1 };
   }
 
   const prefix = content.slice(0, index);
   const prefixLines = prefix.split(/\r?\n/);
   const matchLine = prefix.length === 0 ? 1 : prefixLines.length;
 
-  const snippetStart = Math.max(0, index - 120);
-  const snippetEnd = Math.min(content.length, index + query.length + 120);
-  const preview = content.slice(snippetStart, snippetEnd);
+  const snippetStart = Math.max(0, index - PREVIEW_MATCH_WINDOW);
+  const snippetEnd = Math.min(content.length, index + query.length + PREVIEW_MATCH_WINDOW);
+  const previewSlice = content.slice(snippetStart, snippetEnd);
+  const preview =
+    previewSlice.length > PREVIEW_MAX_LENGTH
+      ? `${previewSlice.slice(0, PREVIEW_MAX_LENGTH - 1)}…`
+      : previewSlice;
 
   return { preview, line: matchLine };
 }
@@ -2335,15 +2340,17 @@ function selectSnippet(snippets: SnippetRow[], matchLine: number | null): Snippe
   return lastSnippet ?? firstSnippet;
 }
 
+const SNIPPET_PREVIEW_MAX_LENGTH = 240;
+
 function buildSnippetPreview(content: string, startLine: number, endLine: number): string {
   const lines = content.split(/\r?\n/);
   const startIndex = Math.max(0, Math.min(startLine - 1, lines.length));
   const endIndex = Math.max(startIndex, Math.min(endLine, lines.length));
   const snippet = lines.slice(startIndex, endIndex).join("\n");
-  if (snippet.length <= 240) {
+  if (snippet.length <= SNIPPET_PREVIEW_MAX_LENGTH) {
     return snippet;
   }
-  return `${snippet.slice(0, 239)}…`;
+  return `${snippet.slice(0, SNIPPET_PREVIEW_MAX_LENGTH - 1)}…`;
 }
 
 /**
@@ -5088,7 +5095,7 @@ async function contextBundleImpl(
       path: candidate.path,
       range: [startLine, endLine],
       score: roundedScore,
-      why: shouldIncludeWhy ? selectWhyTags(reasons) : [],
+      ...(shouldIncludeWhy ? { why: selectWhyTags(reasons) } : {}),
     };
 
     // Add preview only if not in compact mode
