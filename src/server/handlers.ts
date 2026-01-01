@@ -1018,7 +1018,7 @@ function formatWhyTags(reasons: Set<string>, mode: WhyMode): string[] {
   }
   const formatted: string[] = [];
   for (const reason of reasons) {
-    const [prefix, ...restParts] = reason.split(":");
+    const [prefix = "", ...restParts] = reason.split(":");
     const abbreviation = WHY_PREFIX_ABBREVIATIONS[prefix];
     if (!abbreviation) {
       formatted.push(reason);
