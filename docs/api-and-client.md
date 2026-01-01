@@ -22,14 +22,15 @@ The server implements MCP standard endpoints `initialize` / `tools/list`, enabli
 - `deps_closure(paths[], direction="out"|"in", depth=2)` - Analyze dependencies
 - `recent.changed(since="30d", path_prefix?)` - Find recently changed files
 - `who.owns(path)` - Get ownership information from blame summary
-- `snippets_get(path, start_line?, end_line?, compact?, include_line_numbers?)` - Retrieve code snippets; `compact` omits content, `include_line_numbers` prefixes each line when content is returned
+- `snippets_get(path, start_line?, end_line?, compact?, include_line_numbers?, range_source?)` - Retrieve code snippets; default view is `symbol` (override via `KIRI_SNIPPETS_DEFAULT_VIEW`). Provide `range_source` from `context_bundle` to preserve clamped windows, `compact` omits content, `include_line_numbers` prefixes each line when content is returned
 - `semantic_rerank(candidates[], text, k=20)` - Semantic reranking (VSS only)
-- `context_bundle(goal, artifacts, includeTokensEstimate?)` ← **Most Important**
+- `context_bundle(goal, artifacts, includeTokensEstimate?, why_mode?)` ← **Most Important**
   - `goal`: Natural language description (e.g., "Fix failing test: test_verify_token in Auth")
   - `artifacts`: {`editing_path`?, `failing_tests`?, `last_diff`?, `hints`?[]}
     - Providing `editing_path` with the file you're touching strongly boosts that file and nearby dependencies, returning a cohesive set of related files.
     - `hints`: Optional list of short function/file breadcrumbs. They are merged into the search query so abstract goals like "nonparametric test" can still surface concrete implementations.
-  - Output: Fragment list (path, [start,end], why[], score, optional preview) and `tokens_estimate` **only** when `includeTokensEstimate: true`
+  - `why_mode`: `"full"` (default) returns verbose reasons; `"terse"` emits compact prefixes like `["sym:startServer","txt:server"]`.
+  - Output: Fragment list (path, [start,end], `rangeSource`, why[], score, optional preview) and `tokens_estimate` **only** when `includeTokensEstimate: true`
 
 ## `context_bundle` Request/Response Example
 
@@ -45,7 +46,8 @@ The server implements MCP standard endpoints `initialize` / `tools/list`, enabli
         "last_diff": "...",
         "hints": ["verifyToken", "src/auth/keys.ts"]
       },
-    "includeTokensEstimate": true
+    "includeTokensEstimate": true,
+    "why_mode": "terse"
   }
 }
 
@@ -55,6 +57,7 @@ The server implements MCP standard endpoints `initialize` / `tools/list`, enabli
     {
       "path": "src/auth/jwt.ts",
       "range": [12, 78],
+      "rangeSource": "symbol",
       "why": ["symbol:verifyToken", "dep:src/auth/keys.ts", "recent:7d"],
       "score": 0.86,
       "preview": "function verifyToken(token:string){...}"
@@ -62,6 +65,7 @@ The server implements MCP standard endpoints `initialize` / `tools/list`, enabli
     {
       "path": "src/auth/keys.ts",
       "range": [1, 120],
+      "rangeSource": "window",
       "why": ["dep<-jwt.ts"],
       "score": 0.74
     }
@@ -92,6 +96,7 @@ for (const item of result.context.slice(0, 3)) {
     path: item.path,
     start_line: item.range[0],
     end_line: item.range[1],
+    range_source: item.rangeSource, // preserves clamped windows even if defaults change
   });
   // Perform detailed analysis with content
 }
@@ -118,12 +123,14 @@ for (const item of result.context.slice(0, 3)) {
 
 - Immediate code preview is needed
 - Retrieving only a few files (1-3)
+- You need inline previews with `why_mode: "full"` for audit logs
 
 ### Lightweight inspection options
 
 - `files_search(..., compact: true)` removes previews from every result for 60–70% fewer tokens during keyword scans. Use `compact: false` only when the preview text is required inline.
 - `snippets_get(..., compact: true)` returns only metadata (`path`, `startLine`, `endLine`, totals, symbol info) so that you can confirm the symbol boundaries without streaming full text.
 - `snippets_get(..., includeLineNumbers: true)` prefixes each returned line with an aligned counter such as `  1375→export async function...`, making it easier to quote exact locations when copying into bug reports or chats.
+- `context_bundle(..., why_mode: "terse")` shrinks `why` tags (`symbol:` → `sym:`) without changing ranking; flip back to `"full"` when humans need verbose traceability.
 
 ### Real Example: Lambda Function Investigation
 
@@ -247,7 +254,7 @@ Watch mode (`--watch`) monitors repository file changes and automatically reinde
 - `deps_closure(paths[], direction="out"|"in", depth=2)`
 - `recent.changed(since="30d", path_prefix?)`
 - `who.owns(path)` → `blame_summary` を要約
-- `snippets_get(path, start_line?, end_line?, compact?, include_line_numbers?)`
+- `snippets_get(path, start_line?, end_line?, compact?, include_line_numbers?, range_source?)`
 - `semantic_rerank(candidates[], text, k=20)`（VSS 有効時のみ）
 - `context_bundle(goal, artifacts, includeTokensEstimate?)` ← **最重要**
   - `goal`: 自然文（例: "Auth の失敗テスト test_verify_token を修す"）
@@ -333,6 +340,7 @@ for (const item of result.context.slice(0, 3)) {
     path: item.path,
     start_line: item.range[0],
     end_line: item.range[1],
+    range_source: item.rangeSource,
   });
   // contentを使って詳細分析
 }
@@ -359,6 +367,9 @@ for (const item of result.context.slice(0, 3)) {
 
 - すぐにコードプレビューが必要な場合
 - 少数のファイル（1-3件）のみを取得する場合
+- `why_mode: "full"` で詳細な `why` 説明が必要な場合（監査ログなど）
+
+> **Tip**: `context_bundle(..., why_mode: "terse")` + `snippets_get(..., range_source: item.rangeSource)` の組み合わせで、トークンを抑えつつ必要に応じて詳細コードへ拡張できます。
 
 ### 実例：Lambda関数の調査
 
@@ -369,7 +380,8 @@ for (const item of result.context.slice(0, 3)) {
   "params": {
     "goal": "ask-agent Lambda handler logic, runtime execution flow",
     "limit": 10,
-    "compact": true
+    "compact": true,
+    "why_mode": "terse"
   }
 }
 
@@ -379,6 +391,7 @@ for (const item of result.context.slice(0, 3)) {
     {
       "path": "lambda/ask-agent/handler.ts",
       "range": [15, 89],
+      "rangeSource": "symbol",
       "why": ["phrase:ask-agent", "path-phrase:handler", "boost:impl-file"],
       "score": 0.92
       // preview フィールドなし → トークン節約
@@ -386,6 +399,7 @@ for (const item of result.context.slice(0, 3)) {
     {
       "path": "lambda/ask-agent/runtime.ts",
       "range": [42, 156],
+      "rangeSource": "window",
       "why": ["phrase:ask-agent", "dep:handler.ts"],
       "score": 0.85
     }

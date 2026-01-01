@@ -277,8 +277,16 @@ async function runMCPToolsTests(_options: VerificationOptions): Promise<TestResu
       // Step 3: Test each MCP tool
       const tools = [
         { name: "files_search", method: "files_search", params: { query: "hello" } },
-        { name: "context_bundle", method: "context_bundle", params: { goal: "hello" } },
-        { name: "snippets_get", method: "snippets_get", params: { path: "src/index.ts" } },
+        {
+          name: "context_bundle",
+          method: "context_bundle",
+          params: { goal: "hello", why_mode: "terse" },
+        },
+        {
+          name: "snippets_get",
+          method: "snippets_get",
+          params: { path: "src/index.ts", range_source: "window" },
+        },
         {
           name: "deps_closure",
           method: "deps_closure",
@@ -292,7 +300,7 @@ async function runMCPToolsTests(_options: VerificationOptions): Promise<TestResu
         {
           name: "context_bundle (balanced)",
           method: "context_bundle",
-          params: { goal: "hello guide function", boost_profile: "balanced" },
+          params: { goal: "hello guide function", boost_profile: "balanced", why_mode: "terse" },
         },
       ];
 

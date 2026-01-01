@@ -97,6 +97,7 @@ describe("context_bundle", () => {
     expect(editing).toBeDefined();
     expect(editing?.why).toContain("artifact:editing_path");
     expect(editing?.why.some((reason) => reason.startsWith("structural:"))).toBe(true);
+    expect(editing?.rangeSource).toBeDefined();
 
     const helper = bundle.context.find((item) => item.path === "src/utils/helper.ts");
     expect(helper).toBeDefined();
@@ -158,6 +159,43 @@ describe("context_bundle", () => {
     expect(hinted?.why).toContain("artifact:hint:src/stats/rank-biserial.ts");
     expect(withHints.context).toHaveLength(1);
     expect(withHints.context[0]?.path).toBe("src/stats/rank-biserial.ts");
+  }, 10000);
+
+  it("returns terse why tags when why_mode is set", async () => {
+    const repo = await createTempRepo({
+      "src/service/foo.ts": `export function foo() {\n  return "foo";\n}\n`,
+    });
+    cleanupTargets.push({ dispose: repo.cleanup });
+
+    const dbDir = await mkdtemp(join(tmpdir(), "kiri-db-terse-"));
+    const dbPath = join(dbDir, "index.duckdb");
+    cleanupTargets.push({ dispose: async () => await rm(dbDir, { recursive: true, force: true }) });
+
+    await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+    const db = await DuckDBClient.connect({ databasePath: dbPath });
+    cleanupTargets.push({ dispose: async () => await db.close() });
+
+    const repoId = await resolveRepoId(db, repo.path);
+    const tableAvailability = await checkTableAvailability(db);
+    const context: ServerContext = {
+      db,
+      repoId,
+      services: createServerServices(db),
+      tableAvailability,
+      warningManager: new WarningManager(),
+    };
+
+    const bundle = await contextBundle(context, {
+      goal: "foo",
+      why_mode: "terse",
+    });
+
+    expect(bundle.context.length).toBeGreaterThan(0);
+    const reasons = bundle.context[0]?.why ?? [];
+    expect(reasons.length).toBeGreaterThan(0);
+    expect(reasons.some((reason) => reason.startsWith("sym:"))).toBe(true);
+    expect(reasons.every((reason) => !reason.startsWith("symbol:"))).toBe(true);
   }, 10000);
 
   it("applies YAML/env path penalties when merging boost profile multipliers", async () => {

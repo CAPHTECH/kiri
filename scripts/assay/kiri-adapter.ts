@@ -185,6 +185,7 @@ export class KiriSearchAdapter implements SearchAdapter<KiriQuery, Metrics> {
         goal: query.text,
         limit: k,
         compact: this.config.compact,
+        why_mode: "terse",
       };
 
       if (this.config.boostProfile && this.config.boostProfile !== "default") {

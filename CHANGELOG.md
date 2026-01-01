@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `context_bundle`: emits a `rangeSource` flag (`symbol` / `window` / `clamped`) and accepts `why_mode: "terse"` for compact `why` tags.
+- `snippets_get`: understands the optional `range_source` hint and now keeps explicit `[start_line,end_line]` windows even when the default view is `symbol`, protecting context_bundle workflows.
+
+### Changed
+
+- Default `snippets_get` view is now `symbol`. Override via the `KIRI_SNIPPETS_DEFAULT_VIEW` environment variable if you need the legacy `auto` behavior.
+
 ## [0.25.8] - 2025-12-30
 
 ### Fixed

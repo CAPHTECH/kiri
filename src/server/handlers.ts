@@ -22,6 +22,7 @@ import { createIdfProvider } from "./idf-provider.js";
 import { coerceProfileName, loadScoringProfile, type ScoringWeights } from "./scoring.js";
 import { createServerServices, ServerServices } from "./services/index.js";
 import { loadStopWords, type StopWordsService } from "./stop-words.js";
+import type { SnippetRangeSource } from "./handlers/snippets-get.js";
 
 // Re-export extracted handlers for backward compatibility
 export {
@@ -29,6 +30,7 @@ export {
   type SnippetsGetParams,
   type SnippetsGetView,
   type SnippetResult,
+  type SnippetRangeSource,
 } from "./handlers/snippets-get.js";
 
 // Configuration file patterns (v0.8.0+: consolidated to avoid duplication)
@@ -455,11 +457,13 @@ export interface ContextBundleParams {
   requestId?: string; // Optional request ID for tracing/debugging
   path_prefix?: string;
   category?: string; // Query category for adaptive K (bugfix, testfail, etc.)
+  why_mode?: "full" | "terse";
 }
 
 export interface ContextBundleItem {
   path: string;
   range: [number, number];
+  rangeSource: SnippetRangeSource;
   preview?: string; // Omitted when compact: true
   why: string[];
   score: number;
@@ -874,6 +878,32 @@ const DEFAULT_FILECACHE_MAX_BYTES = 64 * 1024 * 1024;
 const PATH_MISS_DELTA = serverConfig.penalties.pathMissDelta;
 const LARGE_FILE_DELTA = serverConfig.penalties.largeFileDelta;
 const MAX_WHY_TAGS = 10;
+type WhyMode = "full" | "terse";
+
+const WHY_PREFIX_ABBREVIATIONS: Record<string, string> = {
+  artifact: "art",
+  dictionary: "dict",
+  phrase: "phr",
+  text: "txt",
+  metadata: "meta",
+  substring: "sub",
+  "path-phrase": "pphr",
+  structural: "str",
+  cochange: "co",
+  "path-segment": "pseg",
+  "path-keyword": "pkey",
+  dep: "dep",
+  near: "near",
+  boost: "boost",
+  recent: "recent",
+  symbol: "sym",
+  penalty: "pen",
+  keyword: "kw",
+  coverage: "cov",
+  fallback: "fb",
+  graph: "graph",
+  "abbr-path": "abbr",
+};
 
 // 項目3: whyタグの優先度マップ（低い数値ほど高優先度）
 // All actual tag prefixes used in the codebase
@@ -936,7 +966,7 @@ function parseOutputOptions(params: {
  *
  * DoS protection: Limits processing to first 1000 reasons to prevent CPU exhaustion.
  */
-function selectWhyTags(reasons: Set<string>): string[] {
+function selectWhyTags(reasons: Set<string>, mode: WhyMode = "full"): string[] {
   // Protect against DoS: limit reasons processed
   if (reasons.size > 1000) {
     reasons = new Set(Array.from(reasons).slice(0, 1000));
@@ -979,7 +1009,25 @@ function selectWhyTags(reasons: Set<string>): string[] {
     selected.add(reason); // Set automatically deduplicates
   }
 
-  return Array.from(selected);
+  return formatWhyTags(selected, mode);
+}
+
+function formatWhyTags(reasons: Set<string>, mode: WhyMode): string[] {
+  if (mode === "full") {
+    return Array.from(reasons);
+  }
+  const formatted: string[] = [];
+  for (const reason of reasons) {
+    const [prefix, ...restParts] = reason.split(":");
+    const abbreviation = WHY_PREFIX_ABBREVIATIONS[prefix];
+    if (!abbreviation) {
+      formatted.push(reason);
+      continue;
+    }
+    const suffix = restParts.join(":");
+    formatted.push(suffix.length > 0 ? `${abbreviation}:${suffix}` : abbreviation);
+  }
+  return formatted;
 }
 
 /**
@@ -4048,6 +4096,7 @@ async function contextBundleImpl(
   const substringHints = hintBuckets.substringHints;
   const includeTokensEstimate = params.includeTokensEstimate === true;
   const isCompact = params.compact === true;
+  const whyMode: WhyMode = params.why_mode ?? "full";
   const pathPrefix =
     params.path_prefix && params.path_prefix.length > 0
       ? normalizePathPrefix(params.path_prefix)
@@ -5035,6 +5084,7 @@ async function contextBundleImpl(
 
     let startLine: number;
     let endLine: number;
+    let rangeSource: SnippetRangeSource = selected ? "symbol" : "window";
     if (selected) {
       startLine = selected.start_line;
       endLine = selected.end_line;
@@ -5064,6 +5114,7 @@ async function contextBundleImpl(
         }
         startLine = clampedStart;
         endLine = Math.max(clampedStart, clampedEnd);
+        rangeSource = "clamped";
       }
     }
 
@@ -5081,11 +5132,12 @@ async function contextBundleImpl(
     const roundedScore = Number.isFinite(normalizedScore) ? Number(normalizedScore.toFixed(3)) : 0;
 
     // Select why tags with diversity guarantee (reserves slots for dep/symbol/near)
-    const why = selectWhyTags(reasons);
+    const why = selectWhyTags(reasons, whyMode);
 
     const item: ContextBundleItem = {
       path: candidate.path,
       range: [startLine, endLine],
+      rangeSource,
       why,
       score: roundedScore,
     };
