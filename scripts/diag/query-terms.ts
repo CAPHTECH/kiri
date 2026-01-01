@@ -12,15 +12,28 @@ interface CliOptions {
   idFilter?: string;
 }
 
+interface ExpectedPathObject {
+  path?: string;
+}
+
 interface GoldenQuery {
   id: string;
   query?: string;
   goal?: string;
+  text?: string;
   repo?: string;
-  expected?: {
-    paths?: string[];
-  };
+  expected?:
+    | {
+        paths?: string[];
+      }
+    | Array<string | ExpectedPathObject>;
   hints?: string[];
+  metadata?: {
+    expected?: Array<string | ExpectedPathObject>;
+    hints?: string[];
+    intent?: string;
+    category?: string;
+  };
 }
 
 interface GoldenDataset {
@@ -29,7 +42,7 @@ interface GoldenDataset {
 
 function parseArgs(): CliOptions {
   const options: CliOptions = {
-    datasetPath: "tests/eval/goldens/queries.yaml",
+    datasetPath: "external/assay-kit/examples/kiri-integration/datasets/kiri-golden.yaml",
   };
   for (let i = 2; i < process.argv.length; i += 1) {
     const arg = process.argv[i];
@@ -53,6 +66,23 @@ function unique(values: string[]): string[] {
   return Array.from(new Set(values));
 }
 
+function normalizeExpectedPaths(value: GoldenQuery["expected"]): string[] {
+  if (!value) {
+    return [];
+  }
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => {
+        if (typeof item === "string") {
+          return item;
+        }
+        return item?.path ?? "";
+      })
+      .filter((path) => path.length > 0);
+  }
+  return value.paths ?? [];
+}
+
 function extractPathSegments(paths: string[] | undefined): string[] {
   if (!paths || paths.length === 0) {
     return [];
@@ -69,10 +99,11 @@ function extractPathSegments(paths: string[] | undefined): string[] {
 }
 
 function logQueryInfo(query: GoldenQuery): void {
-  const text = query.query ?? query.goal ?? "";
+  const text = query.query ?? query.goal ?? query.text ?? query.metadata?.intent ?? "";
   const keywords = unique(tokenizeText(text));
-  const pathSegments = extractPathSegments(query.expected?.paths);
-  const hints = unique(query.hints ?? []);
+  const expectedPaths = normalizeExpectedPaths(query.expected ?? query.metadata?.expected);
+  const pathSegments = extractPathSegments(expectedPaths);
+  const hints = unique(query.hints ?? query.metadata?.hints ?? []);
 
   console.log(`\n=== ${query.id} (repo: ${query.repo ?? "default"}) ===`);
   console.log(`Query Text: ${text}`);

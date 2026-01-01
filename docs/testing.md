@@ -27,203 +27,60 @@ service: "kiri"
 
 - Pull Request ごとに 80% 以上のステートメントカバレッジを目標とする。
 - 検索品質は P@k / TFFU / Token 削減率で報告する。
-- 評価データは `tests/eval/` にゴールデンデータとして保存し、JSON ベースで比較する。
+- 評価データは assay-kit のデータセット YAML と `var/assay/` の結果で管理する。
 
-## ゴールデンセット評価システム
+## Assay Kit 評価システム
 
-### 概要
-
-KIRI は代表的クエリセット（Golden Set）を使用した検索精度の定量評価システムを提供します。
-
-**メトリクス:**
-
-- **P@10** (Precision at K=10): 上位10件中の関連結果の割合（目標: ≥0.70）
-- **TFFU** (Time To First Useful): 最初の関連結果が返されるまでの時間（目標: ≤1000ms）
-
-**現在の制約 (v0.9.10):**
-
-- クエリ数: 5件（カテゴリごとに1件）
-- 推奨: 20-50件（カテゴリごとに3-10件）
-- 今後の計画: v1.0.0までに20件以上に拡充予定
-
-現在のクエリ数は統計的な信頼性が限定的です。より正確な評価のため、今後クエリセットを段階的に拡充していきます。
+KIRI の検索品質評価は assay-kit を標準とする。
 
 ### 実行方法
 
 ```bash
-# ベンチマーク実行（ローカルのみ、CI除外）
-pnpm run eval:golden
+# 評価実行（ローカル）
+pnpm run assay:evaluate
 
-# 詳細ログ付き実行
-pnpm run eval:golden:verbose
+# プロファイル切り替え（current / release）
+pnpm run assay:evaluate -- --profile release
 
-# カスタムパラメータ
-tsx scripts/eval/run-golden.ts --k 10 --warmup 3 --verbose
+# データセットを差し替える
+pnpm run assay:evaluate -- --dataset datasets/kiri-ab.yaml
 ```
 
-### ファイル構成
-
-```
-tests/eval/
-├── goldens/
-│   ├── README.md           # スキーマ定義、クエリ追加ガイド
-│   ├── queries.yaml        # 代表クエリセット（20-50件）
-│   └── baseline.json       # ベースライン測定値とthresholds
-├── results/
-│   ├── README.md           # 結果記録ワークフロー
-│   └── YYYY-MM-DD-*.md     # 個別ベンチマーク結果
-└── metrics.spec.ts         # メトリクス計算のユニットテスト
-
-scripts/eval/
-└── run-golden.ts           # ベンチマーク実行スクリプト
-```
-
-### クエリカテゴリ
-
-1. **bugfix** (5-10 queries): バグ修正時の調査フロー
-2. **feature** (5-10 queries): 新機能追加時の参照コード検索
-3. **refactor** (3-7 queries): リファクタリング対象の特定
-4. **infra** (3-7 queries): インフラ・設定関連の調査
-5. **docs** (3-7 queries): ドキュメント検索
-
-### ベンチマーク機能
-
-- **Warmup**: 2回のwarmup実行でキャッシュを安定化
-- **リトライ**: 失敗時に最大2回リトライ（exponential backoff）
-- **ベースライン比較**: `baseline.json` と比較してリグレッション検知
-- **CI Guard**: `process.env.CI` チェックで本番CI除外
-- **高精度計測**: `process.hrtime.bigint()` による正確なタイミング測定
-
-### 結果出力
-
-**JSON形式** (`var/eval/latest.json`):
-
-```json
-{
-  "timestamp": "2025-11-11T12:00:00Z",
-  "version": "0.9.10",
-  "overall": {
-    "precisionAtK": 0.75,
-    "avgTTFU": 850,
-    "totalQueries": 25
-  },
-  "byCategory": { ... },
-  "queries": [ ... ]
-}
-```
-
-**Markdown形式** (`var/eval/latest.md`):
-
-```markdown
-# KIRI Golden Set Evaluation - 2025-11-11
-
-| Metric | Value | Threshold | Status |
-| ------ | ----- | --------- | ------ |
-| P@10   | 0.750 | ≥0.70     | ✅     |
-| TFFU   | 850ms | ≤1000ms   | ✅     |
-```
-
-### クエリの追加
-
-1. 手動でMCP toolを実行して結果を確認
-2. `tests/eval/goldens/queries.yaml` に追加
-3. 匿名化チェック（機密情報除去）
-4. ベンチマーク実行して検証
-
-詳細は [tests/eval/goldens/README.md](../tests/eval/goldens/README.md) を参照。
-
-### 結果の記録
-
-1. `pnpm run eval:golden` を実行
-2. `var/eval/latest.md` を `tests/eval/results/YYYY-MM-DD-description.md` にコピー
-3. `tests/eval/results/README.md` のサマリーテーブルを更新
-
-詳細は [tests/eval/results/README.md](../tests/eval/results/README.md) を参照。
-
-### 複数リポジトリの評価
-
-- `tests/eval/goldens/queries.yaml` に `defaultRepo` と `repos` を定義すると、1回のベンチマーク内で複数のコードベースを切り替えて検査できます。
-- `repos.<alias>.repoPath` は作業コピーのルート、`dbPath` は対応する DuckDB ファイルを指定します。
-- private リポジトリを扱う場合は Git submodule などで `external/<name>` 配下に配置し、`kiri index --repo external/<name> --db external/<name>/.kiri/index.duckdb` のように事前インデックスを作成します。
-- 各クエリは `repo: <alias>` を指定するだけで該当レポジトリを対象に検索できます（省略時は `defaultRepo` を使用）。
-- `pnpm run eval:golden` はクエリの `repo` を検知してMCPサーバーを自動的に再起動するため、手動で `--repo` を付け替える必要はありません。
-
-### ドキュメント front matter 無効化ベンチ
-
-ドキュメント検索における front matter 依存度を比較するため、`scripts/docs/make-plain.ts` で front matter を除去したコーパスを生成します。
+### A/B 比較
 
 ```bash
-# plain corpus を生成し、インデックスも作成
-pnpm exec tsx scripts/docs/make-plain.ts --index
-
-# 生成物
-#   tmp/docs-plain/                … front matter 無しの Markdown
-#   tmp/docs-plain/.kiri/index.duckdb
+pnpm run assay:compare -- --dataset datasets/kiri-ab.yaml --variant-a default --variant-b balanced
 ```
 
-`tests/eval/goldens/queries.yaml` の `kiri-docs-plain` エイリアスは上記 `tmp/docs-plain/` を参照しており、`pnpm run eval:golden` だけで「front matter あり/なし」両カテゴリのP@10やMetadata Pass Rateを計測できます。front matter 除去ロジックは YAML ブロックのみを削除し、本体コンテンツや Markdown リンクは変更されません。
+### 成果物
 
-### ゴールデンセット実行前チェックリスト
+- 既定の結果は `var/assay/` に `eval-<profile>-<dataset>-YYYY-MM-DD.(json|md)` で保存される。
+- A/B 比較の結果は `var/assay/` に `comparison-*.json` / `comparison-*.md` が出力される。
+- 直近の評価は `var/assay/latest.(json|md)` に上書き保存される。
 
-複数リポジトリを跨いだベンチマークでは、以下の手順を満たしていないとすべてのクエリが空振りします。CI/ローカルを問わず、実行前に毎回確認してください。
+### 実行前チェック（最小）
 
-1. **リポジトリを用意する**
+1. `var/index.duckdb` が最新であることを確認する。
+2. 既存の `src/server/main.ts` プロセスが起動していないことを確認する。
+3. 必要なら `pnpm exec kiri index --repo . --db var/index.duckdb` を実行する。
 
-   ```bash
-   git submodule update --init external/assay-kit
-   scripts/setup-golden.sh
-   pnpm exec tsx scripts/docs/make-plain.ts --index
-   ```
+### 評価基準（データセット別・誤差許容）
 
-2. **DuckDB と security.lock を揃える**
+- **前提**: データセットごとに主指標と許容幅を分けて運用する。
+- **許容幅の決め方**: 同一条件で3回評価し、`stdev > 0` の場合は `max(2*stdev, 0.01)` を許容幅とする。`stdev = 0` は **±0.01** を採用する。
 
-   ```bash
-   pnpm exec tsx src/indexer/cli.ts --repo . --db var/index.duckdb --full
-   ```
+#### stopwords（`datasets/kiri-stopwords.yaml`）
 
-# 上記スクリプトでインデックス生成＆セキュリティロック生成まで行われます
+- **主指標**: precision / recall
+- **合格条件**:
+  - 片方が **+0.02 以上改善**
+  - 他方は **-0.01 以内の悪化**（許容幅内）
+- **副指標**: ndcg / mrr / map / f1 は **±0.01以内**、tffu は **±0.01秒以内**
 
-pnpm exec tsx src/client/cli.ts security verify --db var/index.duckdb --security-lock var/security.lock --write-lock
-pnpm exec tsx src/client/cli.ts security verify --db tmp/docs-plain/.kiri/index.duckdb --security-lock tmp/docs-plain/.kiri/security.lock --write-lock
+#### docs（`datasets/kiri-docs*.yaml`）
 
-````
-
-> `scripts/eval/run-golden.ts` は `security.lock` が存在しない場合に即時停止します。エラーメッセージに沿って上記コマンドを再実行してください。
-
-3. **インデックスカバレッジを確認する**
-
-```bash
-pnpm exec tsx scripts/diag/index-coverage.ts --dataset datasets/kiri-ab.yaml --db var/index.duckdb
-pnpm exec tsx scripts/diag/index-coverage.ts --dataset tests/eval/goldens/queries.yaml --db external/vscode/.kiri/index.duckdb
-````
-
-期待される出力は `Missing on disk: 0 / Missing in DuckDB: 0` です。ヒットしないファイルがある場合は `.gitignore` や `.kiri` の生成を確認します。
-
-4. **スニペット/トークンを spot check する**
-
-   ```bash
-   # 期待ファイルの抜粋を確認
-   pnpm exec tsx scripts/diag/snippet-preview.ts --dataset datasets/kiri-ab.yaml --db var/index.duckdb --max-lines 6 | head -n 80
-
-   # クエリごとのキーワード・パス展開を確認
-   pnpm exec tsx scripts/diag/query-terms.ts --dataset tests/eval/goldens/queries.yaml --repo vscode
-   ```
-
-5. **ベンチマークを実行する**
-
-   ```bash
-   KIRI_ALLOW_UNSAFE_PATHS=1 pnpm run eval:golden -- --dataset datasets/kiri-ab.yaml --limit 50 --k 15
-   ```
-
-   `KIRI_ALLOW_UNSAFE_PATHS=1` を付与しないと `external/*` などリポジトリ外パスを参照できません。
-
-### Assay Kit 連携（Phase 2 機能）
-
-- `pnpm run assay:evaluate` で `external/assay-kit/examples/kiri-integration/datasets/kiri-golden.yaml` を対象に Assay Runner を実行し、`var/assay/eval-YYYY-MM-DD.(json|md)` に結果を保存します。`KiriSearchAdapter` が内部で `kiri-server` を HTTP モードで起動し、warmup/リトライ/並列実行を Assay に委譲します。
-- `pnpm run assay:compare` で `ComparisonRunner`（Phase 2.1）による A/B 比較を実行し、`default` と `balanced` バリアントを統計的に比較します。`--variant-a`/`--variant-b` や `--stats mann-whitney-u`、`--correction holm`（0.1.1 で修正された Holm-Bonferroni 補正を活用）などのフラグは `--` 以降に指定可能です。
-- どちらのコマンドも `.kiri/index.duckdb` を利用するため、事前に `pnpm exec kiri index --repo . --db .kiri/index.duckdb` などで最新のインデックスを作成してください。
-- `scripts/assay/plugins` にはカスタムメトリクス（Phase 2.2）の登録例があり、`assay:evaluate` 実行時に PluginRegistry を通じて読み込まれます。今後はここに自社固有のレポーターやベースラインプロバイダを追加できます。
-- Assay Kit v0.1.1 で統計補正の互換性が更新されたため、カスタムプラグインの `meta.assay` は `">=0.1.1"` を指定し、CLI から Holm/Bonferroni 補正を選べるようにしました。
+- **主指標**: NDCG（目標値は「NDCG目標値の設定」を適用）
+- **補助条件**: 直近ベースラインから **-0.01 以上の劣化は警戒**とする
 
 ## データセット設計のベストプラクティス
 

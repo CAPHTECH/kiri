@@ -45,6 +45,40 @@ function parseDatasetArg(defaultPath: string): string {
   return value;
 }
 
+function parseRepoArg(defaultPath: string): string {
+  const args = process.argv.slice(2);
+  const index = args.indexOf("--repo");
+  if (index === -1) {
+    return defaultPath;
+  }
+  const value = args[index + 1];
+  if (!value) {
+    throw new Error("Missing value for --repo. Pass a repo root path.");
+  }
+  return value;
+}
+
+function resolveDefaultDbPath(repoRoot: string): string {
+  const candidate = join(repoRoot, ".kiri", "index.duckdb");
+  if (existsSync(candidate)) {
+    return candidate;
+  }
+  return join(repoRoot, "var/index.duckdb");
+}
+
+function parseDbArg(defaultPath: string): string {
+  const args = process.argv.slice(2);
+  const index = args.indexOf("--db");
+  if (index === -1) {
+    return defaultPath;
+  }
+  const value = args[index + 1];
+  if (!value) {
+    throw new Error("Missing value for --db. Pass a DuckDB path.");
+  }
+  return value;
+}
+
 function applyProfileEnv(profile: EvalProfile): void {
   const toggles = [
     "KIRI_SUPPRESS_NON_CODE",
@@ -76,18 +110,19 @@ async function main(): Promise<void> {
 
   console.log(`🎯 KIRI Integration Evaluation (profile: ${profile})\n`);
 
-  const repoRoot = process.cwd();
-  const databasePath = join(repoRoot, "var/index.duckdb");
+  const workspaceRoot = process.cwd();
+  const repoRoot = parseRepoArg(workspaceRoot);
+  const databasePath = parseDbArg(resolveDefaultDbPath(repoRoot));
   const defaultDatasetPath = join(
-    repoRoot,
+    workspaceRoot,
     "external/assay-kit/examples/kiri-integration/datasets/kiri-golden.yaml"
   );
   const datasetPath = parseDatasetArg(defaultDatasetPath);
-  const resultsDir = join(repoRoot, "var/assay");
+  const resultsDir = join(workspaceRoot, "var/assay");
 
   if (!existsSync(databasePath)) {
     throw new Error(
-      `DuckDB not found at ${databasePath}. Run \`pnpm exec kiri index --repo . --db ${databasePath}\` first.`
+      `DuckDB not found at ${databasePath}. Run \`pnpm exec kiri index --repo ${repoRoot} --db ${databasePath}\` first.`
     );
   }
   if (!existsSync(datasetPath)) {
@@ -160,17 +195,25 @@ async function main(): Promise<void> {
   const baseName = `eval-${profile}-${datasetSlug}-${timestamp}`;
   const jsonPath = join(resultsDir, `${baseName}.json`);
   const mdPath = join(resultsDir, `${baseName}.md`);
+  const latestJsonPath = join(resultsDir, "latest.json");
+  const latestMdPath = join(resultsDir, "latest.md");
 
   const jsonReporter = new JsonReporter({ outputPath: jsonPath });
   await jsonReporter.write(enhancedResult);
+  const latestJsonReporter = new JsonReporter({ outputPath: latestJsonPath });
+  await latestJsonReporter.write(enhancedResult);
 
   const mdReporter = new MarkdownReporter({ outputPath: mdPath });
   await mdReporter.write(enhancedResult);
+  const latestMdReporter = new MarkdownReporter({ outputPath: latestMdPath });
+  await latestMdReporter.write(enhancedResult);
 
   const consoleReporter = new ConsoleReporter({ verbosity: "normal" });
   await consoleReporter.write(enhancedResult);
 
-  console.log(`\n📄 Results written to:\n  JSON: ${jsonPath}\n  Markdown: ${mdPath}\n`);
+  console.log(
+    `\n📄 Results written to:\n  JSON: ${jsonPath}\n  Markdown: ${mdPath}\n  Latest JSON: ${latestJsonPath}\n  Latest Markdown: ${latestMdPath}\n`
+  );
 
   if (pluginMetricsSummary) {
     console.log("🔌 Plugin metrics summary:");

@@ -26,7 +26,7 @@ interface TestResult {
   details?: string;
 }
 
-type VerificationCategory = "unit" | "integration" | "dart" | "eval" | "tools" | "watch" | "all";
+type VerificationCategory = "unit" | "integration" | "dart" | "tools" | "watch" | "all";
 
 interface VerificationOptions {
   category: VerificationCategory;
@@ -488,38 +488,6 @@ async function runWatchModeTests(_options: VerificationOptions): Promise<TestRes
   }
 }
 
-async function runEvalTests(_options: VerificationOptions): Promise<TestResult> {
-  log("\n📊 Running Evaluation Tests...", "cyan");
-  const start = Date.now();
-
-  const args = buildVitestArgs(["tests/eval"], false);
-
-  try {
-    const result = await runCommand("pnpm", args, { timeout: 60000 });
-    const duration = Date.now() - start;
-
-    if (result.exitCode === 0) {
-      log("✓ Evaluation tests passed", "green");
-      return { category: "eval", passed: true, duration };
-    } else {
-      return {
-        category: "eval",
-        passed: false,
-        duration,
-        error: "Evaluation tests failed",
-        details: result.stderr,
-      };
-    }
-  } catch (error) {
-    return {
-      category: "eval",
-      passed: false,
-      duration: Date.now() - start,
-      error: error instanceof Error ? error.message : String(error),
-    };
-  }
-}
-
 function printSummary(results: TestResult[]): void {
   log("\n" + "=".repeat(60), "cyan");
   log("📋 Test Summary", "cyan");
@@ -618,10 +586,6 @@ async function main(): Promise<void> {
 
   if (options.category === "all" || options.category === "watch") {
     results.push(await runWatchModeTests(options));
-  }
-
-  if (options.category === "all" || options.category === "eval") {
-    results.push(await runEvalTests(options));
   }
 
   printSummary(results);

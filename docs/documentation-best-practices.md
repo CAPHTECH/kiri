@@ -14,7 +14,7 @@ service: "kiri"
 
 > Related: [Testing & Evaluation](./testing.md) / [Search & Ranking](./search-ranking.md)
 
-KIRI’s document search relies on structured metadata and Markdown signals. This guide captures the practices that keep docs discoverable and prevent regressions such as those highlighted in the `docs` vs `docs-plain` benchmark (see `tests/eval/results/2025-11-17-docs-plain.md`).
+KIRI’s document search relies on structured metadata and Markdown signals. This guide captures the practices that keep docs discoverable and prevent regressions such as those highlighted in assay-kit benchmarks (see `var/assay/` reports).
 
 ## 1. Use Complete Front Matter
 
@@ -72,39 +72,33 @@ Notes:
 
 ## 5. Validate with Benchmarks
 
-1. Regenerate the plain corpus and index:
+1. Ensure your dataset includes docs-focused queries (update or add a dataset YAML such as `datasets/kiri-ab.yaml`).
+2. Run assay evaluation:
 
    ```bash
-   pnpm exec tsx scripts/docs/make-plain.ts --index
-   pnpm exec tsx src/client/cli.ts security verify --db tmp/docs-plain/.kiri/index.duckdb --write-lock
+   pnpm run assay:evaluate -- --dataset datasets/kiri-ab.yaml
    ```
 
-2. Compare front matter impact:
+3. If you need A/B comparison (e.g., front matter impact), prepare two variants and run:
 
    ```bash
-   pnpm run eval:golden --categories docs,docs-plain --out var/eval/docs-compare
+   pnpm run assay:compare -- --dataset datasets/kiri-ab.yaml --variant-a default --variant-b balanced
    ```
 
-3. Enforce the docs-only gate before cutting a release. This run fails fast if R@5 drops below 0.5 or MCP startup exceeds 30s:
-
-   ```bash
-   pnpm run eval:golden --categories docs --min-r5 0.5 --max-startup-ms 30000
-   ```
-
-4. Inspect `var/eval/docs-compare/latest.md` → `Category Δ Metrics`. Large negative deltas mean metadata/link signals are missing or misconfigured.
+4. Inspect `var/assay/eval-*.md` or comparison reports and confirm docs category metrics.
 
 ## 6. When Adding New Docs
 
 1. Copy an existing doc as a template to keep the front matter format.
 2. Fill out the fields before writing content.
 3. Run the docs-only benchmark to ensure your doc is discoverable.
-4. Update `tests/eval/goldens/queries.yaml` if the doc represents a new canonical runbook or workflow.
+4. Update the assay dataset YAML (e.g., `datasets/kiri-ab.yaml`) if the doc represents a new canonical runbook or workflow.
 
 ## 7. Troubleshooting Checklist
 
 - **Metadata pass failure**: check for malformed YAML (e.g., tabs, missing delimiters).
 - **Inbound pass failure**: ensure other docs actually link to yours; one-way links do not generate inbound counts.
-- **`pnpm run eval:golden` fails on plain corpus**: regenerate `tmp/docs-plain` and rerun the security lock command.
+- **`pnpm run assay:evaluate` fails on plain corpus**: regenerate `tmp/docs-plain` and rerun the security lock command.
 - **Dictionary hints look stale**: enable logging with `KIRI_HINT_LOG=1`, run a few golden queries, then rebuild the dictionary:
   ```bash
   pnpm exec tsx scripts/diag/dump-hints.ts --db var/index.duckdb --repo .

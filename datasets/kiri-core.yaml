@@ -1,0 +1,294 @@
+schemaVersion: "1.0.0"
+name: "kiri-core"
+datasetId: "kiri-core"
+version: "v2026-01-01"
+description: "Core KIRI repository search quality dataset (non-VSCode)."
+
+defaultParams:
+  k: 10
+  timeoutMs: 30000
+
+queries:
+  - id: "bugfix-001"
+    text: "request queue retry handling for transient failures"
+    goal: "Locate retry logic used by the client request queue."
+    metadata:
+      category: "bugfix"
+      intent: "Find retry/queue logic"
+      tool: "context_bundle"
+      tags: ["retry", "client", "queue"]
+      expected:
+        - path: "src/client/request-queue.ts"
+          relevance: 3
+        - path: "src/shared/utils/retry.ts"
+          relevance: 2
+
+  - id: "bugfix-002"
+    text: "duckdb lockfile handling and cleanup"
+    goal: "Find lockfile utilities and DuckDB integration."
+    metadata:
+      category: "bugfix"
+      intent: "Investigate lockfile handling"
+      tool: "context_bundle"
+      tags: ["duckdb", "lockfile"]
+      expected:
+        - path: "src/shared/utils/lockfile.ts"
+          relevance: 3
+        - path: "src/shared/duckdb.ts"
+          relevance: 2
+
+  - id: "bugfix-003"
+    text: "degrade fallback controller for context bundle"
+    goal: "Locate degrade controller and its integration in handlers."
+    metadata:
+      category: "bugfix"
+      intent: "Locate fallback controller"
+      tool: "context_bundle"
+      tags: ["fallback", "degrade"]
+      expected:
+        - path: "src/server/fallbacks/degradeController.ts"
+          relevance: 3
+        - path: "src/server/handlers.ts"
+          relevance: 2
+
+  - id: "bugfix-004"
+    text: "zombie detector and socket cleanup"
+    goal: "Find zombie detector and socket utility code."
+    metadata:
+      category: "bugfix"
+      intent: "Investigate daemon cleanup"
+      tool: "context_bundle"
+      tags: ["daemon", "socket"]
+      expected:
+        - path: "src/daemon/zombie-detector.ts"
+          relevance: 3
+        - path: "src/shared/utils/socket.ts"
+          relevance: 2
+
+  - id: "feature-001"
+    text: "stop words configuration and domain terms"
+    goal: "Locate stop words list and domain terms configuration."
+    metadata:
+      category: "feature"
+      intent: "Find stop words configuration"
+      tool: "context_bundle"
+      tags: ["stop-words", "config"]
+      expected:
+        - path: "src/server/stop-words.ts"
+          relevance: 3
+        - path: "config/domain-terms.yml"
+          relevance: 2
+
+  - id: "feature-002"
+    text: "boost profiles and scoring pipeline"
+    goal: "Find boost profiles and scoring logic."
+    metadata:
+      category: "feature"
+      intent: "Find scoring and boost profiles"
+      tool: "context_bundle"
+      tags: ["scoring", "boost"]
+      expected:
+        - path: "src/server/boost-profiles.ts"
+          relevance: 3
+        - path: "src/server/scoring.ts"
+          relevance: 2
+
+  - id: "feature-003"
+    text: "adaptive k configuration and categories"
+    goal: "Find adaptive-k configuration and category mapping."
+    metadata:
+      category: "feature"
+      intent: "Locate adaptive-k tuning"
+      tool: "context_bundle"
+      tags: ["adaptive-k", "ranking"]
+      expected:
+        - path: "src/shared/adaptive-k.ts"
+          relevance: 3
+        - path: "src/shared/adaptive-k-categories.ts"
+          relevance: 2
+
+  - id: "feature-004"
+    text: "tokenizer implementation and prompt templates"
+    goal: "Locate tokenizer and prompt templates."
+    metadata:
+      category: "feature"
+      intent: "Find tokenizer and prompts"
+      tool: "context_bundle"
+      tags: ["tokenizer", "prompts"]
+      expected:
+        - path: "src/shared/tokenizer.ts"
+          relevance: 3
+        - path: "src/server/prompts.ts"
+          relevance: 2
+
+  - id: "refactor-001"
+    text: "codeintel registry and index"
+    goal: "Find the codeintel registry and index entry points."
+    metadata:
+      category: "refactor"
+      intent: "Locate codeintel registry"
+      tool: "context_bundle"
+      tags: ["codeintel", "registry"]
+      expected:
+        - path: "src/indexer/codeintel/registry.ts"
+          relevance: 3
+        - path: "src/indexer/codeintel/index.ts"
+          relevance: 2
+
+  - id: "refactor-002"
+    text: "dart analyzer pipeline transform"
+    goal: "Find Dart analyzer pipeline and transform steps."
+    metadata:
+      category: "refactor"
+      intent: "Locate Dart analyzer pipeline"
+      tool: "context_bundle"
+      tags: ["dart", "analyzer"]
+      expected:
+        - path: "src/indexer/dart/analyze.ts"
+          relevance: 3
+        - path: "src/indexer/dart/transform.ts"
+          relevance: 2
+
+  - id: "refactor-003"
+    text: "repo resolver service and repository access"
+    goal: "Find repo resolver and repository access layer."
+    metadata:
+      category: "refactor"
+      intent: "Locate repo services"
+      tool: "context_bundle"
+      tags: ["repo", "services"]
+      expected:
+        - path: "src/server/services/repo-resolver.ts"
+          relevance: 3
+        - path: "src/server/services/repo-repository.ts"
+          relevance: 2
+
+  - id: "refactor-004"
+    text: "indexer denylist filter and security config"
+    goal: "Find denylist filter and security configuration."
+    metadata:
+      category: "refactor"
+      intent: "Locate denylist filter"
+      tool: "context_bundle"
+      tags: ["denylist", "security"]
+      expected:
+        - path: "src/indexer/pipeline/filters/denylist.ts"
+          relevance: 3
+        - path: "src/shared/security/config.ts"
+          relevance: 2
+
+  - id: "infra-001"
+    text: "server entrypoint and stdio boot"
+    goal: "Find server main entry and stdio bootstrap."
+    metadata:
+      category: "infra"
+      intent: "Locate server entrypoint"
+      tool: "context_bundle"
+      tags: ["server", "bootstrap"]
+      expected:
+        - path: "src/server/main.ts"
+          relevance: 3
+        - path: "src/server/bootstrap.ts"
+          relevance: 2
+        - path: "src/server/stdio.ts"
+          relevance: 1
+
+  - id: "infra-002"
+    text: "indexer cli and watch mode"
+    goal: "Find indexer CLI entry and watch mode implementation."
+    metadata:
+      category: "infra"
+      intent: "Locate indexer CLI"
+      tool: "context_bundle"
+      tags: ["indexer", "cli", "watch"]
+      expected:
+        - path: "src/indexer/cli.ts"
+          relevance: 3
+        - path: "src/indexer/watch.ts"
+          relevance: 2
+
+  - id: "infra-003"
+    text: "config loader and scoring profiles"
+    goal: "Find config loader and scoring profile configuration."
+    metadata:
+      category: "infra"
+      intent: "Locate config loader"
+      tool: "context_bundle"
+      tags: ["config", "scoring"]
+      expected:
+        - path: "src/server/config-loader.ts"
+          relevance: 3
+        - path: "src/server/config.ts"
+          relevance: 2
+        - path: "config/scoring-profiles.yml"
+          relevance: 1
+
+  - id: "infra-004"
+    text: "observability metrics and tracing"
+    goal: "Find observability metrics and tracing utilities."
+    metadata:
+      category: "infra"
+      intent: "Locate observability utilities"
+      tool: "context_bundle"
+      tags: ["observability", "metrics"]
+      expected:
+        - path: "src/server/observability/metrics.ts"
+          relevance: 3
+        - path: "src/server/observability/tracing.ts"
+          relevance: 2
+
+  - id: "docs-001"
+    text: "testing and evaluation guide"
+    goal: "Find documentation about testing and evaluation."
+    metadata:
+      category: "docs"
+      intent: "Locate testing docs"
+      tool: "context_bundle"
+      tags: ["docs", "testing"]
+      expected:
+        - path: "docs/testing.md"
+          relevance: 3
+        - path: "docs/runbook.md"
+          relevance: 2
+
+  - id: "docs-002"
+    text: "search ranking design and detailed design"
+    goal: "Find search ranking and detailed design docs."
+    metadata:
+      category: "docs"
+      intent: "Locate ranking docs"
+      tool: "context_bundle"
+      tags: ["docs", "ranking"]
+      expected:
+        - path: "docs/search-ranking.md"
+          relevance: 3
+        - path: "docs/dcca/detailed-design-ja.md"
+          relevance: 2
+
+  - id: "docs-003"
+    text: "security policy and review process"
+    goal: "Find security policy and review process docs."
+    metadata:
+      category: "docs"
+      intent: "Locate security docs"
+      tool: "context_bundle"
+      tags: ["docs", "security"]
+      expected:
+        - path: "docs/security.md"
+          relevance: 3
+        - path: "docs/processes/security-review.md"
+          relevance: 2
+
+  - id: "docs-004"
+    text: "configuration and setup guide"
+    goal: "Find configuration and setup documentation."
+    metadata:
+      category: "docs"
+      intent: "Locate configuration docs"
+      tool: "context_bundle"
+      tags: ["docs", "setup"]
+      expected:
+        - path: "docs/configuration.md"
+          relevance: 3
+        - path: "docs/setup.md"
+          relevance: 2

@@ -161,11 +161,16 @@ export const BOOST_PROFILES: Record<BoostProfileName, BoostProfileConfig> = {
   docs: {
     denylistOverrides: ["docs/"],
     fileTypeMultipliers: {
-      doc: 1.5, // 50% boost for docs
-      impl: 0.5, // 50% penalty for implementation
-      config: 0.05, // Config files still penalized
+      doc: 2.5, // Strong boost for docs
+      impl: 0.3, // Stronger penalty for implementation
+      config: 0.4, // Keep config accessible in docs-focused searches
     },
-    pathMultipliers: [], // No path-specific boosts in docs mode
+    pathMultipliers: [
+      { prefix: "docs/", multiplier: 2.0 },
+      { prefix: "docs/processes/", multiplier: 2.2 },
+      { prefix: "docs/dcca/", multiplier: 1.8 },
+      { prefix: "docs/formal/", multiplier: 1.2 },
+    ],
   },
 
   balanced: {
