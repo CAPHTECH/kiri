@@ -203,7 +203,8 @@ export class KiriSearchAdapter implements SearchAdapter<KiriQuery, Metrics> {
         ctx.signal
       );
 
-      const latencyMs = Date.now() - startTime;
+      const responseTimeMs = Date.now();
+      const latencyMs = responseTimeMs - startTime;
       const context = this.extractContext(result);
       const retrievedPaths = context.map((item) => item.path);
       const expectedPaths = this.getExpectedPaths(query);
@@ -221,7 +222,8 @@ export class KiriSearchAdapter implements SearchAdapter<KiriQuery, Metrics> {
       } = {
         items: retrievedPaths.map((path, i) => ({
           id: path,
-          timestampMs: startTime + i * TIMESTAMP_INTERVAL_MS,
+          // Retrieval results arrive after the server response, not at query start.
+          timestampMs: responseTimeMs + i * TIMESTAMP_INTERVAL_MS,
         })),
         relevant: relevanceGrades.size > 0 ? relevantPaths : expectedPaths,
         k,
