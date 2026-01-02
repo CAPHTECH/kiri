@@ -5090,7 +5090,7 @@ async function contextBundleImpl(
 
     const roundedScore = Number.isFinite(normalizedScore) ? Number(normalizedScore.toFixed(3)) : 0;
 
-    const shouldIncludeWhy = !isCompact || params.includeWhy === true;
+    const shouldIncludeWhy = params.includeWhy ?? !isCompact;
     const item: ContextBundleItem = {
       path: candidate.path,
       range: [startLine, endLine],

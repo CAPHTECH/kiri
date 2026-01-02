@@ -893,6 +893,7 @@ describe("MCP標準エンドポイント", () => {
           arguments: {
             goal: "login authentication",
             limit: 5,
+            includeWhy: true,
           },
         },
       };

@@ -639,6 +639,8 @@ function parseContextBundleParams(input: unknown, context: ServerContext): Conte
   const includeWhyValue = record.includeWhy ?? record.include_why;
   if (typeof includeWhyValue === "boolean") {
     params.includeWhy = includeWhyValue;
+  } else {
+    params.includeWhy = false;
   }
 
   const includeTokensEstimate = record.includeTokensEstimate ?? record.include_tokens_estimate;

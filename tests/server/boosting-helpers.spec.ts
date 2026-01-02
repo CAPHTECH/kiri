@@ -6,7 +6,12 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { runIndexer } from "../../src/indexer/cli.js";
 import { ServerContext } from "../../src/server/context.js";
-import { checkTableAvailability, contextBundle, resolveRepoId } from "../../src/server/handlers.js";
+import {
+  checkTableAvailability,
+  contextBundle,
+  resolveRepoId,
+  type ContextBundleItem,
+} from "../../src/server/handlers.js";
 import { WarningManager } from "../../src/server/rpc.js";
 import { createServerServices } from "../../src/server/services/index.js";
 import { DuckDBClient } from "../../src/shared/duckdb.js";
@@ -15,6 +20,15 @@ import { createTempRepo } from "../helpers/test-repo.js";
 interface CleanupTarget {
   dispose: () => Promise<void>;
 }
+
+const expectReasons = (item: ContextBundleItem, label: string): string[] => {
+  const reasons = item.why;
+  expect(reasons, `${label} should include reason metadata`).toBeDefined();
+  if (!reasons) {
+    throw new Error(`${label} is missing reasons`);
+  }
+  return reasons;
+};
 
 /**
  * Tests for helper functions extracted in v0.7.0 refactoring:
@@ -752,13 +766,18 @@ describe("Boosting Helper Functions (v0.7.0+)", () => {
         expect(buttonRank).toBeLessThan(configRank);
         expect(formatterRank).toBeLessThan(configRank);
 
+        const authReasons = expectReasons(authFile, "src/auth/handler.ts");
+        const buttonReasons = expectReasons(buttonFile, "src/components/Button.tsx");
+        const formatterReasons = expectReasons(formatterFile, "src/lib/formatter.ts");
+        const configReasons = expectReasons(configFile, "package.json");
+
         // Implementation files should not have penalty reasons
-        expect(authFile.why.some((reason) => reason.startsWith("penalty:"))).toBe(false);
-        expect(buttonFile.why.some((reason) => reason.startsWith("penalty:"))).toBe(false);
-        expect(formatterFile.why.some((reason) => reason.startsWith("penalty:"))).toBe(false);
+        expect(authReasons.some((reason) => reason.startsWith("penalty:"))).toBe(false);
+        expect(buttonReasons.some((reason) => reason.startsWith("penalty:"))).toBe(false);
+        expect(formatterReasons.some((reason) => reason.startsWith("penalty:"))).toBe(false);
 
         // Config file should have penalty reason
-        expect(configFile.why.some((reason) => reason === "penalty:config-file")).toBe(true);
+        expect(configReasons.some((reason) => reason === "penalty:config-file")).toBe(true);
       }
     });
 
@@ -815,12 +834,18 @@ describe("Boosting Helper Functions (v0.7.0+)", () => {
         expect(settingsRank).toBeLessThan(tsconfigRank);
 
         // Implementation files should not have config penalty
-        expect(databaseFile.why.some((reason) => reason === "penalty:config-file")).toBe(false);
-        expect(settingsFile.why.some((reason) => reason === "penalty:config-file")).toBe(false);
+        const databaseReasons = expectReasons(databaseFile, "src/config/database.ts");
+        const settingsReasons = expectReasons(settingsFile, "src/config/settings.ts");
+        const appConfigReasons = expectReasons(appConfigFile, "config/app.config.js");
+        const tsconfigReasons = expectReasons(tsconfigFile, "tsconfig.json");
+
+        // Implementation files should not have config penalty
+        expect(databaseReasons.some((reason) => reason === "penalty:config-file")).toBe(false);
+        expect(settingsReasons.some((reason) => reason === "penalty:config-file")).toBe(false);
 
         // Actual config files should have penalty
-        expect(appConfigFile.why.some((reason) => reason === "penalty:config-file")).toBe(true);
-        expect(tsconfigFile.why.some((reason) => reason === "penalty:config-file")).toBe(true);
+        expect(appConfigReasons.some((reason) => reason === "penalty:config-file")).toBe(true);
+        expect(tsconfigReasons.some((reason) => reason === "penalty:config-file")).toBe(true);
       }
     });
 
@@ -881,37 +906,45 @@ describe("Boosting Helper Functions (v0.7.0+)", () => {
         // All config files found should rank lower than implementation file
         if (pythonReqFile) {
           expect(implRank).toBeLessThan(bundle.context.indexOf(pythonReqFile));
-          expect(pythonReqFile.why.some((reason) => reason === "penalty:config-file")).toBe(true);
+          const pythonReqReasons = expectReasons(pythonReqFile, "requirements.txt");
+          expect(pythonReqReasons.some((reason) => reason === "penalty:config-file")).toBe(true);
         }
         if (pythonTomlFile) {
           expect(implRank).toBeLessThan(bundle.context.indexOf(pythonTomlFile));
-          expect(pythonTomlFile.why.some((reason) => reason === "penalty:config-file")).toBe(true);
+          const pythonTomlReasons = expectReasons(pythonTomlFile, "pyproject.toml");
+          expect(pythonTomlReasons.some((reason) => reason === "penalty:config-file")).toBe(true);
         }
         if (gemFile) {
           expect(implRank).toBeLessThan(bundle.context.indexOf(gemFile));
-          expect(gemFile.why.some((reason) => reason === "penalty:config-file")).toBe(true);
+          const gemReasons = expectReasons(gemFile, "Gemfile");
+          expect(gemReasons.some((reason) => reason === "penalty:config-file")).toBe(true);
         }
         if (goModFile) {
           expect(implRank).toBeLessThan(bundle.context.indexOf(goModFile));
-          expect(goModFile.why.some((reason) => reason === "penalty:config-file")).toBe(true);
+          const goModReasons = expectReasons(goModFile, "go.mod");
+          expect(goModReasons.some((reason) => reason === "penalty:config-file")).toBe(true);
         }
         if (cargoFile) {
           expect(implRank).toBeLessThan(bundle.context.indexOf(cargoFile));
-          expect(cargoFile.why.some((reason) => reason === "penalty:config-file")).toBe(true);
+          const cargoReasons = expectReasons(cargoFile, "Cargo.toml");
+          expect(cargoReasons.some((reason) => reason === "penalty:config-file")).toBe(true);
         }
         if (dockerComposeFile) {
           expect(implRank).toBeLessThan(bundle.context.indexOf(dockerComposeFile));
-          expect(dockerComposeFile.why.some((reason) => reason === "penalty:config-file")).toBe(
+          const dockerComposeReasons = expectReasons(dockerComposeFile, "docker-compose.yml");
+          expect(dockerComposeReasons.some((reason) => reason === "penalty:config-file")).toBe(
             true
           );
         }
         if (dockerFile) {
           expect(implRank).toBeLessThan(bundle.context.indexOf(dockerFile));
-          expect(dockerFile.why.some((reason) => reason === "penalty:config-file")).toBe(true);
+          const dockerReasons = expectReasons(dockerFile, "Dockerfile");
+          expect(dockerReasons.some((reason) => reason === "penalty:config-file")).toBe(true);
         }
 
         // Implementation file should not have config penalty
-        expect(implFile.why.some((reason) => reason === "penalty:config-file")).toBe(false);
+        const implReasons = expectReasons(implFile, "src/main.py");
+        expect(implReasons.some((reason) => reason === "penalty:config-file")).toBe(false);
       }
     });
 
@@ -974,13 +1007,15 @@ describe("Boosting Helper Functions (v0.7.0+)", () => {
           expect(swiftRank).toBeLessThan(bundle.context.indexOf(shrinkwrapFile));
           expect(csRank).toBeLessThan(bundle.context.indexOf(shrinkwrapFile));
           expect(jsRank).toBeLessThan(bundle.context.indexOf(shrinkwrapFile));
-          expect(shrinkwrapFile.why.some((reason) => reason === "penalty:config-file")).toBe(true);
+          const shrinkwrapReasons = expectReasons(shrinkwrapFile, "npm-shrinkwrap.json");
+          expect(shrinkwrapReasons.some((reason) => reason === "penalty:config-file")).toBe(true);
         }
         if (packageResolvedFile) {
           expect(swiftRank).toBeLessThan(bundle.context.indexOf(packageResolvedFile));
           expect(csRank).toBeLessThan(bundle.context.indexOf(packageResolvedFile));
           expect(jsRank).toBeLessThan(bundle.context.indexOf(packageResolvedFile));
-          expect(packageResolvedFile.why.some((reason) => reason === "penalty:config-file")).toBe(
+          const packageResolvedReasons = expectReasons(packageResolvedFile, "Package.resolved");
+          expect(packageResolvedReasons.some((reason) => reason === "penalty:config-file")).toBe(
             true
           );
         }
@@ -988,15 +1023,17 @@ describe("Boosting Helper Functions (v0.7.0+)", () => {
           expect(swiftRank).toBeLessThan(bundle.context.indexOf(packagesLockFile));
           expect(csRank).toBeLessThan(bundle.context.indexOf(packagesLockFile));
           expect(jsRank).toBeLessThan(bundle.context.indexOf(packagesLockFile));
-          expect(packagesLockFile.why.some((reason) => reason === "penalty:config-file")).toBe(
-            true
-          );
+          const packagesLockReasons = expectReasons(packagesLockFile, "packages.lock.json");
+          expect(packagesLockReasons.some((reason) => reason === "penalty:config-file")).toBe(true);
         }
 
         // Implementation files should not have config penalty
-        expect(swiftFile.why.some((reason) => reason === "penalty:config-file")).toBe(false);
-        expect(csFile.why.some((reason) => reason === "penalty:config-file")).toBe(false);
-        expect(jsFile.why.some((reason) => reason === "penalty:config-file")).toBe(false);
+        const swiftReasons = expectReasons(swiftFile, "src/app.swift");
+        const csReasons = expectReasons(csFile, "src/Program.cs");
+        const jsReasons = expectReasons(jsFile, "src/index.js");
+        expect(swiftReasons.some((reason) => reason === "penalty:config-file")).toBe(false);
+        expect(csReasons.some((reason) => reason === "penalty:config-file")).toBe(false);
+        expect(jsReasons.some((reason) => reason === "penalty:config-file")).toBe(false);
       }
     });
 
@@ -1059,34 +1096,42 @@ describe("Boosting Helper Functions (v0.7.0+)", () => {
         // All config directory files should rank lower than implementation
         if (bootstrapFile) {
           expect(controllerRank).toBeLessThan(bundle.context.indexOf(bootstrapFile));
-          expect(bootstrapFile.why.some((reason) => reason === "penalty:config-file")).toBe(true);
+          const bootstrapReasons = expectReasons(bootstrapFile, "bootstrap/app.php");
+          expect(bootstrapReasons.some((reason) => reason === "penalty:config-file")).toBe(true);
         }
         if (configFile) {
           expect(controllerRank).toBeLessThan(bundle.context.indexOf(configFile));
-          expect(configFile.why.some((reason) => reason === "penalty:config-file")).toBe(true);
+          const configReasons = expectReasons(configFile, "config/database.php");
+          expect(configReasons.some((reason) => reason === "penalty:config-file")).toBe(true);
         }
         if (migrationFile) {
           expect(controllerRank).toBeLessThan(bundle.context.indexOf(migrationFile));
           // v1.0.0: Migration files now use "penalty:low-value-file" instead of "penalty:migration-file"
-          expect(migrationFile.why.some((reason) => reason === "penalty:low-value-file")).toBe(
-            true
-          );
+          const migrationReasons = expectReasons(migrationFile, "migrations/2024_create_users.php");
+          expect(migrationReasons.some((reason) => reason === "penalty:low-value-file")).toBe(true);
         }
         if (localeFile) {
           expect(controllerRank).toBeLessThan(bundle.context.indexOf(localeFile));
-          expect(localeFile.why.some((reason) => reason === "penalty:config-file")).toBe(true);
+          const localeReasons = expectReasons(localeFile, "locales/en.json");
+          expect(localeReasons.some((reason) => reason === "penalty:config-file")).toBe(true);
         }
         if (caddyFile) {
           expect(controllerRank).toBeLessThan(bundle.context.indexOf(caddyFile));
-          expect(caddyFile.why.some((reason) => reason === "penalty:config-file")).toBe(true);
+          const caddyReasons = expectReasons(caddyFile, "Caddyfile");
+          expect(caddyReasons.some((reason) => reason === "penalty:config-file")).toBe(true);
         }
         if (nginxFile) {
           expect(controllerRank).toBeLessThan(bundle.context.indexOf(nginxFile));
-          expect(nginxFile.why.some((reason) => reason === "penalty:config-file")).toBe(true);
+          const nginxReasons = expectReasons(nginxFile, "nginx.conf");
+          expect(nginxReasons.some((reason) => reason === "penalty:config-file")).toBe(true);
         }
 
         // Implementation file should not have config penalty
-        expect(controllerFile.why.some((reason) => reason === "penalty:config-file")).toBe(false);
+        const controllerReasons = expectReasons(
+          controllerFile,
+          "src/controllers/UserController.php"
+        );
+        expect(controllerReasons.some((reason) => reason === "penalty:config-file")).toBe(false);
       }
     });
   });
