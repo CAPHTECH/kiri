@@ -1,7 +1,9 @@
+import { execFile } from "node:child_process";
 import { realpathSync, mkdirSync } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
 import { resolve, relative, sep, dirname, isAbsolute, join } from "node:path";
 import { performance } from "node:perf_hooks";
+import { promisify } from "node:util";
 
 import watcher, { type AsyncSubscription, type Event } from "@parcel/watcher";
 
@@ -81,6 +83,7 @@ export class IndexWatcher {
   private isStopping = false; // Flag to prevent new reindexes during shutdown
   private denylistFilter: DenylistFilter | null = null;
   private ignoredRelativePaths = new Set<string>();
+  private readonly execGit = promisify(execFile);
 
   constructor(options: IndexWatcherOptions) {
     this.rawRepoRoot = resolve(options.repoRoot);
@@ -393,13 +396,21 @@ export class IndexWatcher {
       try {
         const stats = await stat(absPath);
         if (stats.isDirectory()) {
-          const files = await this.collectFilesUnder(absPath);
+          const gitPaths = await this.listGitChangesFor(relativePath);
+          if (gitPaths.length > 0) {
+            for (const gitPath of gitPaths) {
+              expanded.add(gitPath);
+            }
+            continue;
+          }
+
+          const files = await this.collectFilesUnder(absPath, { maxDepth: 1 });
           if (files.length === 0) {
             expanded.add(relativePath);
-          } else {
-            for (const file of files) {
-              expanded.add(file);
-            }
+            continue;
+          }
+          for (const file of files) {
+            expanded.add(file);
           }
         } else if (stats.isFile()) {
           expanded.add(relativePath);
@@ -415,15 +426,19 @@ export class IndexWatcher {
     return Array.from(expanded);
   }
 
-  private async collectFilesUnder(absDir: string): Promise<string[]> {
+  private async collectFilesUnder(
+    absDir: string,
+    options?: { maxDepth?: number }
+  ): Promise<string[]> {
     const collected: string[] = [];
-    const stack: string[] = [absDir];
+    const maxDepth = options?.maxDepth ?? Infinity;
+    const stack: Array<{ path: string; depth: number }> = [{ path: absDir, depth: 0 }];
 
     while (stack.length > 0) {
-      const current = stack.pop()!;
+      const { path, depth } = stack.pop()!;
       let entries;
       try {
-        entries = await readdir(current, { withFileTypes: true });
+        entries = await readdir(path, { withFileTypes: true });
       } catch {
         continue;
       }
@@ -433,14 +448,16 @@ export class IndexWatcher {
           continue;
         }
 
-        const entryPath = join(current, entry.name);
+        const entryPath = join(path, entry.name);
         const relativePath = this.normalizePathForRepo(entryPath);
         if (!relativePath || this.shouldIgnore(relativePath)) {
           continue;
         }
 
         if (entry.isDirectory()) {
-          stack.push(entryPath);
+          if (depth + 1 <= maxDepth) {
+            stack.push({ path: entryPath, depth: depth + 1 });
+          }
         } else if (entry.isFile()) {
           collected.push(relativePath);
         }
@@ -448,6 +465,36 @@ export class IndexWatcher {
     }
 
     return collected;
+  }
+
+  private async listGitChangesFor(relativePath: string): Promise<string[]> {
+    try {
+      const { stdout } = await this.execGit(
+        "git",
+        ["status", "--porcelain=1", "--", relativePath],
+        {
+          cwd: this.rawRepoRoot,
+        }
+      );
+      const results: string[] = [];
+      for (const rawLine of stdout.split(/\r?\n/)) {
+        const line = rawLine.trim();
+        if (!line) continue;
+        const payload = line.slice(3); // drop XY status
+        const renameParts = payload.split(" -> ");
+        const finalPath = (renameParts[renameParts.length - 1] ?? payload).trim();
+        if (!finalPath) continue;
+        const normalized = finalPath.replace(/\\/g, "/");
+        const absPath = join(this.rawRepoRoot, normalized);
+        const rel = this.normalizePathForRepo(absPath);
+        if (rel) {
+          results.push(rel);
+        }
+      }
+      return results;
+    } catch {
+      return [];
+    }
   }
 
   /**

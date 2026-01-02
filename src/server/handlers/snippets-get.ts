@@ -312,10 +312,14 @@ export async function snippetsGet(
     }
   }
 
+  const derivedRangeSource: SnippetRangeSource =
+    rangeSource ?? (useSymbolSnippets ? "symbol" : "window");
+
   return {
     path: row.path,
     startLine,
     endLine,
+    rangeSource: derivedRangeSource,
     ...(content !== undefined && { content }),
     totalLines,
     symbolName,
