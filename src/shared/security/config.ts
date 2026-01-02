@@ -33,10 +33,13 @@ const SecurityConfigSchema = z.object({
   sensitive_tokens: z.array(z.string()),
 });
 
-function resolveSecurityConfigPath(configPath?: string): string {
+export function resolveSecurityConfigPath(
+  configPath?: string,
+  fsExists: (path: string) => boolean = existsSync
+): string {
   if (configPath) {
     const absoluteConfigPath = resolve(configPath);
-    if (!existsSync(absoluteConfigPath)) {
+    if (!fsExists(absoluteConfigPath)) {
       throw new Error(
         `Security configuration is missing at ${absoluteConfigPath}. Provide a valid config path or run 'pnpm exec tsx src/client/cli.ts security init'.`
       );
@@ -48,12 +51,12 @@ function resolveSecurityConfigPath(configPath?: string): string {
     fileURLToPath(import.meta.url),
     "../../../../config/security.yml"
   );
-  if (existsSync(compiledConfigPath)) {
+  if (fsExists(compiledConfigPath)) {
     return compiledConfigPath;
   }
 
   const repoConfigPath = resolve("config/security.yml");
-  if (existsSync(repoConfigPath)) {
+  if (fsExists(repoConfigPath)) {
     return repoConfigPath;
   }
 
