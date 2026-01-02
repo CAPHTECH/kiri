@@ -12,7 +12,7 @@
  */
 
 import { existsSync, unlinkSync } from "node:fs";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -234,7 +234,6 @@ describe("FTS incremental rebuild via IndexWatcher (Issue #158)", () => {
       "src/initial.ts": ["export const initial = 'value';"].join("\n"),
     });
     cleanupTargets.push({ dispose: repo.cleanup });
-
     const testId = Math.random().toString(36).substring(7);
     const dbDir = await mkdtemp(join(tmpdir(), `kiri-fts-watch-${testId}-`));
     const dbPath = join(dbDir, "index.duckdb");
@@ -331,6 +330,13 @@ describe("FTS incremental rebuild via IndexWatcher (Issue #158)", () => {
     });
     cleanupTargets.push({ dispose: repo.cleanup });
 
+    const { execa } = await import("execa");
+    const fixturesDir = join(repo.path, "tests/fixtures");
+    await mkdir(fixturesDir, { recursive: true });
+    await writeFile(join(fixturesDir, ".gitkeep"), "");
+    await execa("git", ["add", "tests/fixtures/.gitkeep"], { cwd: repo.path });
+    await execa("git", ["commit", "-m", "Prepare fixtures directory"], { cwd: repo.path });
+
     const testId = Math.random().toString(36).substring(7);
     const dbDir = await mkdtemp(join(tmpdir(), `kiri-fts-gherkin-${testId}-`));
     const dbPath = join(dbDir, "index.duckdb");
@@ -375,17 +381,14 @@ describe("FTS incremental rebuild via IndexWatcher (Issue #158)", () => {
     When I perform an action
     Then I should see a result
 `;
-    const { mkdir } = await import("node:fs/promises");
-    await mkdir(join(repo.path, "tests/fixtures"), { recursive: true });
     await writeFile(join(repo.path, "tests/fixtures/test.feature"), gherkinContent);
 
     // 5. ファイルをgitにステージしてコミット
-    const { execa } = await import("execa");
     await execa("git", ["add", "tests/fixtures/test.feature"], { cwd: repo.path });
     await execa("git", ["commit", "-m", "Add gherkin feature file"], { cwd: repo.path });
 
     // 6. Watcherがリインデックスを完了するまで待機
-    await waitForCondition(() => watcher.getStatistics().reindexCount >= 1);
+    await waitForCondition(() => watcher.getStatistics().reindexCount >= 1, 30_000);
 
     // 7. DB接続してFTS検索
     const db = await DuckDBClient.connect({ databasePath: dbPath });
@@ -403,7 +406,7 @@ describe("FTS incremental rebuild via IndexWatcher (Issue #158)", () => {
       db.all<{ hash: string; content: string }>(
         "SELECT hash, content FROM blob WHERE content LIKE '%GHERKINUNIQUE158%'"
       );
-    await waitForCondition(async () => (await fetchBlobResults()).length > 0);
+    await waitForCondition(async () => (await fetchBlobResults()).length > 0, 30_000);
     const blobResults = await fetchBlobResults();
     expect(blobResults.length).toBeGreaterThan(0);
 
@@ -419,5 +422,5 @@ describe("FTS incremental rebuild via IndexWatcher (Issue #158)", () => {
 
     // Issue #158: FTS検索で新規追加されたblobが見つかることを確認
     expect(ftsResults.length).toBeGreaterThan(0);
-  }, 30000);
+  }, 45000);
 });

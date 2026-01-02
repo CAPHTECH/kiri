@@ -452,6 +452,7 @@ export interface ContextBundleParams {
   profile?: string;
   boost_profile?: BoostProfileName;
   compact?: boolean; // If true, omit preview field to reduce token usage
+  includeWhy?: boolean; // When true, keep why tags even in compact mode
   includeTokensEstimate?: boolean; // If true, compute tokens_estimate (slower)
   metadata_filters?: Record<string, string | string[]>;
   requestId?: string; // Optional request ID for tracing/debugging
@@ -465,7 +466,7 @@ export interface ContextBundleItem {
   range: [number, number];
   rangeSource: SnippetRangeSource;
   preview?: string; // Omitted when compact: true
-  why: string[];
+  why?: string[]; // Omitted when compact mode suppresses reasons
   score: number;
 }
 
@@ -1170,21 +1171,28 @@ function normalizeLimit(limit?: number): number {
   return Math.min(Math.max(1, Math.floor(limit)), 100);
 }
 
+const PREVIEW_MATCH_WINDOW = 120;
+const PREVIEW_MAX_LENGTH = 100;
+
 function buildPreview(content: string, query: string): { preview: string; line: number } {
   const lowerContent = content.toLowerCase();
   const lowerQuery = query.toLowerCase();
   const index = lowerContent.indexOf(lowerQuery);
   if (index === -1) {
-    return { preview: content.slice(0, 240), line: 1 };
+    return { preview: content.slice(0, PREVIEW_MAX_LENGTH), line: 1 };
   }
 
   const prefix = content.slice(0, index);
   const prefixLines = prefix.split(/\r?\n/);
   const matchLine = prefix.length === 0 ? 1 : prefixLines.length;
 
-  const snippetStart = Math.max(0, index - 120);
-  const snippetEnd = Math.min(content.length, index + query.length + 120);
-  const preview = content.slice(snippetStart, snippetEnd);
+  const snippetStart = Math.max(0, index - PREVIEW_MATCH_WINDOW);
+  const snippetEnd = Math.min(content.length, index + query.length + PREVIEW_MATCH_WINDOW);
+  const previewSlice = content.slice(snippetStart, snippetEnd);
+  const preview =
+    previewSlice.length > PREVIEW_MAX_LENGTH
+      ? `${previewSlice.slice(0, PREVIEW_MAX_LENGTH - 1)}…`
+      : previewSlice;
 
   return { preview, line: matchLine };
 }
@@ -2380,15 +2388,17 @@ function selectSnippet(snippets: SnippetRow[], matchLine: number | null): Snippe
   return lastSnippet ?? firstSnippet;
 }
 
+const SNIPPET_PREVIEW_MAX_LENGTH = 240;
+
 function buildSnippetPreview(content: string, startLine: number, endLine: number): string {
   const lines = content.split(/\r?\n/);
   const startIndex = Math.max(0, Math.min(startLine - 1, lines.length));
   const endIndex = Math.max(startIndex, Math.min(endLine, lines.length));
   const snippet = lines.slice(startIndex, endIndex).join("\n");
-  if (snippet.length <= 240) {
+  if (snippet.length <= SNIPPET_PREVIEW_MAX_LENGTH) {
     return snippet;
   }
-  return `${snippet.slice(0, 239)}…`;
+  return `${snippet.slice(0, SNIPPET_PREVIEW_MAX_LENGTH - 1)}…`;
 }
 
 /**
@@ -5131,16 +5141,17 @@ async function contextBundleImpl(
 
     const roundedScore = Number.isFinite(normalizedScore) ? Number(normalizedScore.toFixed(3)) : 0;
 
-    // Select why tags with diversity guarantee (reserves slots for dep/symbol/near)
-    const why = selectWhyTags(reasons, whyMode);
-
+    const shouldIncludeWhy = params.includeWhy ?? !isCompact;
     const item: ContextBundleItem = {
       path: candidate.path,
       range: [startLine, endLine],
       rangeSource,
-      why,
       score: roundedScore,
     };
+    if (shouldIncludeWhy) {
+      // Select why tags with diversity guarantee (reserves slots for dep/symbol/near)
+      item.why = selectWhyTags(reasons, whyMode);
+    }
 
     // Add preview only if not in compact mode
     if (!params.compact) {

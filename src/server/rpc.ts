@@ -8,6 +8,7 @@ import {
 } from "../shared/adaptive-k-categories.js";
 import { maskValue } from "../shared/security/masker.js";
 
+import { resolveCompactFlag } from "./compact-mode.js";
 import { isValidBoostProfile, BOOST_PROFILES } from "./boost-profiles.js";
 import { ServerContext } from "./context.js";
 import { DegradeController } from "./fallbacks/degradeController.js";
@@ -462,9 +463,8 @@ function parseFilesSearchParams(input: unknown): FilesSearchParams {
     params.boost_profile = selectProfileFromQuery(params.query, "default");
   }
 
-  if (typeof record.compact === "boolean") {
-    params.compact = record.compact;
-  }
+  const compactValue = typeof record.compact === "boolean" ? record.compact : undefined;
+  params.compact = resolveCompactFlag(compactValue);
 
   if (record.metadata_filters && typeof record.metadata_filters === "object") {
     params.metadata_filters = record.metadata_filters as Record<string, string | string[]>;
@@ -642,21 +642,23 @@ function parseContextBundleParams(input: unknown, context: ServerContext): Conte
     params.path_prefix = normalizedPrefix;
   }
 
-  // Parse compact parameter (default: true for token efficiency)
-  if (typeof record.compact === "boolean") {
-    params.compact = record.compact;
-  } else {
-    params.compact = true; // Default to compact mode (v0.8.0+: breaking change)
-
-    // Show one-time warning about breaking change using WarningManager
-    // forResponse: true adds this warning to the API response
+  const compactValue = typeof record.compact === "boolean" ? record.compact : undefined;
+  params.compact = resolveCompactFlag(compactValue);
+  if (compactValue === undefined) {
     context.warningManager.warnOnce(
       "compact-default-v0.8.0",
       "BREAKING CHANGE (v0.8.0): compact mode is now default. " +
         "Set compact: false to restore previous behavior. " +
         "See CHANGELOG.md for details.",
-      true // Add to API response
+      true
     );
+  }
+
+  const includeWhyValue = record.includeWhy ?? record.include_why;
+  if (typeof includeWhyValue === "boolean") {
+    params.includeWhy = includeWhyValue;
+  } else {
+    params.includeWhy = false;
   }
 
   const includeTokensEstimate = record.includeTokensEstimate ?? record.include_tokens_estimate;
@@ -801,8 +803,11 @@ async function executeToolByName(
     case "files_search": {
       const params = parseFilesSearchParams(toolParams);
       if (degrade.current.active && allowDegrade) {
-        // Use same output option logic as normal mode for consistency
-        const includePreview = params.compact !== true;
+        // When DuckDB is unavailable, keep previews to preserve readability regardless of compact
+        const includePreview =
+          toolParams && typeof (toolParams as Record<string, unknown>).compact === "boolean"
+            ? params.compact !== true
+            : true;
         const results = degrade.search(params.query, params.limit ?? 20).map((hit) => {
           const result = {
             path: hit.path,

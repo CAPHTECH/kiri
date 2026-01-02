@@ -21,7 +21,10 @@ export const ContextBundleItemSchema = z.object({
   range: z.tuple([z.number(), z.number()]).describe("行範囲 [start, end]"),
   rangeSource: z.enum(["symbol", "clamped", "window"]).describe("rangeが生成された根拠"),
   preview: z.string().optional().describe("コードプレビュー（compact=falseの場合）"),
-  why: z.array(z.string()).describe("スコアリング理由"),
+  why: z
+    .array(z.string())
+    .optional()
+    .describe("スコアリング理由（compact=false または includeWhy=true の場合）"),
   score: z.number().describe("関連度スコア"),
 });
 
