@@ -1,5 +1,6 @@
 import { realpathSync, mkdirSync } from "node:fs";
-import { resolve, relative, sep, dirname, isAbsolute } from "node:path";
+import { readdir, stat } from "node:fs/promises";
+import { resolve, relative, sep, dirname, isAbsolute, join } from "node:path";
 import { performance } from "node:perf_hooks";
 
 import watcher, { type AsyncSubscription, type Event } from "@parcel/watcher";
@@ -376,6 +377,80 @@ export class IndexWatcher {
   }
 
   /**
+   * Expands directory paths into individual file paths so incremental indexing
+   * can operate on concrete files even when the watcher only reports folder-level
+   * events (common when creating new directories).
+   */
+  private async expandChangedPaths(changedPaths: string[]): Promise<string[]> {
+    if (changedPaths.length === 0) {
+      return [];
+    }
+
+    const expanded = new Set<string>();
+
+    for (const relativePath of changedPaths) {
+      const absPath = join(this.rawRepoRoot, relativePath);
+      try {
+        const stats = await stat(absPath);
+        if (stats.isDirectory()) {
+          const files = await this.collectFilesUnder(absPath);
+          if (files.length === 0) {
+            expanded.add(relativePath);
+          } else {
+            for (const file of files) {
+              expanded.add(file);
+            }
+          }
+        } else if (stats.isFile()) {
+          expanded.add(relativePath);
+        } else {
+          expanded.add(relativePath);
+        }
+      } catch {
+        // File may have been deleted before we could stat it
+        expanded.add(relativePath);
+      }
+    }
+
+    return Array.from(expanded);
+  }
+
+  private async collectFilesUnder(absDir: string): Promise<string[]> {
+    const collected: string[] = [];
+    const stack: string[] = [absDir];
+
+    while (stack.length > 0) {
+      const current = stack.pop()!;
+      let entries;
+      try {
+        entries = await readdir(current, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+
+      for (const entry of entries) {
+        if (entry.isSymbolicLink()) {
+          continue;
+        }
+
+        const entryPath = join(current, entry.name);
+        const relativePath = this.normalizePathForRepo(entryPath);
+        if (!relativePath || this.shouldIgnore(relativePath)) {
+          continue;
+        }
+
+        if (entry.isDirectory()) {
+          stack.push(entryPath);
+        } else if (entry.isFile()) {
+          collected.push(relativePath);
+        }
+      }
+    }
+
+    return collected;
+  }
+
+  /**
    * Executes an incremental reindex operation for changed files only.
    *
    * If a reindex is already in progress, marks a pending flag to trigger
@@ -442,15 +517,25 @@ export class IndexWatcher {
           throw error;
         }
 
+        let targetPaths = changedPaths;
+        try {
+          targetPaths = await this.expandChangedPaths(changedPaths);
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error);
+          process.stderr.write(
+            `⚠️  Failed to expand directory changes (${reason}). Using original paths.\n`
+          );
+        }
+
         // Run incremental reindex for changed files only
         const start = performance.now();
-        process.stderr.write(`🔄 Incrementally reindexing ${changedPaths.length} file(s)...\n`);
+        process.stderr.write(`🔄 Incrementally reindexing ${targetPaths.length} file(s)...\n`);
 
         await runIndexer({
           repoRoot: this.rawRepoRoot,
           databasePath: this.options.databasePath,
           full: false,
-          changedPaths,
+          changedPaths: targetPaths,
           skipLocking: true, // Watcher already holds the lock
         });
 
