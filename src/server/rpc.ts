@@ -265,6 +265,11 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
           additionalProperties: true,
           description: "Filter by YAML frontmatter (e.g., {tags: ['api'], category: 'auth'}).",
         },
+        why_mode: {
+          type: "string",
+          enum: ["full", "terse"],
+          description: "Return why tags as full strings or terse prefixes.",
+        },
       },
     },
     outputSchema: OUTPUT_SCHEMAS.context_bundle,
@@ -354,6 +359,11 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
           enum: ["auto", "symbol", "lines", "full"],
           description:
             "auto=symbol boundaries, lines=exact range, full=entire file (max 500 lines).",
+        },
+        range_source: {
+          type: "string",
+          enum: ["symbol", "clamped", "window"],
+          description: "Pass context_bundle rangeSource to preserve windows when defaults change.",
         },
       },
     },
@@ -498,6 +508,14 @@ function parseSnippetsGetParams(input: unknown): SnippetsGetParams {
     } else {
       throw new Error(`Invalid view: "${record.view}". Valid values are: ${validViews.join(", ")}`);
     }
+  }
+  const rangeSourceValue = record.range_source ?? record.rangeSource;
+  if (
+    rangeSourceValue === "symbol" ||
+    rangeSourceValue === "clamped" ||
+    rangeSourceValue === "window"
+  ) {
+    params.rangeSource = rangeSourceValue;
   }
   return params;
 }
@@ -667,6 +685,18 @@ function parseContextBundleParams(input: unknown, context: ServerContext): Conte
           )}. The value was ignored.`
         );
       }
+    }
+  }
+
+  if (typeof record.why_mode === "string") {
+    const normalized = record.why_mode.trim().toLowerCase();
+    if (normalized === "full" || normalized === "terse") {
+      params.why_mode = normalized === "terse" ? "terse" : "full";
+    } else {
+      context.warningManager.warnForRequest(
+        "why-mode-invalid",
+        'why_mode must be either "full" or "terse". The provided value was ignored.'
+      );
     }
   }
 

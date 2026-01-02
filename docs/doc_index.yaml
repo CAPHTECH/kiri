@@ -47,6 +47,9 @@ documents:
   - doc_id: RUN-002
     path: docs/operations.md
     title: "Operations"
+  - doc_id: RUN-210
+    path: docs/uncertainty-issue-210.md
+    title: "Issue 210 – Uncertainty Register"
 
   # Guide - ユーザー/開発者向けガイド
   - doc_id: GUIDE-001

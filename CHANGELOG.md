@@ -7,11 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `context_bundle`: emits a `rangeSource` flag (`symbol` / `window` / `clamped`) and accepts `why_mode: "terse"` for compact `why` tags.
+- `snippets_get`: understands the optional `range_source` hint and now keeps explicit `[start_line,end_line]` windows even when the default view is `symbol`, protecting context_bundle workflows.
+
 ### Changed
 
 - **Compact-mode defaults**: `files_search` now defaults to `compact: true`, matching `context_bundle` so previews are omitted unless explicitly requested.
 - **Why tag control**: `context_bundle` compact responses omit `why[]` arrays by default to save ~170 bytes per item; callers can pass `includeWhy: true` to retain them.
 - **Preview clamp**: `files_search` fallback previews are truncated to 100 characters (was 240) for additional token savings.
+- Default `snippets_get` view is now `symbol`. Override via the `KIRI_SNIPPETS_DEFAULT_VIEW` environment variable if you need the legacy `auto` behavior.
 
 ## [0.25.8] - 2025-12-30
 

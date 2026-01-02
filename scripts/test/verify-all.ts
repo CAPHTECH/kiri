@@ -277,8 +277,16 @@ async function runMCPToolsTests(_options: VerificationOptions): Promise<TestResu
       // Step 3: Test each MCP tool
       const tools = [
         { name: "files_search", method: "files_search", params: { query: "hello" } },
-        { name: "context_bundle", method: "context_bundle", params: { goal: "hello" } },
-        { name: "snippets_get", method: "snippets_get", params: { path: "src/index.ts" } },
+        {
+          name: "context_bundle",
+          method: "context_bundle",
+          params: { goal: "hello", why_mode: "terse" },
+        },
+        {
+          name: "snippets_get",
+          method: "snippets_get",
+          params: { path: "src/index.ts" },
+        },
         {
           name: "deps_closure",
           method: "deps_closure",
@@ -292,7 +300,7 @@ async function runMCPToolsTests(_options: VerificationOptions): Promise<TestResu
         {
           name: "context_bundle (balanced)",
           method: "context_bundle",
-          params: { goal: "hello guide function", boost_profile: "balanced" },
+          params: { goal: "hello guide function", boost_profile: "balanced", why_mode: "terse" },
         },
       ];
 
@@ -314,14 +322,37 @@ async function runMCPToolsTests(_options: VerificationOptions): Promise<TestResu
         throw lastError ?? new Error("fetch failed");
       }
 
+      let lastBundleEntry: { path: string; range: [number, number]; rangeSource?: string } | null =
+        null;
+
       for (const tool of tools) {
         log(`  → Testing ${tool.name}...`, "blue");
-        const result = (await requestWithRetry({
-          jsonrpc: "2.0",
-          id: 1,
-          method: tool.method,
-          params: tool.params,
-        })) as { error?: { message: string }; result?: { context?: unknown[] } | unknown[] };
+        let params = tool.params;
+        if (tool.method === "snippets_get" && lastBundleEntry) {
+          params = {
+            path: lastBundleEntry.path,
+            start_line: lastBundleEntry.range[0],
+            end_line: lastBundleEntry.range[1],
+            range_source: lastBundleEntry.rangeSource ?? "window",
+          };
+        }
+        let rpcResponse: unknown;
+        try {
+          rpcResponse = await requestWithRetry({
+            jsonrpc: "2.0",
+            id: 1,
+            method: tool.method,
+            params,
+          });
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error);
+          throw new Error(`${tool.name} request failed: ${reason}\nServer logs:\n${serverLogs}`);
+        }
+
+        const result = rpcResponse as {
+          error?: { message: string };
+          result?: { context?: unknown[] } | unknown[];
+        };
 
         if (result?.error) {
           throw new Error(
@@ -329,11 +360,37 @@ async function runMCPToolsTests(_options: VerificationOptions): Promise<TestResu
           );
         }
 
+        if (tool.method === "context_bundle") {
+          const entries = Array.isArray((result.result as { context?: unknown[] })?.context)
+            ? ((result.result as { context?: unknown[] })?.context as Array<{
+                path: string;
+                range?: unknown;
+                rangeSource?: string;
+              }>)
+            : [];
+          if (entries.length > 0 && Array.isArray(entries[0]?.range)) {
+            const entry = entries[0]!;
+            const [start, end] = entry.range as [number, number];
+            lastBundleEntry = {
+              path: entry.path,
+              range: [start, end],
+              rangeSource: entry.rangeSource,
+            };
+          } else {
+            lastBundleEntry = null;
+          }
+        }
+
         // Verify balanced profile returns docs/ files
         if (tool.name.includes("balanced")) {
-          const items = Array.isArray(result.result)
-            ? result.result
-            : (result.result as { context?: unknown[] })?.context;
+          let items: unknown[] | undefined;
+          if (Array.isArray(result.result)) {
+            items = result.result;
+          } else if (Array.isArray((result.result as { context?: unknown[] })?.context)) {
+            items = (result.result as { context?: unknown[] }).context;
+          } else if (Array.isArray((result.result as { results?: unknown[] })?.results)) {
+            items = (result.result as { results?: unknown[] }).results;
+          }
 
           // ✅ Strict validation: Ensure items is defined and is an array
           if (!items || !Array.isArray(items)) {

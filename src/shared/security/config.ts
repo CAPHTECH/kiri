@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -33,9 +33,40 @@ const SecurityConfigSchema = z.object({
   sensitive_tokens: z.array(z.string()),
 });
 
+export function resolveSecurityConfigPath(
+  configPath?: string,
+  fsExists: (path: string) => boolean = existsSync
+): string {
+  if (configPath) {
+    const absoluteConfigPath = resolve(configPath);
+    if (!fsExists(absoluteConfigPath)) {
+      throw new Error(
+        `Security configuration is missing at ${absoluteConfigPath}. Provide a valid config path or run 'pnpm exec tsx src/client/cli.ts security init'.`
+      );
+    }
+    return absoluteConfigPath;
+  }
+
+  const compiledConfigPath = join(
+    fileURLToPath(import.meta.url),
+    "../../../../config/security.yml"
+  );
+  if (fsExists(compiledConfigPath)) {
+    return compiledConfigPath;
+  }
+
+  const repoConfigPath = resolve("config/security.yml");
+  if (fsExists(repoConfigPath)) {
+    return repoConfigPath;
+  }
+
+  throw new Error(
+    "Security configuration file config/security.yml was not found in the build output nor in the repository root. Provide --config to continue."
+  );
+}
+
 export function loadSecurityConfig(configPath?: string): { config: SecurityConfig; hash: string } {
-  const path =
-    configPath ?? join(fileURLToPath(import.meta.url), "../../../../config/security.yml");
+  const path = resolveSecurityConfigPath(configPath);
   const content = readFileSync(path, "utf8");
   const parsed = parseSimpleYaml(content);
 
@@ -59,12 +90,12 @@ export function readSecurityLock(lockPath?: string): string | null {
 }
 
 export function evaluateSecurityStatus(configPath?: string, lockPath?: string): SecurityStatus {
-  const { config, hash } = loadSecurityConfig(configPath);
+  const resolvedConfigPath = resolveSecurityConfigPath(configPath);
+  const { config, hash } = loadSecurityConfig(resolvedConfigPath);
   const stored = readSecurityLock(lockPath);
-  const defaultConfigPath = join(fileURLToPath(import.meta.url), "../../../../config/security.yml");
   return {
     config,
-    configPath: configPath ?? defaultConfigPath,
+    configPath: resolvedConfigPath,
     lockPath: resolve(lockPath ?? "var/security.lock"),
     hash,
     lockHash: stored,

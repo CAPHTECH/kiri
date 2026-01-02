@@ -1,3 +1,5 @@
+import process from "node:process";
+
 import { ServerContext } from "../context.js";
 
 /**
@@ -11,6 +13,7 @@ import { ServerContext } from "../context.js";
  * - "full": ファイル全体を返す（安全上限付き）
  */
 export type SnippetsGetView = "auto" | "symbol" | "lines" | "full";
+export type SnippetRangeSource = "symbol" | "clamped" | "window";
 
 export interface SnippetsGetParams {
   path: string;
@@ -19,6 +22,7 @@ export interface SnippetsGetParams {
   compact?: boolean; // If true, omit content payload entirely
   includeLineNumbers?: boolean; // If true, prefix content lines with line numbers
   view?: SnippetsGetView; // 取得戦略を明示的に制御
+  rangeSource?: SnippetRangeSource; // context_bundle 由来の範囲の性質
 }
 
 /**
@@ -32,6 +36,7 @@ export interface SnippetResult {
   totalLines: number;
   symbolName: string | null;
   symbolKind: string | null;
+  rangeSource: SnippetRangeSource;
   truncated?: boolean; // 行数/文字数の安全上限で切り詰められた場合 true
 }
 
@@ -65,6 +70,18 @@ interface SnippetRow {
 const DEFAULT_SNIPPET_WINDOW = 150;
 const MAX_SNIPPET_LINES = 500; // 全モード共通の安全上限
 const MAX_SNIPPET_CHARS = 200_000; // 返却内容の安全上限（1レスポンスの最大文字数）
+const VALID_SNIPPET_VIEWS: SnippetsGetView[] = ["auto", "symbol", "lines", "full"];
+
+function resolveDefaultSnippetsView(): SnippetsGetView {
+  const envValue = process.env.KIRI_SNIPPETS_DEFAULT_VIEW;
+  if (typeof envValue === "string") {
+    const normalized = envValue.toLowerCase();
+    if (VALID_SNIPPET_VIEWS.includes(normalized as SnippetsGetView)) {
+      return normalized as SnippetsGetView;
+    }
+  }
+  return "symbol";
+}
 
 /**
  * 行番号をプレフィックスとして追加する（動的幅調整）
@@ -160,7 +177,18 @@ export async function snippetsGet(
     [repoId, params.path]
   );
 
-  const view = params.view ?? "auto";
+  const explicitView = params.view;
+  let view = explicitView ?? resolveDefaultSnippetsView();
+  const rangeSource = params.rangeSource;
+
+  const hasExplicitRange = params.end_line !== undefined;
+  if (
+    view === "symbol" &&
+    explicitView === undefined &&
+    (hasExplicitRange || rangeSource === "clamped" || rangeSource === "window")
+  ) {
+    view = "lines";
+  }
 
   // view パラメータに基づいて取得戦略を決定
   let useSymbolSnippets: boolean;
@@ -285,10 +313,14 @@ export async function snippetsGet(
     }
   }
 
+  const derivedRangeSource: SnippetRangeSource =
+    rangeSource ?? (useSymbolSnippets ? "symbol" : "window");
+
   return {
     path: row.path,
     startLine,
     endLine,
+    rangeSource: derivedRangeSource,
     ...(content !== undefined && { content }),
     totalLines,
     symbolName,

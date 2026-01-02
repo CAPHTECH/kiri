@@ -34,16 +34,17 @@ The most powerful tool for getting started with unfamiliar code. Provide a task 
 
 ### Parameters
 
-| Parameter          | Type    | Required | Default   | Description                                 |
-| ------------------ | ------- | -------- | --------- | ------------------------------------------- |
-| `goal`             | string  | Yes      | -         | Task description or question about the code |
-| `limit`            | number  | No       | 7         | Max snippets to return (max: 20)            |
-| `compact`          | boolean | No       | true      | Return only metadata without preview        |
-| `includeWhy`       | boolean | No       | false     | Keep `why[]` even when compact mode is used |
-| `boost_profile`    | string  | No       | "default" | File type boosting mode                     |
-| `path_prefix`      | string  | No       | -         | Filter by path prefix                       |
-| `category`         | string  | No       | -         | Query category for adaptive K               |
-| `metadata_filters` | object  | No       | -         | Filter by document metadata                 |
+| Parameter          | Type    | Required | Default   | Description                                                |
+| ------------------ | ------- | -------- | --------- | ---------------------------------------------------------- |
+| `goal`             | string  | Yes      | -         | Task description or question about the code                |
+| `limit`            | number  | No       | 7         | Max snippets to return (max: 20)                           |
+| `compact`          | boolean | No       | true      | Return only metadata without preview                       |
+| `includeWhy`       | boolean | No       | false     | Keep `why[]` even when compact mode suppresses them        |
+| `boost_profile`    | string  | No       | "default" | File type boosting mode                                    |
+| `path_prefix`      | string  | No       | -         | Filter by path prefix                                      |
+| `category`         | string  | No       | -         | Query category for adaptive K                              |
+| `metadata_filters` | object  | No       | -         | Filter by document metadata                                |
+| `why_mode`         | string  | No       | "full"    | `"full"` returns verbose tags, `"terse"` shortens prefixes |
 
 ### Boost Profiles
 
@@ -89,7 +90,8 @@ The most powerful tool for getting started with unfamiliar code. Provide a task 
 - **Be specific**: Include file names, error messages, symptoms
 - **Avoid imperatives**: "auth flow JWT validation" not "Find where authentication happens"
 - **Use compact mode**: Default is `compact: true` (95% token savings)
-- **Follow up with snippets_get**: Get full code after identifying relevant files
+- **Need explanations?** Pass `includeWhy: true` when using compact mode to keep `why[]`
+- **Follow up with snippets_get**: Get full code after identifying relevant files. Pass `range_source: item.rangeSource` so clamped windows stay intact even if the default view changes.
 
 ---
 
@@ -145,23 +147,26 @@ Get specific code sections from a file, aligned to function/class boundaries.
 
 ### Parameters
 
-| Parameter              | Type    | Required | Default | Description                           |
-| ---------------------- | ------- | -------- | ------- | ------------------------------------- |
-| `path`                 | string  | Yes      | -       | File path relative to repository root |
-| `start_line`           | number  | No       | -       | Starting line number                  |
-| `end_line`             | number  | No       | -       | Ending line number                    |
-| `view`                 | string  | No       | "auto"  | Retrieval strategy                    |
-| `compact`              | boolean | No       | false   | Return only metadata                  |
-| `include_line_numbers` | boolean | No       | false   | Prefix lines with numbers             |
+| Parameter              | Type    | Required | Default  | Description                                                     |
+| ---------------------- | ------- | -------- | -------- | --------------------------------------------------------------- |
+| `path`                 | string  | Yes      | -        | File path relative to repository root                           |
+| `start_line`           | number  | No       | -        | Starting line number                                            |
+| `end_line`             | number  | No       | -        | Ending line number                                              |
+| `view`                 | string  | No       | "symbol" | Retrieval strategy (override with `KIRI_SNIPPETS_DEFAULT_VIEW`) |
+| `compact`              | boolean | No       | false    | Return only metadata                                            |
+| `include_line_numbers` | boolean | No       | false    | Prefix lines with numbers                                       |
+| `range_source`         | string  | No       | -        | `"symbol"`, `"window"`, or `"clamped"` from `context_bundle`    |
 
 ### View Modes
 
 | Mode     | Behavior                                             |
 | -------- | ---------------------------------------------------- |
 | `auto`   | Uses symbol boundaries if available, else line range |
-| `symbol` | Forces symbol-based snippets                         |
+| `symbol` | Forces symbol-based snippets (default behavior)      |
 | `lines`  | Line-based retrieval (ignores symbols)               |
 | `full`   | Returns entire file (500 line limit)                 |
+
+> **Hint**: Pass the `rangeSource` emitted by `context_bundle` as `range_source` so that clamped windows stay compact even when the default view is symbol.
 
 ### Examples
 

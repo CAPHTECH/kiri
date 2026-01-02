@@ -646,5 +646,61 @@ describe("snippets_get", () => {
       });
       expect(snippetWithEndLine.symbolName).toBeNull();
     });
+
+    it("respects explicit ranges when default view is symbol and rangeSource is clamped", async () => {
+      const repo = await createTempRepo({
+        "src/window.ts": [
+          "export function first() {",
+          "  return 1;",
+          "}",
+          "",
+          "export function second() {",
+          "  return 2;",
+          "}",
+        ].join("\n"),
+      });
+      cleanupTargets.push({ dispose: repo.cleanup });
+
+      const dbDir = await mkdtemp(join(tmpdir(), "kiri-db-view-guard-"));
+      const dbPath = join(dbDir, "index.duckdb");
+      cleanupTargets.push({
+        dispose: async () => await rm(dbDir, { recursive: true, force: true }),
+      });
+
+      await runIndexer({ repoRoot: repo.path, databasePath: dbPath, full: true });
+
+      const db = await DuckDBClient.connect({ databasePath: dbPath });
+      cleanupTargets.push({ dispose: async () => await db.close() });
+
+      const repoId = await resolveRepoId(db, repo.path);
+      const tableAvailability = await checkTableAvailability(db);
+      const context: ServerContext = {
+        db,
+        repoId,
+        services: createServerServices(db),
+        tableAvailability,
+        warningManager: new WarningManager(),
+      };
+
+      const originalDefault = process.env.KIRI_SNIPPETS_DEFAULT_VIEW;
+      process.env.KIRI_SNIPPETS_DEFAULT_VIEW = "symbol";
+      try {
+        const snippet = await snippetsGet(context, {
+          path: "src/window.ts",
+          start_line: 5,
+          end_line: 6,
+          rangeSource: "clamped",
+        });
+        expect(snippet.startLine).toBe(5);
+        expect(snippet.endLine).toBe(6);
+        expect(snippet.symbolName).toBeNull();
+      } finally {
+        if (originalDefault === undefined) {
+          delete process.env.KIRI_SNIPPETS_DEFAULT_VIEW;
+        } else {
+          process.env.KIRI_SNIPPETS_DEFAULT_VIEW = originalDefault;
+        }
+      }
+    });
   });
 });
