@@ -36,6 +36,7 @@ export interface SnippetResult {
   totalLines: number;
   symbolName: string | null;
   symbolKind: string | null;
+  rangeSource: SnippetRangeSource;
   truncated?: boolean; // 行数/文字数の安全上限で切り詰められた場合 true
 }
 
