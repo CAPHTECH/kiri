@@ -101,8 +101,10 @@ for (const item of result.context.slice(0, 3)) {
 
 | Mode                               | Tokens  | Information Included                 |
 | ---------------------------------- | ------- | ------------------------------------ |
-| `compact: true` (default, v0.8.0+) | ~2,500  | path, range, why, score              |
+| `compact: true` (default, v0.8.0+) | ~2,500  | path, range, why\*, score            |
 | `compact: false`                   | ~55,000 | path, range, why, score, **preview** |
+
+`*` Pass `includeWhy: true` if you still need `why[]` explanations in compact mode.
 
 **Reduction: 95%**
 
@@ -121,7 +123,7 @@ for (const item of result.context.slice(0, 3)) {
 
 ### Lightweight inspection options
 
-- `files_search(..., compact: true)` removes previews from every result for 60–70% fewer tokens during keyword scans. Use `compact: false` only when the preview text is required inline.
+- `files_search(..., compact: true)` (now the default) removes previews from every result for 60–70% fewer tokens during keyword scans. Use `compact: false` only when the preview text is required inline.
 - `snippets_get(..., compact: true)` returns only metadata (`path`, `startLine`, `endLine`, totals, symbol info) so that you can confirm the symbol boundaries without streaming full text.
 - `snippets_get(..., includeLineNumbers: true)` prefixes each returned line with an aligned counter such as `  1375→export async function...`, making it easier to quote exact locations when copying into bug reports or chats.
 
