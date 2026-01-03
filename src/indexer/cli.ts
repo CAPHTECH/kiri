@@ -1090,8 +1090,8 @@ async function collectPlainDocsPaths(repoRoot: string): Promise<string[]> {
     }
   }
 
-  await walkRelative("docs").catch(() => {});
-  await walkRelative("docmeta").catch(() => {});
+  await walkRelative("docs").catch(() => { });
+  await walkRelative("docmeta").catch(() => { });
   return results;
 }
 
@@ -1512,7 +1512,7 @@ function normalizePathForDenylist(filePath: string): string {
     normalized = normalized.slice(1);
   }
   // パストラバーサル検出（セキュリティ）
-  if (normalized.includes("..")) {
+  if (normalized.split(/[/\\]/).includes("..")) {
     throw new Error(`Path traversal detected: ${filePath}`);
   }
   return normalized;
@@ -1820,8 +1820,8 @@ export async function runIndexer(options: IndexerOptions): Promise<void> {
           // ログはフィルタ後の件数を使用して正確な情報を提供
           console.info(
             `No actual changes detected in ${filteredChangedPaths.length} file(s)` +
-              (filteredCount > 0 ? ` (${filteredCount} filtered by denylist)` : "") +
-              `. Skipping reindex.`
+            (filteredCount > 0 ? ` (${filteredCount} filtered by denylist)` : "") +
+            `. Skipping reindex.`
           );
 
           // Fix #3 & #4: If files were deleted or purged, still need to dirty FTS and rebuild
