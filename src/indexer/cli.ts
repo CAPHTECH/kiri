@@ -1500,7 +1500,7 @@ const DELETE_CHUNK_SIZE = 500;
  * @returns 正規化されたPOSIX相対パス
  * @throws パストラバーサルが検出された場合
  */
-function normalizePathForDenylist(filePath: string): string {
+export function normalizePathForDenylist(filePath: string): string {
   // バックスラッシュをスラッシュに変換（Windows対応）
   let normalized = filePath.replace(/\\/g, "/");
   // 先頭の ./ を除去
@@ -1512,7 +1512,7 @@ function normalizePathForDenylist(filePath: string): string {
     normalized = normalized.slice(1);
   }
   // パストラバーサル検出（セキュリティ）
-  if (normalized.includes("..")) {
+  if (normalized.split(/[/\\]/).includes("..")) {
     throw new Error(`Path traversal detected: ${filePath}`);
   }
   return normalized;
