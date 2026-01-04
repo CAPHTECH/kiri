@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.26.1] - 2026-01-05
+
+### Fixed
+
+- **Improve path traversal detection accuracy** (PR #214): Fix false positives for Next.js catch-all routes (`[...all]`)
+  - Changed from substring match (`includes("..")`) to path segment check (`split(/[/\\]/).includes("..")`)
+  - Added 24 unit tests for `normalizePathForDenylist` function
+
+## [0.26.0] - 2026-01-02
+
 ### Added
 
 - `context_bundle`: emits a `rangeSource` flag (`symbol` / `window` / `clamped`) and accepts `why_mode: "terse"` for compact `why` tags.
