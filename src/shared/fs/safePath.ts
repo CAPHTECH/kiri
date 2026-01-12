@@ -1,6 +1,8 @@
 import { resolve, relative, sep } from "node:path";
 import process from "node:process";
 
+import { isPathTraversal } from "./pathTraversal.js";
+
 interface SafePathOptions {
   baseDir?: string;
   allowOutsideBase?: boolean;
@@ -26,7 +28,8 @@ export function resolveSafePath(inputPath: string, options?: SafePathOptions): s
     return resolved;
   }
 
-  if (relativePath.startsWith(`..${sep}`) || relativePath === "..") {
+  // @see Issue #215: 共通ユーティリティに統合
+  if (isPathTraversal(relativePath)) {
     throw new Error(`Path traversal attempt detected: ${inputPath}`);
   }
 
