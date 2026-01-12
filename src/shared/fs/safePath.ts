@@ -1,4 +1,4 @@
-import { resolve, relative, sep } from "node:path";
+import { resolve, relative } from "node:path";
 import process from "node:process";
 
 import { isPathTraversal } from "./pathTraversal.js";
