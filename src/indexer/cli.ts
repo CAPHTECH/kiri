@@ -8,6 +8,7 @@ import { parse as parseYAML } from "yaml";
 
 import { DuckDBClient } from "../shared/duckdb.js";
 import { generateEmbedding } from "../shared/embedding.js";
+import { isPathTraversal } from "../shared/fs/pathTraversal.js";
 import { acquireLock, releaseLock, LockfileError, getLockOwner } from "../shared/utils/lockfile.js";
 import {
   normalizeDbPath,
@@ -1512,7 +1513,8 @@ export function normalizePathForDenylist(filePath: string): string {
     normalized = normalized.slice(1);
   }
   // パストラバーサル検出（セキュリティ）
-  if (normalized.split(/[/\\]/).includes("..")) {
+  // @see Issue #215: 共通ユーティリティに統合
+  if (isPathTraversal(normalized)) {
     throw new Error(`Path traversal detected: ${filePath}`);
   }
   return normalized;
