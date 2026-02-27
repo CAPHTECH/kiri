@@ -5519,8 +5519,13 @@ function extractSearchKeywords(goal: string): string {
     "should",
     "could",
   ]);
+  // Split camelCase/PascalCase before lowercasing to preserve word boundaries
+  // e.g. "createUser" → ["create", "User"] → "create user"
+  const splitCamel = (token: string): string =>
+    token.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2");
   return goal
     .split(/\s+/)
+    .flatMap((w) => splitCamel(w).split(/\s+/))
     .map((w) => w.toLowerCase().replace(/[^a-z0-9_]/g, ""))
     .filter((w) => w.length > 2 && !STOP_WORDS.has(w))
     .slice(0, 5)
