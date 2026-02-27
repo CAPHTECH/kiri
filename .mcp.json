@@ -1,9 +1,15 @@
 {
   "mcpServers": {
-    "pce-memory": {
+    "kiri": {
       "type": "stdio",
-      "command": "npx",
-      "args": ["pce-memory@latest", "--db", "~/.pce/kiri.db"],
+      "command": "node",
+      "args": [
+        "/Users/rizumita/Workspace/kiri/dist/src/client/proxy.js",
+        "--repo",
+        "/Users/rizumita/Workspace/kiri",
+        "--db",
+        "/Users/rizumita/Workspace/kiri/var/index.duckdb"
+      ],
       "env": {}
     }
   }

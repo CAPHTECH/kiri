@@ -18,11 +18,11 @@ import { loadPathPenalties, mergePathPenaltyEntries } from "./config-loader.js";
 import { loadServerConfig } from "./config.js";
 import { FtsStatusCache, ServerContext, TableAvailability } from "./context.js";
 import type { DomainFileHint } from "./domain-terms.js";
+import type { SnippetRangeSource } from "./handlers/snippets-get.js";
 import { createIdfProvider } from "./idf-provider.js";
 import { coerceProfileName, loadScoringProfile, type ScoringWeights } from "./scoring.js";
 import { createServerServices, ServerServices } from "./services/index.js";
 import { loadStopWords, type StopWordsService } from "./stop-words.js";
-import type { SnippetRangeSource } from "./handlers/snippets-get.js";
 
 // Re-export extracted handlers for backward compatibility
 export {
@@ -5464,4 +5464,128 @@ export async function contextBundle(
     console.error("context_bundle error:", error);
     throw error;
   }
+}
+
+export interface HybridSearchParams {
+  goal: string;
+  limit?: number; // default: 7, max: 20
+  required_types?: string[]; // default: ['sql'] - 未カバー時に補完 (最大5件, ドットなし小文字)
+  compact?: boolean; // default: true
+  boost_profile?: BoostProfileName;
+}
+
+export interface HybridSearchCoverage {
+  semantic_count: number;
+  supplemental_count: number;
+  triggered: boolean;
+  missing_types: string[];
+}
+
+export interface HybridSearchResult {
+  context: ContextBundleItem[];
+  supplemental: FilesSearchResult[];
+  coverage: HybridSearchCoverage;
+}
+
+function extractSearchKeywords(goal: string): string {
+  const STOP_WORDS = new Set([
+    "how",
+    "does",
+    "the",
+    "a",
+    "an",
+    "and",
+    "or",
+    "for",
+    "to",
+    "in",
+    "of",
+    "is",
+    "are",
+    "was",
+    "were",
+    "be",
+    "been",
+    "do",
+    "did",
+    "what",
+    "where",
+    "when",
+    "why",
+    "which",
+    "who",
+    "will",
+    "would",
+    "should",
+    "could",
+  ]);
+  return goal
+    .split(/\s+/)
+    .map((w) => w.toLowerCase().replace(/[^a-z0-9_]/g, ""))
+    .filter((w) => w.length > 2 && !STOP_WORDS.has(w))
+    .slice(0, 5)
+    .join(" ");
+}
+
+export async function hybridSearch(
+  context: ServerContext,
+  params: HybridSearchParams
+): Promise<HybridSearchResult> {
+  const { goal, compact = true, boost_profile } = params;
+  const limit = Math.min(Math.max(1, params.limit ?? 7), 20);
+  const required_types = params.required_types ?? ["sql"];
+
+  // Step 1: Semantic search
+  const bundleParams: ContextBundleParams = { goal, limit, compact };
+  if (boost_profile !== undefined) {
+    bundleParams.boost_profile = boost_profile;
+  }
+  const bundleResult = await contextBundle(context, bundleParams);
+  const semanticItems = bundleResult.context;
+
+  // Step 2: Coverage analysis
+  // Use path.extname for reliable extension extraction (handles dotfiles, multi-dot paths)
+  const coveredExts = new Set(
+    semanticItems.map((item) => {
+      const ext = path.extname(item.path);
+      return ext.startsWith(".") ? ext.slice(1).toLowerCase() : "";
+    })
+  );
+  const missingTypes = required_types.filter((ext) => !coveredExts.has(ext));
+  // lowConfidence: score-based threshold is unreliable when scores are normalized;
+  // trigger only on completely empty semantic results instead.
+  const lowConfidence = semanticItems.length === 0;
+  const triggered = missingTypes.length > 0 || lowConfidence;
+
+  // Step 3: Supplemental search
+  const supplemental: FilesSearchResult[] = [];
+  if (triggered) {
+    const keywords = extractSearchKeywords(goal);
+    if (keywords.length > 0) {
+      for (const ext of missingTypes) {
+        const results = await filesSearch(context, {
+          query: keywords,
+          ext: `.${ext}`,
+          limit: 3,
+          compact,
+        });
+        supplemental.push(...results);
+      }
+      if (lowConfidence && missingTypes.length === 0) {
+        const results = await filesSearch(context, { query: keywords, limit: 3, compact });
+        supplemental.push(...results);
+      }
+    }
+  }
+
+  return {
+    context: semanticItems,
+    supplemental,
+    coverage: {
+      semantic_count: semanticItems.length,
+      supplemental_count: supplemental.length,
+      triggered,
+      missing_types: missingTypes,
+    },
+  };
 }
