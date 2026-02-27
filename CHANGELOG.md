@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-02-27
+
+### Added
+
+- **`hybrid_search` MCP tool** (PR #217): Two-phase search combining semantic search with automatic file-type supplementation.
+  - Runs `context_bundle` first; if `required_types` extensions (e.g. `sql`, `yaml`) are missing from semantic results, automatically supplements with `files_search`
+  - Returns `coverage` metadata: `semantic_count`, `supplemental_count`, `triggered`, `missing_types`
+  - `required_types` normalization: strips leading dots, lowercases, deduplicates, caps at 5
+  - camelCase keyword splitting for better grep supplementation (e.g. `createUser` → `create user`)
+  - Example: `hybrid_search({goal: 'DuckDB schema blob tree definition'})`
+
+### Changed
+
+- **Unify path traversal detection logic** (PR #216): Refactor `normalizePathForDenylist` into a shared utility used by both the indexer and server, eliminating duplicated logic.
+
 ## [0.26.1] - 2026-01-05
 
 ### Fixed
