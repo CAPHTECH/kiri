@@ -8,20 +8,22 @@ import {
 } from "../shared/adaptive-k-categories.js";
 import { maskValue } from "../shared/security/masker.js";
 
-import { resolveCompactFlag } from "./compact-mode.js";
 import { isValidBoostProfile, BOOST_PROFILES } from "./boost-profiles.js";
+import { resolveCompactFlag } from "./compact-mode.js";
 import { ServerContext } from "./context.js";
 import { DegradeController } from "./fallbacks/degradeController.js";
 import {
   ContextBundleParams,
   DepsClosureParams,
   FilesSearchParams,
+  HybridSearchParams,
   SemanticRerankParams,
   SnippetsGetParams,
   SnippetsGetView,
   contextBundle,
   depsClosure,
   filesSearch,
+  hybridSearch,
   semanticRerank,
   snippetsGet,
 } from "./handlers.js";
@@ -391,6 +393,45 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
     },
     outputSchema: OUTPUT_SCHEMAS.deps_closure,
   },
+  {
+    name: "hybrid_search",
+    description:
+      "Semantic code search with automatic file-type supplementation.\n" +
+      "Runs context_bundle first; if required file types (e.g. SQL, YAML) are missing or\n" +
+      "confidence is low, automatically supplements with files_search.\n" +
+      "Returns coverage metadata so callers know what triggered supplementation.\n" +
+      "Example: hybrid_search({goal: 'DuckDB schema blob tree definition'})",
+    inputSchema: {
+      type: "object",
+      required: ["goal"],
+      additionalProperties: true,
+      properties: {
+        goal: { type: "string", description: "Concrete keywords describing what to find." },
+        limit: {
+          type: "number",
+          minimum: 1,
+          maximum: 20,
+          description: "Max results (default: 7).",
+        },
+        required_types: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "File extensions to ensure coverage for (default: ['sql']). Triggers supplemental search if missing.",
+        },
+        compact: {
+          type: "boolean",
+          description: "Omit previews for token savings (default: true).",
+        },
+        boost_profile: {
+          type: "string",
+          enum: ["default", "docs", "balanced", "none", "code"],
+          description: "File type priority.",
+        },
+      },
+    },
+    outputSchema: OUTPUT_SCHEMAS.hybrid_search,
+  },
 ];
 
 const INITIALIZE_PAYLOAD = {
@@ -468,6 +509,61 @@ function parseFilesSearchParams(input: unknown): FilesSearchParams {
 
   if (record.metadata_filters && typeof record.metadata_filters === "object") {
     params.metadata_filters = record.metadata_filters as Record<string, string | string[]>;
+  }
+
+  return params;
+}
+
+function parseHybridSearchParams(input: unknown): HybridSearchParams {
+  if (!input || typeof input !== "object") {
+    throw new Error(
+      "hybrid_search requires an object with a goal parameter. Provide keywords describing what to find."
+    );
+  }
+  const record = input as Record<string, unknown>;
+  const goal = record.goal;
+  if (typeof goal !== "string" || goal.trim().length === 0) {
+    throw new Error(
+      "hybrid_search requires a non-empty goal string. Provide keywords describing what to find."
+    );
+  }
+
+  const params: HybridSearchParams = { goal: goal.trim() };
+
+  if (typeof record.limit === "number") {
+    if (record.limit < 1 || record.limit > 20) {
+      throw new Error("limit must be between 1 and 20");
+    }
+    params.limit = record.limit;
+  }
+
+  if (Array.isArray(record.required_types)) {
+    // Normalize: trim whitespace, strip leading dots, lowercase, deduplicate via Set, cap at 5
+    const seen = new Set<string>();
+    const normalized: string[] = [];
+    for (const t of record.required_types as unknown[]) {
+      if (typeof t !== "string") continue;
+      const clean = t.trim().replace(/^\.+/, "").toLowerCase();
+      if (clean.length === 0 || seen.has(clean)) continue;
+      seen.add(clean);
+      normalized.push(clean);
+      if (normalized.length >= 5) break;
+    }
+    params.required_types = normalized;
+  }
+
+  params.compact = resolveCompactFlag(
+    typeof record.compact === "boolean" ? record.compact : undefined
+  );
+
+  if (typeof record.boost_profile === "string") {
+    if (isValidBoostProfile(record.boost_profile)) {
+      params.boost_profile = record.boost_profile;
+    } else {
+      throw new Error(
+        `Invalid boost_profile: "${record.boost_profile}". Valid profiles are: ${Object.keys(BOOST_PROFILES).join(", ")}`
+      );
+    }
   }
 
   return params;
@@ -843,6 +939,12 @@ async function executeToolByName(
       const handler = async () =>
         await withSpan("deps_closure", async () => await depsClosure(context, params));
       return await degrade.withResource(handler, "duckdb:deps_closure");
+    }
+    case "hybrid_search": {
+      const params = parseHybridSearchParams(toolParams);
+      const handler = async () =>
+        await withSpan("hybrid_search", async () => await hybridSearch(context, params));
+      return await degrade.withResource(handler, "duckdb:hybrid_search");
     }
     default:
       throw new Error(`Unknown tool: ${toolName}`);

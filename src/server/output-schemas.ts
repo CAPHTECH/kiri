@@ -137,6 +137,23 @@ export const SemanticRerankResultSchema = z.object({
 });
 
 // =============================================================================
+// hybrid_search
+// =============================================================================
+
+export const HybridSearchCoverageSchema = z.object({
+  semantic_count: z.number().describe("KIRI semantic search の結果件数"),
+  supplemental_count: z.number().describe("Grep補完の結果件数"),
+  triggered: z.boolean().describe("補完が実行されたか"),
+  missing_types: z.array(z.string()).describe("required_types のうち未カバーの拡張子"),
+});
+
+export const HybridSearchResultSchema = z.object({
+  context: z.array(ContextBundleItemSchema).describe("KIRI semantic search の結果"),
+  supplemental: z.array(FilesSearchResultItemSchema).describe("Grep補完の結果"),
+  coverage: HybridSearchCoverageSchema.describe("カバレッジメタデータ"),
+});
+
+// =============================================================================
 // JSON Schema生成
 // =============================================================================
 
@@ -151,4 +168,5 @@ export const OUTPUT_SCHEMAS = {
   snippets_get: z.toJSONSchema(SnippetResultSchema),
   deps_closure: z.toJSONSchema(DepsClosureResultSchema),
   semantic_rerank: z.toJSONSchema(SemanticRerankResultSchema),
+  hybrid_search: z.toJSONSchema(HybridSearchResultSchema),
 } as const;
